@@ -1,13 +1,18 @@
-// Image editor: crop, resize, rotate and convert on this device, plus optional cloud background removal.
+// Image editor: crop, cut, resize, rotate, mirror and convert on this device, plus optional cloud background removal.
 // Markup lives in src/components/ImageEditor.astro.
 // The crop rect is in full-resolution pixels of the rotated image ("source px"): inside the image when
 // cropping to the frame, around it with "Fit inside". The stage draws a ≤ PREVIEW px copy; export
-// re-decodes the file at full resolution.
+// decodes the source at full resolution (SVGs are rasterized at the resolution the output needs).
+// Crop, Cut and background removal replace an image's pixels and are undoable per image.
 import { zipSync, type Zippable } from 'fflate';
 import { API_URL, uploadForResult } from './api';
-import { canvasOf, decodeImage, drawImage, encodeCanvas, EXT, inspectImage, keepMetadata, linkQuality, MAX_PIXELS, uniqueName, type ImageType, type Rect } from './image';
+import {
+  canvasHasAlpha, canvasOf, decodeImage, drawImage, encodeCanvas, EXT, imageKind, inspectImage, isSvg, keepMetadata, linkQuality, MAX_PIXELS,
+  rasterizeSvg, svgSize, uniqueName, type ImageType, type Rect,
+} from './image';
 import { loadPrefs } from './prefs';
-import { confirmUpload, downloadBlob, el, formatBytes, setDial, sniff, UserError } from './tool';
+import { resizable } from './resize';
+import { confirmUpload, downloadBlob, el, formatBytes, setDial, UserError } from './tool';
 
 export const RATIOS = ['original', 'free', '1:1', '4:5', '3:4', '2:3', '9:16', '16:9', '4:3', '3:2', '21:9', 'custom'] as const;
 /** Pixel sizes apply to the long side. */
@@ -19,33 +24,43 @@ export type SizeId = (typeof SIZES)[number];
 export const choiceLabel = (id: string) => ({ original: 'Original', free: 'Free', custom: 'Custom' })[id] ?? id;
 
 const PREVIEW = 2048;
+const THUMB = 160;
 const MIN_ZOOM = 0.1; // "Fit inside": image down to 10 % of the frame
 const MIN_CROP = 16; // source px
 const HIT = 12; // CSS px around a handle, so a 24 px target
 const BG_MAX_BYTES = 20 * 1024 * 1024;
+/** Undo steps per image; each may hold a full-resolution bitmap. */
+const HISTORY = 10;
 
 type Source = ImageBitmap | HTMLCanvasElement;
 type Handle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 type SizeMode = { kind: 'original' } | { kind: 'long'; n: number } | { kind: 'pct'; p: number } | { kind: 'px'; axis: 'w' | 'h'; v: number };
 
-/** Decoded pixels of one file. */
+/** One version of an image's pixels. Files decode on demand; Crop and Cut results are held in memory. */
 interface Pixels {
-  file: File;
-  w: number; // decoded size before rotation
+  file?: File; // the original, or a background-removal PNG
+  bitmap?: ImageBitmap; // baked Crop/Cut result, unrotated
+  svg: boolean; // `file` is vector: rasterized at the resolution each export needs
+  w: number; // full-resolution size before rotation
   h: number;
   base: HTMLCanvasElement; // ≤ PREVIEW px copy, unrotated
-  alpha: boolean; // has transparent pixels; detected in the background
+  url: string; // thumbnail
+  alpha: boolean; // has transparent pixels
 }
 
-interface Item extends Pixels {
-  origin: File; // as added: name, EXIF and size comparison
-  url: string; // thumbnail
-  view: HTMLCanvasElement; // base with rot/flip applied
+interface State {
+  px: Pixels;
   rot: number; // quarter turns clockwise, applied before flip
-  flip: boolean;
+  flip: boolean; // horizontal mirror; a vertical mirror is stored as flip + half turn
   crop: Rect;
+}
+
+interface Item extends State {
+  origin: File; // as added: name, EXIF and size comparison
+  view: HTMLCanvasElement; // px.base with rot/flip applied
   gps: boolean;
-  before?: Pixels; // pixels before background removal, for undo
+  undo: State[];
+  redo: State[];
 }
 
 let root: HTMLElement | undefined;
@@ -53,23 +68,27 @@ let ui: ReturnType<typeof bind>;
 let items: Item[] = [];
 let cur = 0;
 let size: SizeMode = { kind: 'original' };
-let full: { item: Item; file: File; rot: number; flip: boolean; src: Promise<Source> } | undefined;
+let full: { px: Pixels; rot: number; flip: boolean; k: number; src: Promise<Source> } | undefined;
 let raf = 0;
 /** Stage transform of the last draw: canvas px = o + world · vs; `toWorld` is source px per CSS px. */
 let stage = { ox: 0, oy: 0, vs: 1, dpr: 1, toWorld: 1 };
+let dragging = false;
 let estTimer = 0;
 let estGen = 0;
 let busy = false;
 let bgJob: AbortController | undefined;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const freePixels = (px: Pixels) => (px.base.width = 0);
+const freeSource = (s: Source) => (s instanceof ImageBitmap ? s.close() : (s.width = 0));
+function freePixels(px: Pixels) {
+  if (full?.px === px) dropFull();
+  px.base.width = 0;
+  px.bitmap?.close();
+  URL.revokeObjectURL(px.url);
+}
 function discard(it: Item) {
-  if (it.view !== it.base) it.view.width = 0;
-  freePixels(it);
-  if (it.before) freePixels(it.before);
-  URL.revokeObjectURL(it.url);
-  if (full?.item === it) dropFull();
+  if (it.view !== it.px.base) it.view.width = 0;
+  for (const s of [it, ...it.undo, ...it.redo]) freePixels(s.px);
 }
 
 function bind(root: HTMLElement) {
@@ -77,13 +96,17 @@ function bind(root: HTMLElement) {
   return {
     form: q<HTMLFormElement>('[data-form]'),
     side: q<HTMLFieldSetElement>('[data-side]'),
+    resizer: q('[data-side-resizer]'),
     canvas: q<HTMLCanvasElement>('[data-canvas]'),
     name: q('[data-name]'),
     thumbs: q('[data-thumbs]'),
     crop: q('[data-crop]'),
     needsImage: [...root.querySelectorAll<HTMLButtonElement | HTMLInputElement>('[data-needs-image]')],
+    selectionActions: [...root.querySelectorAll<HTMLButtonElement>('[data-crop-apply], [data-cut]')],
+    float: q('[data-float]'),
+    undo: q<HTMLButtonElement>('[data-undo]'),
+    redo: q<HTMLButtonElement>('[data-redo]'),
     removeBg: q<HTMLButtonElement>('[data-remove-bg]'),
-    undoBg: q<HTMLButtonElement>('[data-undo-bg]'),
     busy: q('[data-busy]'),
     busyText: q('[data-busy-text]'),
     dial: q('[data-dial]'),
@@ -95,6 +118,7 @@ function bind(root: HTMLElement) {
     qualityNum: q<HTMLInputElement>('[data-quality-num]'),
     jpegWarn: q('[data-jpeg-warn]'),
     gpsHint: q('[data-gps-hint]'),
+    svgNote: q('[data-svg-note]'),
     problem: q('[data-problem]'),
     upscaleWarn: q('[data-upscale-warn]'),
     dims: q('[data-dims]'),
@@ -116,7 +140,7 @@ const quality = () => Number(field('quality').value) / 100;
 /** Colour behind transparent pixels and padding; JPEG has no alpha so it always gets one. */
 const background = () => (format() === 'image/jpeg' || value('bg') === 'colour' ? field('colour').value : undefined);
 
-const dims = (it: Item): [number, number] => (it.rot % 2 ? [it.h, it.w] : [it.w, it.h]);
+const dims = (it: State): [number, number] => (it.rot % 2 ? [it.px.h, it.px.w] : [it.px.w, it.px.h]);
 
 /** Width / height the crop must have: undefined for Free, NaN if the custom ratio is invalid. */
 function targetRatio(it: Item): number | undefined {
@@ -171,6 +195,14 @@ function resetCrop(it: Item) {
   it.crop = { x: (W - w) / 2, y: (H - h) / 2, w, h };
 }
 
+/** Whether the crop is a real selection: Crop and Cut need part of the image left out. */
+function hasSelection(it: Item | undefined): it is Item {
+  if (!it || !cropMode() || problem(it)) return false;
+  const [W, H] = dims(it);
+  const c = it.crop;
+  return Math.round(c.x) > 0 || Math.round(c.y) > 0 || Math.round(c.x + c.w) < W || Math.round(c.y + c.h) < H;
+}
+
 function setZoom(it: Item, z: number) {
   const { x, y, w, h } = it.crop;
   const [bw, bh] = baseSize(it, w / h);
@@ -220,6 +252,13 @@ function outSize(it: Item): [number, number] {
   return [Math.max(1, Math.round(it.crop.w * k)), Math.max(1, Math.round(it.crop.h * k))];
 }
 
+/** Raster scale for an SVG source: as sharp as the output needs, within the pixel limit. Raster sources: 1. */
+function rasterScale(it: Item): number {
+  if (!it.px.svg) return 1;
+  const cap = Math.sqrt(MAX_PIXELS / (it.px.w * it.px.h));
+  return Math.min(cap, Math.max(1, Math.ceil(scaleOf(it) * 100) / 100));
+}
+
 function problem(it: Item): string | undefined {
   if (Number.isNaN(targetRatio(it))) return 'Enter an aspect ratio with both sides above 0.';
   const [w, h] = outSize(it);
@@ -238,57 +277,88 @@ function orient<T extends Source>(src: T, rot: number, flip: boolean): T | HTMLC
   return c;
 }
 
-async function decodePixels(file: File): Promise<Pixels> {
+const previewOf = (src: Source) => {
+  const k = Math.min(1, PREVIEW / Math.max(src.width, src.height));
+  return drawImage(src, Math.max(1, Math.round(src.width * k)), Math.max(1, Math.round(src.height * k)));
+};
+
+async function filePixels(file: File): Promise<Pixels> {
+  if (await isSvg(file)) {
+    const [w, h] = await svgSize(file);
+    const k = PREVIEW / Math.max(w, h);
+    const base = await rasterizeSvg(file, Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+    return { file, svg: true, w, h, base, url: URL.createObjectURL(file), alpha: false };
+  }
   const { bitmap } = await decodeImage(file);
   try {
-    const k = Math.min(1, PREVIEW / Math.max(bitmap.width, bitmap.height));
-    const base = drawImage(bitmap, Math.max(1, Math.round(bitmap.width * k)), Math.max(1, Math.round(bitmap.height * k)));
-    return { file, w: bitmap.width, h: bitmap.height, base, alpha: false };
+    return { file, svg: false, w: bitmap.width, h: bitmap.height, base: previewOf(bitmap), url: URL.createObjectURL(file), alpha: false };
   } finally {
     bitmap.close();
   }
 }
 
+/** Keep a Crop/Cut result in memory. Takes ownership of `canvas`. */
+async function bakedPixels(canvas: HTMLCanvasElement): Promise<Pixels> {
+  const base = previewOf(canvas);
+  const bitmap = await createImageBitmap(canvas);
+  const k = Math.min(1, THUMB / Math.max(base.width, base.height));
+  const thumb = drawImage(base, Math.max(1, Math.round(base.width * k)), Math.max(1, Math.round(base.height * k)));
+  const blob = await encodeCanvas(thumb, 'image/png');
+  const px: Pixels = { bitmap, svg: false, w: canvas.width, h: canvas.height, base, url: URL.createObjectURL(blob), alpha: canvasHasAlpha(base) };
+  canvas.width = 0;
+  return px;
+}
+
 /** Fill in `alpha` (and GPS for the original file) once detected. */
 function inspect(it: Item, px: Pixels) {
+  if (!px.file) return;
   void inspectImage(px.file, px.base).then((info) => {
     px.alpha = info.alpha;
     if (px.file === it.origin) it.gps = info.gps;
-    if (it.file === px.file) it.alpha = info.alpha;
     if (items.includes(it)) syncHints();
   });
 }
 
 async function load(file: File): Promise<Item> {
-  const px = await decodePixels(file);
-  const it: Item = { ...px, origin: file, url: URL.createObjectURL(file), view: px.base, rot: 0, flip: false, crop: { x: 0, y: 0, w: px.w, h: px.h }, gps: false };
+  const px = await filePixels(file);
+  const it: Item = { px, origin: file, view: px.base, rot: 0, flip: false, crop: { x: 0, y: 0, w: px.w, h: px.h }, gps: false, undo: [], redo: [] };
   resetCrop(it);
   inspect(it, px);
   return it;
 }
 
 function dropFull() {
-  full?.src.then((s) => (s instanceof ImageBitmap ? s.close() : (s.width = 0)), () => {});
+  if (!full) return;
+  const { px, src } = full;
+  src.then((s) => s !== px.bitmap && freeSource(s), () => {});
   full = undefined;
 }
 
-/** Full-resolution, rotated source. Only one is kept in memory. */
-function fullOf(it: Item): Promise<Source> {
-  if (full?.item === it && full.file === it.file && full.rot === it.rot && full.flip === it.flip) return full.src;
+/** Full-resolution, rotated source (SVGs at `k` × their own size). Only one is kept in memory. */
+function fullOf(it: Item, k = 1): Promise<Source> {
+  const { px, rot, flip } = it;
+  if (full && full.px === px && full.rot === rot && full.flip === flip && full.k === k) return full.src;
   dropFull();
-  const src = decodeImage(it.file).then(({ bitmap }) => {
-    const out = orient(bitmap, it.rot, it.flip);
-    if (out !== bitmap) bitmap.close();
+  const raw: Promise<Source> = px.bitmap
+    ? Promise.resolve(px.bitmap)
+    : px.svg
+      ? rasterizeSvg(px.file!, Math.max(1, Math.round(px.w * k)), Math.max(1, Math.round(px.h * k)))
+      : decodeImage(px.file!).then((r) => r.bitmap);
+  const src = raw.then((s) => {
+    const out = orient(s, rot, flip);
+    if (out !== s && s !== px.bitmap) freeSource(s);
     return out;
   });
-  full = { item: it, file: it.file, rot: it.rot, flip: it.flip, src };
-  src.catch(() => full?.src === src && (full = undefined));
+  const entry = { px, rot, flip, k, src };
+  full = entry;
+  src.catch(() => full === entry && (full = undefined));
   return src;
 }
 
 function renderOutput(it: Item, src: Source): HTMLCanvasElement {
   const [W, H] = dims(it);
   const [FW, FH] = outSize(it);
+  const ks = src.width / W; // > 1 for SVGs rasterized above their own size
   const c = it.crop;
   const sx = FW / c.w;
   const sy = FH / c.h;
@@ -309,7 +379,9 @@ function renderOutput(it: Item, src: Source): HTMLCanvasElement {
   if (dx1 > dx0 && dy1 > dy0) {
     const x = clamp((dx0 - x0) / sx, 0, W);
     const y = clamp((dy0 - y0) / sy, 0, H);
-    const piece = drawImage(src, dx1 - dx0, dy1 - dy0, undefined, { x, y, w: Math.min(W - x, (dx1 - dx0) / sx), h: Math.min(H - y, (dy1 - dy0) / sy) });
+    const w = Math.min(W - x, (dx1 - dx0) / sx);
+    const h = Math.min(H - y, (dy1 - dy0) / sy);
+    const piece = drawImage(src, dx1 - dx0, dy1 - dy0, undefined, { x: x * ks, y: y * ks, w: w * ks, h: h * ks });
     ctx.drawImage(piece, dx0, dy0);
     piece.width = 0;
   }
@@ -319,7 +391,7 @@ function renderOutput(it: Item, src: Source): HTMLCanvasElement {
 async function exportBlob(it: Item): Promise<{ blob: Blob; note?: string }> {
   const p = problem(it);
   if (p) throw new UserError(p);
-  const canvas = renderOutput(it, await fullOf(it));
+  const canvas = renderOutput(it, await fullOf(it, rasterScale(it)));
   const type = format();
   const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : quality());
   return field('strip').checked ? { blob } : keepMetadata(it.origin, blob);
@@ -328,8 +400,66 @@ async function exportBlob(it: Item): Promise<{ blob: Blob; note?: string }> {
 const baseName = (it: Item) => it.origin.name.replace(/\.[^./]*$/, '') || 'image';
 const outName = (it: Item) => {
   const [w, h] = outSize(it);
-  return `${baseName(it)}${it.before ? '-no-background' : ''}-${w}x${h}.${EXT[format()]}`;
+  return `${baseName(it)}-${w}x${h}.${EXT[format()]}`;
 };
+
+// ---- History ----
+
+const snapshot = (it: Item): State => ({ px: it.px, rot: it.rot, flip: it.flip, crop: { ...it.crop } });
+
+/** Show `s` as the item's current state. */
+function setState(it: Item, s: State) {
+  if (it.view !== it.px.base) it.view.width = 0;
+  Object.assign(it, { px: s.px, rot: s.rot, flip: s.flip, crop: { ...s.crop } });
+  it.view = orient(it.px.base, it.rot, it.flip);
+  clampCrop(it);
+  renderThumbs();
+  changed();
+}
+
+/** Record the current state before replacing the pixels; drops the redo branch and the oldest steps. */
+function pushHistory(it: Item) {
+  it.undo.push(snapshot(it));
+  while (it.undo.length > HISTORY) freePixels(it.undo.shift()!.px);
+  for (const s of it.redo.splice(0)) freePixels(s.px);
+}
+
+function step(back: boolean) {
+  const it = items[cur];
+  if (!it || busy) return;
+  const s = (back ? it.undo : it.redo).pop();
+  if (!s) return;
+  (back ? it.redo : it.undo).push(snapshot(it));
+  setState(it, s);
+  setStatus(back ? 'Undone.' : 'Redone.', 'done');
+}
+
+/** Crop: the selection becomes the image. Cut: the selection becomes transparent. Rotation and mirroring are baked in. */
+function bake(kind: 'crop' | 'cut') {
+  const it = items[cur];
+  if (!hasSelection(it)) return;
+  return run(async () => {
+    setStatus(kind === 'crop' ? 'Cropping…' : 'Cutting…', 'working');
+    const wasSvg = it.px.svg;
+    const [W] = dims(it);
+    const src = await fullOf(it, rasterScale(it));
+    const ks = src.width / W;
+    const c = it.crop;
+    const [x, y] = [Math.round(c.x * ks), Math.round(c.y * ks)];
+    const [w, h] = [Math.round((c.x + c.w) * ks) - x, Math.round((c.y + c.h) * ks) - y];
+    const canvas = kind === 'crop' ? canvasOf(w, h) : canvasOf(src.width, src.height);
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(src, kind === 'crop' ? -x : 0, kind === 'crop' ? -y : 0);
+    if (kind === 'cut') ctx.clearRect(x, y, w, h);
+    const px = await bakedPixels(canvas);
+    pushHistory(it);
+    const next: Item = { ...it, px, rot: 0, flip: false };
+    resetCrop(next);
+    setState(it, next);
+    const what = kind === 'crop' ? `Cropped to ${w} × ${h} px.` : `Cut out ${w} × ${h} px; that area is now transparent.`;
+    setStatus(`${what}${wasSvg ? ' The SVG was converted to pixels.' : ''}`, 'done');
+  });
+}
 
 // ---- Stage ----
 
@@ -341,7 +471,7 @@ function refreshPalette() {
     probe.style.color = `var(${v})`;
     return getComputedStyle(probe).color;
   };
-  palette = { a: resolve('--stage-check-a'), b: resolve('--stage-check-b'), dim: resolve('--stage-dim') };
+  palette = { a: resolve('--ie-check-a'), b: resolve('--ie-check-b'), dim: resolve('--ie-dim') };
   probe.style.color = '';
   requestDraw();
 }
@@ -372,11 +502,28 @@ function handlePoints(): [Handle, number, number][] {
   return [['nw', l, t], ['ne', r, t], ['sw', l, b], ['se', r, b], ['n', mx, t], ['s', mx, b], ['w', l, my], ['e', r, my]];
 }
 
+/** Floating Crop/Cut bar under the selection, or above it, or inside its bottom edge; hidden while dragging. */
+function placeFloat(frame: Rect) {
+  const it = items[cur];
+  const bar = ui.float;
+  bar.hidden = dragging || busy || !hasSelection(it);
+  if (bar.hidden) return;
+  const { dpr } = stage;
+  const [l, t, w, h] = [frame.x / dpr, frame.y / dpr, frame.w / dpr, frame.h / dpr];
+  const [bw, bh] = [bar.offsetWidth, bar.offsetHeight];
+  const H = ui.canvas.clientHeight;
+  const gap = 10;
+  const top = t + h + gap + bh <= H ? t + h + gap : t - gap - bh >= 0 ? t - gap - bh : t + h - gap - bh;
+  bar.style.left = `${clamp(l + w / 2 - bw / 2, 4, ui.canvas.clientWidth - bw - 4)}px`;
+  bar.style.top = `${clamp(top, 4, H - bh - 4)}px`;
+}
+
 function draw() {
   raf = 0;
   const it = items[cur];
   const { canvas } = ui;
   const ctx = canvas.getContext('2d');
+  ui.float.hidden = true;
   if (!it || !ctx || !canvas.width) return;
   const { width: cw, height: ch } = canvas;
   ctx.clearRect(0, 0, cw, ch);
@@ -433,6 +580,7 @@ function draw() {
     ctx.strokeStyle = 'rgb(0 0 0 / 0.55)';
     ctx.strokeRect(x - s / 2, y - s / 2, s, s);
   }
+  placeFloat(frame);
 }
 
 const requestDraw = () => (raf ||= requestAnimationFrame(draw));
@@ -481,11 +629,13 @@ function readouts() {
   root!.toggleAttribute('data-empty', !has);
   ui.side.disabled = !has;
   for (const c of ui.needsImage) c.disabled = !has || busy;
-  ui.removeBg.disabled = !has || busy || !API_URL || !!it?.before;
-  ui.undoBg.hidden = !it?.before;
-  ui.undoBg.disabled = busy;
+  for (const b of ui.selectionActions) b.disabled = busy || !hasSelection(it);
+  ui.undo.disabled = busy || !it?.undo.length;
+  ui.redo.disabled = busy || !it?.redo.length;
+  ui.removeBg.disabled = !has || busy || !API_URL;
   ui.download.disabled = ui.downloadAll.disabled = true;
   ui.name.textContent = !it ? '' : items.length > 1 ? `${it.origin.name} (${cur + 1} of ${items.length})` : it.origin.name;
+  ui.svgNote.hidden = !it?.px.svg;
   if (!it) {
     ui.crop.textContent = '';
     ui.dims.textContent = ui.estimate.textContent = '–';
@@ -506,8 +656,8 @@ function readouts() {
   const s = FW / it.crop.w;
   const pct = `${Math.round(s * 100)}%`;
   zoom.setAttribute('aria-valuetext', `${pct} of original pixels`);
-  // Enlarging invents pixels; tolerate rounding noise just above 100%.
-  const upscaled = !err && s > 1.01;
+  // Enlarging a raster invents pixels (vectors stay sharp); tolerate rounding noise just above 100%.
+  const upscaled = !err && !it.px.svg && s > 1.01;
   ui.upscaleWarn.hidden = !upscaled;
   if (upscaled) ui.upscaleWarn.textContent = `Enlarged to ${pct} of the original pixels, so the result may look soft or blurry. Use a larger image, a bigger crop or a smaller output size for a sharp result.`;
   const [x, y, w, h] = [it.crop.x, it.crop.y, it.crop.w, it.crop.h].map(Math.round);
@@ -546,7 +696,7 @@ function syncControls(editing?: string) {
 }
 
 function syncHints() {
-  ui.jpegWarn.hidden = format() !== 'image/jpeg' || !items.some((it) => it.alpha);
+  ui.jpegWarn.hidden = format() !== 'image/jpeg' || !items.some((it) => it.px.alpha);
   ui.gpsHint.hidden = field('strip').checked || !items.some((it) => it.gps);
 }
 
@@ -588,8 +738,8 @@ function setStatus(text: string, kind: 'idle' | 'working' | 'error' | 'done' = '
 }
 
 function reorient(it: Item) {
-  if (it.view !== it.base) it.view.width = 0;
-  it.view = orient(it.base, it.rot, it.flip);
+  if (it.view !== it.px.base) it.view.width = 0;
+  it.view = orient(it.px.base, it.rot, it.flip);
   clampCrop(it);
   changed();
 }
@@ -604,10 +754,14 @@ function rotate(d: 1 | -1) {
   reorient(it);
 }
 
-function flip() {
+function flip(vertical: boolean) {
   const it = items[cur];
+  const [W, H] = dims(it);
+  const c = it.crop;
   it.flip = !it.flip;
-  it.crop = { ...it.crop, x: dims(it)[0] - it.crop.x - it.crop.w };
+  // Vertical mirror = horizontal mirror after a half turn.
+  if (vertical) it.rot = (it.rot + 2) % 4;
+  it.crop = vertical ? { ...c, y: H - c.y - c.h } : { ...c, x: W - c.x - c.w };
   reorient(it);
 }
 
@@ -635,29 +789,28 @@ function swap() {
   changed();
 }
 
-/** Swap an item's pixels (background removal or its undo), keeping rotation, flip and crop. */
-function setPixels(it: Item, px: Pixels) {
-  const [W0, H0] = dims(it);
-  if (it.view !== it.base) it.view.width = 0;
-  Object.assign(it, { file: px.file, w: px.w, h: px.h, base: px.base, alpha: px.alpha });
-  it.view = orient(it.base, it.rot, it.flip);
-  URL.revokeObjectURL(it.url);
-  it.url = URL.createObjectURL(it.file);
-  if (full?.item === it) dropFull();
-  const [W1, H1] = dims(it);
-  if (W1 !== W0 || H1 !== H0) {
-    const c = it.crop;
-    it.crop = { x: (c.x * W1) / W0, y: (c.y * H1) / H0, w: (c.w * W1) / W0, h: (c.h * H1) / H0 };
+/** Unrotated full-resolution pixels to upload: the file itself when it is a raster, else a PNG. */
+async function uploadBody(px: Pixels): Promise<Blob> {
+  if (px.file && !px.svg) {
+    const kind = await imageKind(px.file);
+    // Type the body by its content, not the browser-reported MIME type.
+    return px.file.slice(0, px.file.size, `image/${kind}`);
   }
-  clampCrop(it);
-  renderThumbs();
-  changed();
+  let canvas: HTMLCanvasElement;
+  if (px.bitmap) {
+    canvas = canvasOf(px.w, px.h);
+    canvas.getContext('2d')!.drawImage(px.bitmap, 0, 0);
+  } else {
+    // Vector: at least 2048 px on the long side so the result is usable.
+    const k = Math.min(Math.sqrt(MAX_PIXELS / (px.w * px.h)), Math.max(1, PREVIEW / Math.max(px.w, px.h)));
+    canvas = await rasterizeSvg(px.file!, Math.round(px.w * k), Math.round(px.h * k));
+  }
+  return encodeCanvas(canvas, 'image/png');
 }
 
 async function removeBackground() {
   const it = items[cur];
-  if (!it || busy || it.before || !API_URL) return;
-  if (it.file.size > BG_MAX_BYTES) return setStatus('Background removal takes images up to 20 MB.', 'error');
+  if (!it || busy || !API_URL) return;
   if (!(await confirmUpload())) return;
   const controller = new AbortController();
   bgJob = controller;
@@ -669,11 +822,12 @@ async function removeBackground() {
     ui.busyText.textContent = text;
     setDial(ui.dial, f);
   };
-  progress('Uploading… 0%', 0);
+  progress('Preparing…');
   try {
-    const kind = await sniff(it.file);
-    // Type the body by its content, not the browser-reported MIME type.
-    const blob = await uploadForResult('/v1/remove-background', it.file.slice(0, it.file.size, `image/${kind}`), {
+    const body = await uploadBody(it.px);
+    if (body.size > BG_MAX_BYTES) throw new UserError('Background removal takes images up to 20 MB.');
+    progress('Uploading… 0%', 0);
+    const blob = await uploadForResult('/v1/remove-background', body, {
       signal: controller.signal,
       onUploadProgress: (f) => (f < 1 ? progress(`Uploading… ${Math.round(f * 100)}%`, f) : progress('Removing the background on the server…')),
       messages: {
@@ -683,10 +837,15 @@ async function removeBackground() {
         504: 'Processing took too long. Try a smaller image.',
       },
     });
-    const px = await decodePixels(new File([blob], `${baseName(it)}-no-background.png`, { type: 'image/png' }));
+    const px = await filePixels(new File([blob], `${baseName(it)}-no-background.png`, { type: 'image/png' }));
     if (!items.includes(it)) return freePixels(px);
-    it.before = { file: it.file, w: it.w, h: it.h, base: it.base, alpha: it.alpha };
-    setPixels(it, px);
+    const [W0, H0] = dims(it);
+    pushHistory(it);
+    const next: Item = { ...it, px };
+    const [W1, H1] = dims(next);
+    const c = it.crop;
+    next.crop = { x: (c.x * W1) / W0, y: (c.y * H1) / H0, w: (c.w * W1) / W0, h: (c.h * H1) / H0 };
+    setState(it, next);
     inspect(it, px);
     let note = 'Background removed.';
     if (format() === 'image/jpeg') {
@@ -702,24 +861,14 @@ async function removeBackground() {
     busy = false;
     ui.busy.hidden = true;
     readouts();
+    requestDraw();
   }
-}
-
-function undoBackground() {
-  const it = items[cur];
-  if (!it?.before || busy) return;
-  const removed: Pixels = { file: it.file, w: it.w, h: it.h, base: it.base, alpha: it.alpha };
-  setPixels(it, it.before);
-  it.before = undefined;
-  freePixels(removed);
-  changed();
-  setStatus('Background restored.', 'done');
 }
 
 function renderThumbs() {
   ui.thumbs.replaceChildren(
     ...items.map((it, i) => {
-      const b = el('button', { type: 'button', className: 'ie-thumb checker', ariaLabel: `Edit ${it.origin.name}`, title: it.origin.name }, el('img', { src: it.url, alt: '' }));
+      const b = el('button', { type: 'button', className: 'ie-thumb checker', ariaLabel: `Edit ${it.origin.name}`, title: it.origin.name }, el('img', { src: it.px.url, alt: '' }));
       b.onclick = () => select(i);
       return el('li', {}, b);
     }),
@@ -775,6 +924,7 @@ async function run(task: () => Promise<void>) {
   } finally {
     busy = false;
     readouts();
+    requestDraw();
   }
 }
 
@@ -836,21 +986,33 @@ export function initImageEditor(): void {
     if (files.length) void addFiles(files);
   });
 
-  const on = (sel: string, fn: () => void) => r.querySelector(sel)!.addEventListener('click', fn);
-  on('[data-rotate-left]', () => rotate(-1));
-  on('[data-rotate-right]', () => rotate(1));
-  on('[data-flip]', flip);
-  on('[data-swap]', swap);
-  on('[data-zoom-out]', () => zoomBy(items[cur], 1 / 1.25));
-  on('[data-zoom-in]', () => zoomBy(items[cur], 1.25));
-  on('[data-reset]', () => {
+  const onEach = (sel: string, fn: () => void) => r.querySelectorAll(sel).forEach((b) => b.addEventListener('click', fn));
+  onEach('[data-rotate-left]', () => rotate(-1));
+  onEach('[data-rotate-right]', () => rotate(1));
+  onEach('[data-flip]', () => flip(false));
+  onEach('[data-flip-v]', () => flip(true));
+  onEach('[data-swap]', swap);
+  onEach('[data-zoom-out]', () => zoomBy(items[cur], 1 / 1.25));
+  onEach('[data-zoom-in]', () => zoomBy(items[cur], 1.25));
+  onEach('[data-reset]', () => {
     resetCrop(items[cur]);
     changed();
   });
-  on('[data-remove-image]', removeCurrent);
-  on('[data-remove-bg]', () => void removeBackground());
-  on('[data-undo-bg]', undoBackground);
-  on('[data-busy-cancel]', () => bgJob?.abort());
+  onEach('[data-crop-apply]', () => void bake('crop'));
+  onEach('[data-cut]', () => void bake('cut'));
+  onEach('[data-undo]', () => step(true));
+  onEach('[data-redo]', () => step(false));
+  onEach('[data-remove-image]', removeCurrent);
+  onEach('[data-remove-bg]', () => void removeBackground());
+  onEach('[data-busy-cancel]', () => bgJob?.abort());
+
+  // Undo/redo anywhere in the editor except while typing in a field.
+  r.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 'z') return;
+    if ((e.target as Element).closest('input, select, textarea')) return;
+    e.preventDefault();
+    step(!e.shiftKey);
+  });
 
   ui.download.addEventListener('click', () =>
     run(async () => {
@@ -883,6 +1045,19 @@ export function initImageEditor(): void {
     }),
   );
 
+  // Settings sidebar width; the canvas keeps at least 320 px.
+  resizable(ui.resizer, {
+    key: 'images.side',
+    min: () => 280,
+    max: () => Math.max(280, Math.min(640, r.clientWidth - 320)),
+    initial: 340,
+    apply: (px) => r.style.setProperty('--ie-side', `${px}px`),
+    fromPointer: (e, start) => start.size - (e.clientX - start.x),
+    growKey: 'ArrowLeft',
+    shrinkKey: 'ArrowRight',
+    container: r,
+  });
+
   // Stage: one pointer moves the crop or drags a handle, two pinch-zoom.
   const pointers = new Map<number, { x: number; y: number }>();
   let gesture: { grab: Handle | 'move'; x: number; y: number; crop: Rect; zoom: number; dist: number } | undefined;
@@ -895,6 +1070,7 @@ export function initImageEditor(): void {
     if (e.button !== 0 || !items[cur] || busy) return;
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    dragging = true;
     startGesture(hitTest(e.clientX, e.clientY));
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -919,7 +1095,11 @@ export function initImageEditor(): void {
   const end = (e: PointerEvent) => {
     if (!pointers.delete(e.pointerId)) return;
     startGesture();
-    if (!pointers.size) scheduleEstimate();
+    if (pointers.size) return;
+    dragging = false;
+    readouts();
+    requestDraw();
+    scheduleEstimate();
   };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
@@ -934,7 +1114,7 @@ export function initImageEditor(): void {
   );
   canvas.addEventListener('keydown', (e) => {
     const it = items[cur];
-    if (!it) return;
+    if (!it || e.ctrlKey || e.metaKey || e.altKey) return;
     const step = e.shiftKey ? 50 : 10;
     const moves: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
     if (moves[e.key]) {
@@ -942,6 +1122,8 @@ export function initImageEditor(): void {
       changed();
     } else if (e.key === '+' || e.key === '=') zoomBy(it, 1.1);
     else if (e.key === '-') zoomBy(it, 1 / 1.1);
+    else if (e.key === 'Enter') void bake('crop');
+    else if (e.key === 'Delete' || e.key === 'Backspace') void bake('cut');
     else return;
     e.preventDefault();
   });

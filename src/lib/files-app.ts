@@ -1,10 +1,12 @@
-// Files & text app (src/pages/files/index.astro): explorer, tabbed text editor, JSON/JS/ZIP/gzip actions.
-import { Gunzip, Gzip, gzipSync, zip, type Zippable } from 'fflate';
+// Files & text app (src/pages/files/index.astro): explorer, tabbed text editor, JSON/JS tools and an archive tray (ZIP/gzip).
+import { Gunzip, Gzip, gzipSync, Unzip, UnzipInflate, zip, type Zippable } from 'fflate';
 import { formatJson, jsonError } from './json';
 import { jsonErrorAt } from './json-locate';
-import { downloadBlob, el, formatBytes, sniff, throwIfAborted, UserError } from './tool';
+import { diffLines, diffWords, sortJsonKeys } from './diff';
+import { resizable } from './resize';
+import { downloadBlob, el, formatBytes, setDial, sniff, throwIfAborted, UserError } from './tool';
 
-type Tool = 'json' | 'js' | 'zip' | 'gzip';
+type Tool = 'json' | 'js' | 'zip' | 'gzip' | 'compare';
 type Lang = 'json' | 'js' | 'text' | 'binary';
 type Kind = 'info' | 'ok' | 'warn' | 'error';
 type Sniffed = 'jpeg' | 'png' | 'webp' | 'pdf' | 'gzip' | 'zip' | 'unknown';
@@ -35,13 +37,25 @@ const MAX_ZIP = 500 * MB;
 const MAX_GZ_IN = 200 * MB;
 const MAX_GZ_OUT = 500 * MB;
 const MAX_INLINE = 5 * MB;
+const MAX_ENTRIES = 10_000;
+const DRAG_TYPE = 'application/x-fx-items';
 const LINE = 20; // px; matches --fx-line
-const TOOLS: Tool[] = ['json', 'js', 'zip', 'gzip'];
+const TOOLS: Tool[] = ['json', 'js', 'zip', 'gzip', 'compare'];
+/** Tab id of the comparison view (items have positive ids). */
+const DIFF = -1;
 const INDENTS: Record<string, string> = { '2': '  ', '4': '    ', tab: '\t' };
 const LANG_LABEL: Record<Lang, string> = { json: 'JSON', js: 'JavaScript', text: 'Plain text', binary: 'Binary' };
 const TYPE_LABEL: Record<Item['sniffed'], string> = {
   jpeg: 'JPEG image', png: 'PNG image', webp: 'WebP image', pdf: 'PDF document', gzip: 'Gzip archive', zip: 'ZIP archive', unknown: 'Binary data',
 };
+
+/** Archive entry path made safe for the Explorer: no absolute paths, drive letters, `.`/`..` segments or control characters. */
+const safeEntryName = (raw: string) =>
+  raw
+    .replace(/[\u0000-\u001f]/g, '')
+    .split(/[\\/]+/)
+    .filter((s) => s && s !== '.' && s !== '..' && !/^[a-z]:$/i.test(s))
+    .join('/');
 
 /** UTF-8 text without NUL bytes, or null for binary, non-UTF-8 or oversized data. */
 async function decodeText(blob: Blob, max: number): Promise<string | null> {
@@ -130,7 +144,10 @@ export function initFilesApp(): void {
   const selectAll = $<HTMLInputElement>('[data-select-all]');
   const msg = $('[data-msg]');
   const progress = $<HTMLProgressElement>('[data-progress]');
-  const cancelBtn = $<HTMLButtonElement>('[data-cancel]');
+  const trayEl = $('[data-tray]');
+  const trayList = $<HTMLUListElement>('[data-tray-list]');
+  const trayBusy = $('[data-tray-busy]');
+  const dial = $('[data-dial]');
   const sbJson = $<HTMLButtonElement>('[data-sb-json]');
   const icons = $<HTMLTemplateElement>('[data-icons]');
   const icon = (name: string) => icons.content.querySelector(`[data-i="${name}"]`)!.firstElementChild!.cloneNode(true);
@@ -142,6 +159,7 @@ export function initFilesApp(): void {
   let open: number[] = [];
   let active: number | undefined;
   const ticked = new Set<number>();
+  let tray: number[] = []; // item ids collected in the archive tray
   let anchor: number | undefined;
   let roving: number | undefined;
   let nextId = 1;
@@ -151,6 +169,7 @@ export function initFilesApp(): void {
   let lineCount = 1;
   let escaped = false;
   let busy: AbortController | null = null;
+  let busyInTray = false;
   let tool: Tool = 'json';
 
   const byId = (id: number | undefined) => items.find((i) => i.id === id);
@@ -178,6 +197,7 @@ export function initFilesApp(): void {
   const setOutOpen = (open: boolean) => {
     outToggle.ariaExpanded = String(open);
     out.hidden = !open;
+    $('[data-resize-out]').hidden = !open;
   };
   const renderProblemCount = () => {
     const n = out.querySelectorAll('[data-kind="error"]').length;
@@ -278,10 +298,12 @@ export function initFilesApp(): void {
   function showActive() {
     sync();
     const it = cur();
-    empty.hidden = !!it;
+    const diffing = active === DIFF;
+    empty.hidden = !!it || diffing;
     code.hidden = it?.text === undefined;
     hex.hidden = !it || it.text !== undefined;
-    $('#fx-editor').setAttribute('aria-labelledby', it ? `fx-tab-${it.id}` : '');
+    $('[data-diff]').hidden = !diffing;
+    $('#fx-editor').setAttribute('aria-labelledby', active !== undefined ? `fx-tab-${active}` : '');
     if (it?.text !== undefined) {
       if (shown !== it.id) {
         shown = it.id;
@@ -300,7 +322,7 @@ export function initFilesApp(): void {
         const info = $('[data-info]');
         const rows: [string, string][] = [['Name', it.name], ['Size', `${formatBytes(it.size)} (${it.size.toLocaleString()} bytes)`], ['Type', TYPE_LABEL[it.sniffed]]];
         if (it.note) rows.push(['Note', it.note]);
-        if (it.sniffed === 'gzip') rows.push(['Tip', 'Choose Gzip, then Decompress, to unpack it.']);
+        if (it.sniffed === 'zip' || it.sniffed === 'gzip') rows.push(['Tip', `Add it to the Archive tray to ${it.sniffed === 'zip' ? 'extract' : 'decompress'} it.`]);
         rows.push(['Preview', blob.size > 4096 ? 'First 4 KB, hexadecimal' : 'Hexadecimal']);
         info.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })]));
         $('[data-hexdump]').textContent = '';
@@ -318,12 +340,17 @@ export function initFilesApp(): void {
     analyse();
   }
 
-  function openItem(id: number, focus = false) {
+  /** `stay` keeps the narrow-screen Explorer drawer open (actions started from it). */
+  function openItem(id: number, focus = false, stay = false) {
     if (active !== id) saveView();
     if (!open.includes(id)) open.push(id);
     active = id;
     showActive();
-    if (narrow.matches) setExplorer(false);
+    const row = filesEl.querySelector<HTMLElement>(`[data-id="${id}"]`);
+    if (row && (row.offsetTop < filesEl.scrollTop || row.offsetTop + row.offsetHeight > filesEl.scrollTop + filesEl.clientHeight)) {
+      filesEl.scrollTop = row.offsetTop - filesEl.clientHeight / 2;
+    }
+    if (narrow.matches && !stay) setExplorer(false);
     if (focus) (cur()?.text !== undefined ? ta : hex).focus();
   }
 
@@ -342,6 +369,7 @@ export function initFilesApp(): void {
     closeTab(id);
     items = items.filter((it) => it.id !== id);
     ticked.delete(id);
+    tray = tray.filter((t) => t !== id);
     if (roving === id) roving = undefined;
     renderExplorer();
     renderTools();
@@ -401,6 +429,11 @@ export function initFilesApp(): void {
     if (l === 'text') return 'doc';
     return { zip: 'files', gzip: 'files', jpeg: 'images', png: 'images', webp: 'images', pdf: 'pdf', unknown: 'doc' }[it.sniffed];
   };
+  // Folder prefixes (from extracted archives) are shown muted before the file name.
+  const nameEl = (name: string) => {
+    const i = name.lastIndexOf('/');
+    return el('span', { className: 'fx-name' }, ...(i < 0 ? [name] : [el('span', { className: 'fx-dir', textContent: name.slice(0, i + 1) }), name.slice(i + 1)]));
+  };
 
   function rove(id: number | undefined) {
     roving = id;
@@ -417,13 +450,13 @@ export function initFilesApp(): void {
     const fIndex = fRow ? [...fRow.querySelectorAll('button, input')].indexOf(f!) : -1;
     filesEl.replaceChildren(
       ...items.map((it) => {
-        const row = el('li', { className: 'fx-row' });
+        const row = el('li', { className: 'fx-row', draggable: true });
         row.dataset.id = String(it.id);
         row.dataset.kind = lang(it);
         if (it.id === active) row.dataset.active = '';
         const cb = el('input', { type: 'checkbox', checked: ticked.has(it.id), ariaLabel: `Select ${it.name}` });
         cb.onchange = () => tick(it.id, cb.checked);
-        const openBtn = el('button', { type: 'button', className: 'fx-open', title: it.name }, icon(kindIcon(it)), el('span', { className: 'fx-name', textContent: it.name }), el('span', { className: 'fx-size', textContent: formatBytes(it.size) }));
+        const openBtn = el('button', { type: 'button', className: 'fx-open', title: it.name }, icon(kindIcon(it)), nameEl(it.name), el('span', { className: 'fx-size', textContent: formatBytes(it.size) }));
         openBtn.dataset.open = '';
         if (it.id === active) openBtn.ariaCurrent = 'true';
         openBtn.onclick = (e) => {
@@ -452,7 +485,11 @@ export function initFilesApp(): void {
     rove(byId(roving) ? roving : (active ?? items[0]?.id));
     if (fRow) (filesEl.querySelector(`[data-id="${fRow.dataset.id}"]`)?.querySelectorAll<HTMLElement>('button, input')[fIndex] ?? filesEl.querySelector<HTMLElement>('.fx-open[tabindex="0"]'))?.focus();
     $('[data-files-empty]').hidden = items.length > 0;
-    $('[data-count]').textContent = items.length ? `${items.length} file${items.length === 1 ? '' : 's'}${ticked.size ? ` · ${ticked.size} ticked` : ''}` : '';
+    $('[data-count]').textContent = items.length ? `${items.length} file${items.length === 1 ? '' : 's'}` : '';
+    $('[data-selbar]').hidden = ticked.size === 0;
+    $('[data-sel-count]').textContent = `${ticked.size} selected`;
+    const sel = items.filter((it) => ticked.has(it.id));
+    $('[data-sel-compare]').hidden = !(sel.length === 2 && sel.every((it) => it.text !== undefined));
     selectAll.disabled = !items.length;
     selectAll.checked = items.length > 0 && ticked.size === items.length;
     selectAll.indeterminate = ticked.size > 0 && ticked.size < items.length;
@@ -534,11 +571,11 @@ export function initFilesApp(): void {
     const hadFocus = tabsEl.contains(document.activeElement);
     tabsEl.replaceChildren(
       ...open.map((id) => {
-        const it = byId(id)!;
+        const it = byId(id);
         const x = el('span', { className: 'fx-tab-x', title: 'Close' }, icon('xmark'));
         x.dataset.x = '';
         x.ariaHidden = 'true';
-        const tab = el('button', { type: 'button', className: 'fx-tab', id: `fx-tab-${id}`, tabIndex: id === active ? 0 : -1 }, icon(kindIcon(it)), el('span', { className: 'fx-tab-name', textContent: it.name }), x);
+        const tab = el('button', { type: 'button', className: 'fx-tab', id: `fx-tab-${id}`, tabIndex: id === active ? 0 : -1 }, icon(it ? kindIcon(it) : 'compare'), el('span', { className: 'fx-tab-name', textContent: it?.name ?? diffTitle() }), x);
         tab.role = 'tab';
         tab.ariaSelected = String(id === active);
         tab.setAttribute('aria-controls', 'fx-editor');
@@ -588,12 +625,24 @@ export function initFilesApp(): void {
   const focusAfterClose = () => (tabsEl.querySelector<HTMLElement>('[aria-selected="true"]') ?? $('[data-empty-state] [data-open]')).focus();
 
   // ---- Tools ----
-  function setTool(t: Tool) {
+  function setTool(t: Tool, focusTray = false) {
     tool = t;
     field(`tool"][value="${t}`).checked = true;
-    $$('[data-panel]').forEach((p) => (p.hidden = p.dataset.panel !== t));
+    const archive = t === 'zip' || t === 'gzip';
+    $$('[data-panel]').forEach((p) => (p.hidden = p.dataset.panel !== (archive ? 'archive' : t)));
+    if (archive) showTray(focusTray);
     renderTools();
     analyse();
+  }
+
+  let hlTimer = 0;
+  /** Open the Explorer and draw attention to the archive tray. */
+  function showTray(focus: boolean) {
+    setExplorer(true);
+    trayEl.dataset.hl = '';
+    clearTimeout(hlTimer);
+    hlTimer = window.setTimeout(() => delete trayEl.dataset.hl, 1600);
+    if (focus) trayEl.focus({ preventScroll: true });
   }
 
   function renderTools() {
@@ -601,31 +650,101 @@ export function initFilesApp(): void {
     const isText = it?.text !== undefined;
     const set = (act: string, enabled: boolean) => ($<HTMLButtonElement>(`[data-act="${act}"]`).disabled = !!busy || !enabled);
     ['validate', 'minify-json', 'format', 'minify-js'].forEach((a) => set(a, isText));
-    set('zip', items.length > 0);
-    set('gzip', !!it);
-    set('gunzip', it?.sniffed === 'gzip');
-    $('[data-zip-scope]').textContent = !items.length ? 'Add files to archive' : ticked.size ? `${ticked.size} ticked file${ticked.size === 1 ? '' : 's'}` : `All ${items.length} file${items.length === 1 ? '' : 's'}`;
-    $('[data-gzip-target]').textContent = it ? `${it.name} · ${formatBytes(it.size)}` : 'Open a file to compress or decompress';
-    $('[data-act="gunzip"]').classList.toggle('fx-primary', it?.sniffed === 'gzip');
-    $('[data-act="gzip"]').classList.toggle('fx-primary', !!it && it.sniffed !== 'gzip');
+    $$<HTMLButtonElement>('[data-tray-add]').forEach((b) => (b.disabled = !!busy || (!ticked.size && !it)));
+    renderTray();
+    renderCompareChoices();
   }
 
-  function startBusy(text: string, cancellable: boolean) {
+  const plural = (n: number, word = 'file') => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+  const trayItems = () => tray.map((id) => byId(id)!);
+
+  function renderTray() {
+    const list = trayItems();
+    const hadFocus = trayList.contains(document.activeElement);
+    trayList.replaceChildren(
+      ...list.map((it, i) => {
+        const remove = el('button', { type: 'button', className: 'fx-ib', ariaLabel: `Remove ${it.name} from the archive tray`, title: 'Remove from the tray' }, icon('xmark'));
+        remove.onclick = () => {
+          tray.splice(i, 1);
+          renderTools();
+          (trayList.querySelectorAll('button')[Math.min(i, tray.length - 1)] ?? trayEl).focus();
+        };
+        return el('li', { className: 'fx-tray-row', title: it.name }, icon(kindIcon(it)), nameEl(it.name), el('span', { className: 'fx-size', textContent: formatBytes(it.size) }), remove);
+      }),
+    );
+    if (hadFocus && !trayList.contains(document.activeElement)) trayEl.focus();
+    const total = list.reduce((s, it) => s + it.size, 0);
+    $('[data-tray-count]').textContent = list.length ? `${plural(list.length)} · ${formatBytes(total)}` : '';
+    const zips = list.filter((it) => it.sniffed === 'zip').length;
+    const gzs = list.filter((it) => it.sniffed === 'gzip').length;
+    // A tray holding only archives is most likely there to be extracted.
+    const extract = list.length > 0 && zips + gzs === list.length;
+    const set = (act: string, enabled: boolean, primary: boolean, show = true) => {
+      const b = $<HTMLButtonElement>(`[data-act="${act}"]`);
+      b.hidden = !show;
+      b.disabled = !!busy || !enabled;
+      b.classList.toggle('fx-primary', primary && enabled);
+    };
+    set('zip', list.length > 0, !extract);
+    set('gzip', list.length === 1, false);
+    set('unzip', zips > 0, extract, zips > 0);
+    set('gunzip', gzs > 0, extract, gzs > 0);
+    $<HTMLButtonElement>('[data-tray-clear]').disabled = !!busy || !list.length;
+    const it = cur();
+    const hexBtn = $<HTMLButtonElement>('[data-hex-tray]');
+    hexBtn.hidden = !it || it.text !== undefined || (it.sniffed !== 'zip' && it.sniffed !== 'gzip');
+    hexBtn.disabled = !!it && tray.includes(it.id);
+    hexBtn.querySelector('span:not(.icon)')!.textContent = hexBtn.disabled ? 'In the Archive tray' : 'Add to Archive tray';
+  }
+
+  function addToTray(ids: number[]) {
+    const fresh = ids.filter((id) => byId(id) && !tray.includes(id));
+    tray.push(...fresh);
+    renderTools();
+    say(fresh.length ? `Added ${plural(fresh.length)} to the archive tray.` : 'Already in the archive tray.');
+  }
+
+  function addSelectedToTray() {
+    const ids = ticked.size ? items.filter((it) => ticked.has(it.id)).map((it) => it.id) : cur() ? [active!] : [];
+    if (!ids.length) return say('Select files in the Explorer first.', 'error');
+    ticked.clear();
+    renderExplorer();
+    addToTray(ids);
+    showTray(true);
+  }
+
+  /** Archive work shows its progress over the tray; text tools use the status bar. */
+  function startBusy(text: string, inTray = false) {
     busy = new AbortController();
-    say(text);
-    progress.hidden = false;
-    progress.removeAttribute('value');
-    cancelBtn.hidden = !cancellable;
+    busyInTray = inTray;
+    setBusyText(text);
+    if (inTray) {
+      trayBusy.hidden = false;
+      dial.hidden = false;
+      setDial(dial);
+    } else {
+      progress.hidden = false;
+      progress.removeAttribute('value');
+    }
     renderTools();
     return busy.signal;
+  }
+  function setBusyText(text: string) {
+    say(text);
+    $('[data-busy-text]').textContent = text;
+  }
+  function setFraction(f?: number) {
+    if (busyInTray) setDial(dial, f);
+    else if (f === undefined) progress.removeAttribute('value');
+    else progress.value = f;
   }
   function endBusy() {
     busy = null;
     progress.hidden = true;
-    cancelBtn.hidden = true;
+    trayBusy.hidden = true;
     renderTools();
   }
-  cancelBtn.onclick = () => busy?.abort();
+  $('[data-cancel]').addEventListener('click', () => busy?.abort());
 
   function fail(err: unknown) {
     if (err instanceof DOMException && err.name === 'AbortError') return say('Cancelled.');
@@ -636,7 +755,7 @@ export function initFilesApp(): void {
   function addOutput(name: string, data: { text?: string; blob?: Blob }, sniffed: Item['sniffed'] = 'unknown', note?: string) {
     const size = data.blob?.size ?? new Blob([data.text ?? '']).size;
     const it = addItem({ name: uniqueName(name), ...data, size, sniffed, generated: true, note });
-    openItem(it.id);
+    openItem(it.id, false, true);
     return it;
   }
 
@@ -653,7 +772,7 @@ export function initFilesApp(): void {
     try {
       const it = needText();
       const text = it.text!;
-      startBusy('Checking JSON…', false);
+      startBusy('Checking JSON…');
       // Let the status paint before a potentially long synchronous parse.
       const painted = Promise.withResolvers<void>();
       requestAnimationFrame(() => setTimeout(painted.resolve));
@@ -685,7 +804,7 @@ export function initFilesApp(): void {
     try {
       const it = needText();
       if (it.size > MAX_JS) throw new UserError(`${it.name} is larger than ${formatBytes(MAX_JS)}, the limit for JavaScript.`);
-      startBusy('Minifying…', false);
+      startBusy('Minifying…');
       // Code-split: Terser is large and only needed when minifying.
       const { minify } = await import('terser');
       let result: string;
@@ -718,113 +837,174 @@ export function initFilesApp(): void {
     }
   }
 
-  async function runZip() {
+  /** Runs one archive-tray action under the tray's progress overlay; Cancel aborts `signal`. */
+  async function trayRun(label: string, fn: (signal: AbortSignal) => Promise<void>) {
     if (busy) return;
     sync();
-    const list = items.filter((it) => !ticked.size || ticked.has(it.id));
+    const signal = startBusy(label, true);
+    if (trayEl.contains(document.activeElement)) $('[data-cancel]').focus();
     try {
-      if (!list.length) throw new UserError('Add files to archive first.');
-      const blobs = list.map(blobOf);
-      const total = blobs.reduce((s, b) => s + b.size, 0);
-      if (total > MAX_ZIP) throw new UserError(`The selected files add up to ${formatBytes(total)}; the ZIP limit is ${formatBytes(MAX_ZIP)}.`);
-      const level = Number(checkedValue('level')) as 0 | 6 | 9;
-      const name = (field('zipName').value.trim().replace(/[\\/]+/g, '-') || 'archive').replace(/\.zip$/i, '') + '.zip';
-      const signal = startBusy('Reading files…', true);
-      // Deduplicate names so files with the same name don't overwrite each other.
-      const entries: Zippable = {};
-      for (const [i, it] of list.entries()) {
-        throwIfAborted(signal);
-        progress.value = i / list.length;
-        let entry = it.name;
-        for (let n = 2; entry in entries; n++) entry = it.name.replace(/(\.[^.]*)?$/, ` (${n})$1`);
-        entries[entry] = [new Uint8Array(await blobs[i].arrayBuffer()), { level, mtime: it.mtime }];
-      }
-      say('Compressing…');
-      progress.removeAttribute('value');
-      const { promise, resolve, reject } = Promise.withResolvers<Uint8Array>();
-      // Async fflate runs in workers and keeps the page responsive.
-      const terminate = zip(entries, (err, data) => (err ? reject(err) : resolve(data)));
-      signal.addEventListener('abort', () => {
-        terminate();
-        reject(new DOMException('Cancelled', 'AbortError'));
-      });
-      const data = await promise;
-      const o = addOutput(name, { blob: new Blob([data as BlobPart], { type: 'application/zip' }) }, 'zip');
-      log('ok', `Created ${o.name} from ${list.length} file${list.length === 1 ? '' : 's'}: ${formatBytes(total)} → ${formatBytes(o.size)}.`);
+      await fn(signal);
     } catch (err) {
       fail(err);
     } finally {
-      if (busy) endBusy();
+      const refocus = trayBusy.contains(document.activeElement);
+      endBusy();
+      if (refocus) trayEl.focus();
     }
   }
 
-  async function runGzip(compress: boolean) {
-    if (busy) return;
-    sync();
-    const it = cur();
-    try {
-      if (!it) throw new UserError('Open a file first.');
-      const src = blobOf(it);
-      if (src.size > MAX_GZ_IN) throw new UserError(`${it.name} is larger than ${formatBytes(MAX_GZ_IN)}, the gzip limit.`);
-      if (!compress && (await sniff(src)) !== 'gzip') throw new UserError(`${it.name} is not gzip-compressed. Choose Compress instead.`);
-      const signal = startBusy(compress ? 'Compressing…' : 'Decompressing…', true);
-      const chunks: Uint8Array[] = [];
-      let outSize = 0;
-      const ondata = (chunk: Uint8Array) => {
-        outSize += chunk.length;
-        if (outSize > MAX_GZ_OUT) throw new UserError(`Decompressed data is larger than ${formatBytes(MAX_GZ_OUT)}; stopped to protect your device.`);
-        chunks.push(chunk);
-      };
-      const stream = compress ? new Gzip({ mtime: it.mtime }, ondata) : new Gunzip(ondata);
-      const reader = src.stream().getReader();
-      let read = 0;
-      try {
-        for (;;) {
-          throwIfAborted(signal);
-          const { done, value } = await reader.read();
-          if (done) break;
-          read += value.length;
-          stream.push(value);
-          progress.value = src.size ? read / src.size : 1;
-        }
-        stream.push(new Uint8Array(0), true);
-      } catch (err) {
-        reader.cancel().catch(() => {});
-        if (err instanceof UserError || (err instanceof DOMException && err.name === 'AbortError')) throw err;
-        // fflate throws plain errors for corrupt or truncated input.
-        if (!compress) throw new UserError(`The gzip data in ${it.name} is damaged or incomplete.`);
-        throw err;
-      }
-      const name = compress ? `${it.name}.gz` : it.name.replace(/\.tgz$/i, '.tar').replace(/\.gz$/i, '') || 'decompressed';
-      const blob = new Blob(chunks as BlobPart[], { type: compress ? 'application/gzip' : 'application/octet-stream' });
-      // Small UTF-8 results open as editable text; everything else is listed as a binary file.
-      const text = compress ? null : await decodeText(blob, MAX_INLINE - 1);
-      const o = text !== null ? addOutput(name, { text, blob }) : addOutput(name, { blob }, await sniff(blob));
-      log('ok', `${compress ? 'Compressed' : 'Decompressed'} ${it.name} → ${o.name}: ${formatBytes(src.size)} → ${formatBytes(o.size)}.`);
-    } catch (err) {
-      fail(err);
-    } finally {
-      if (busy) endBusy();
+  async function createZip(signal: AbortSignal) {
+    const list = trayItems();
+    if (!list.length) throw new UserError('Add files to the archive tray first.');
+    const blobs = list.map(blobOf);
+    const total = blobs.reduce((s, b) => s + b.size, 0);
+    if (total > MAX_ZIP) throw new UserError(`The files in the tray add up to ${formatBytes(total)}; the ZIP limit is ${formatBytes(MAX_ZIP)}.`);
+    const level = Number(checkedValue('level')) as 0 | 6 | 9;
+    const name = (field('zipName').value.trim().replace(/[\\/]+/g, '-') || 'archive').replace(/\.zip$/i, '') + '.zip';
+    // Deduplicate names so files with the same name don't overwrite each other.
+    const entries: Zippable = {};
+    for (const [i, it] of list.entries()) {
+      throwIfAborted(signal);
+      setFraction(i / list.length);
+      let entry = it.name;
+      for (let n = 2; entry in entries; n++) entry = it.name.replace(/(\.[^./]*)?$/, ` (${n})$1`);
+      entries[entry] = [new Uint8Array(await blobs[i].arrayBuffer()), { level, mtime: it.mtime }];
     }
+    setBusyText('Compressing…');
+    setFraction();
+    const { promise, resolve, reject } = Promise.withResolvers<Uint8Array>();
+    // Async fflate runs in workers and keeps the page responsive.
+    const terminate = zip(entries, (err, data) => (err ? reject(err) : resolve(data)));
+    signal.addEventListener('abort', () => {
+      terminate();
+      reject(new DOMException('Cancelled', 'AbortError'));
+    });
+    const data = await promise;
+    const o = addOutput(name, { blob: new Blob([data as BlobPart], { type: 'application/zip' }) }, 'zip');
+    log('ok', `Created ${o.name} from ${plural(list.length)}: ${formatBytes(total)} → ${formatBytes(o.size)}.`);
+  }
+
+  /** Streams `it` through gzip or gunzip and adds the result to the Explorer. */
+  async function gzipItem(it: Item, compress: boolean, signal: AbortSignal) {
+    const src = blobOf(it);
+    if (src.size > MAX_GZ_IN) throw new UserError(`${it.name} is larger than ${formatBytes(MAX_GZ_IN)}, the gzip limit.`);
+    if (!compress && (await sniff(src)) !== 'gzip') throw new UserError(`${it.name} is not gzip-compressed.`);
+    const chunks: Uint8Array[] = [];
+    let outSize = 0;
+    const ondata = (chunk: Uint8Array) => {
+      outSize += chunk.length;
+      if (outSize > MAX_GZ_OUT) throw new UserError(`${it.name} decompresses to more than ${formatBytes(MAX_GZ_OUT)}; stopped to protect your device.`);
+      chunks.push(chunk);
+    };
+    const stream = compress ? new Gzip({ mtime: it.mtime }, ondata) : new Gunzip(ondata);
+    const reader = src.stream().getReader();
+    let read = 0;
+    try {
+      for (;;) {
+        throwIfAborted(signal);
+        const { done, value } = await reader.read();
+        if (done) break;
+        read += value.length;
+        stream.push(value);
+        setFraction(read / src.size);
+      }
+      stream.push(new Uint8Array(0), true);
+    } catch (err) {
+      reader.cancel().catch(() => {});
+      if (err instanceof UserError || (err instanceof DOMException && err.name === 'AbortError')) throw err;
+      // fflate throws plain errors for corrupt or truncated input.
+      if (!compress) throw new UserError(`The gzip data in ${it.name} is damaged or incomplete.`);
+      throw err;
+    }
+    const name = compress ? `${it.name}.gz` : it.name.replace(/\.tgz$/i, '.tar').replace(/\.gz$/i, '') || 'decompressed';
+    const blob = new Blob(chunks as BlobPart[], { type: compress ? 'application/gzip' : 'application/octet-stream' });
+    // Small UTF-8 results open as editable text; everything else is listed as a binary file.
+    const o = await addBlob(uniqueName(name), blob, compress ? it.mtime : Date.now(), true, compress ? 0 : MAX_INLINE - 1);
+    openItem(o.id, false, true);
+    log('ok', `${compress ? 'Compressed' : 'Decompressed'} ${it.name} → ${o.name}: ${formatBytes(src.size)} → ${formatBytes(o.size)}.`);
+  }
+
+  /** Extracts every file entry of a ZIP into the Explorer, with entry-count and expanded-size guards. */
+  async function unzipItem(it: Item, signal: AbortSignal) {
+    const src = blobOf(it);
+    if (src.size > MAX_ZIP) throw new UserError(`${it.name} is larger than ${formatBytes(MAX_ZIP)}, the ZIP limit.`);
+    if ((await sniff(src)) !== 'zip') throw new UserError(`${it.name} is not a ZIP archive.`);
+    const entries: { name: string; chunks: Uint8Array[]; done: boolean; error?: string }[] = [];
+    let total = 0;
+    let renamed = 0;
+    // fflate routes exceptions thrown in its callbacks back into ondata, so guards set `stop` and the push loop throws it.
+    let stop: UserError | undefined;
+    // Streaming: sizes are counted from the actual output, not trusted from the headers.
+    const uz = new Unzip((file) => {
+      // Folder entries (folders show up as name prefixes) and macOS resource-fork copies are skipped.
+      if (stop || /[\\/]$/.test(file.name) || /^__MACOSX[\\/]/.test(file.name)) return;
+      const name = safeEntryName(file.name);
+      if (name !== file.name) renamed++;
+      if (!name) return;
+      if (entries.length >= MAX_ENTRIES) return void (stop = new UserError(`${it.name} holds more than ${plural(MAX_ENTRIES)}; stopped to protect your device.`));
+      const entry: (typeof entries)[number] = { name, chunks: [], done: false };
+      entries.push(entry);
+      file.ondata = (err, chunk, final) => {
+        if (stop) return;
+        if (err) return void (entry.error = err.message);
+        total += chunk.length;
+        if (total > MAX_ZIP) return void (stop = new UserError(`${it.name} expands to more than ${formatBytes(MAX_ZIP)}; stopped to protect your device.`));
+        entry.chunks.push(chunk);
+        if (final) entry.done = true;
+      };
+      file.start();
+    });
+    uz.register(UnzipInflate);
+    const reader = src.stream().getReader();
+    let read = 0;
+    try {
+      for (;;) {
+        throwIfAborted(signal);
+        const { done, value } = await reader.read();
+        if (done) break;
+        // Small pushes bound how much one call can inflate before the size guard runs (deflate expands ≤ ~1032×).
+        for (let o = 0; o < value.length && !stop; o += 65536) uz.push(value.subarray(o, o + 65536));
+        if (stop) throw stop;
+        read += value.length;
+        setFraction(read / src.size);
+      }
+      uz.push(new Uint8Array(0), true);
+      if (stop) throw stop;
+    } catch (err) {
+      reader.cancel().catch(() => {});
+      if (err instanceof UserError || (err instanceof DOMException && err.name === 'AbortError')) throw err;
+      throw new UserError(`${it.name} is damaged or uses a ZIP feature this tool does not support.`);
+    }
+    const good = entries.filter((e) => e.done && !e.error);
+    if (!good.length) throw new UserError(entries.length ? `Could not extract ${it.name}: ${entries[0].error ?? 'the data is damaged'}.` : `${it.name} contains no files.`);
+    setBusyText('Adding files…');
+    const added: Item[] = [];
+    for (const e of good) added.push(await addBlob(uniqueName(e.name), new Blob(e.chunks as BlobPart[]), Date.now(), true, MAX_INLINE - 1));
+    openItem(added[0].id, false, true);
+    log('ok', `Extracted ${plural(good.length)} from ${it.name}: ${formatBytes(src.size)} → ${formatBytes(total)}.`);
+    if (good.length < entries.length) log('warn', `${plural(entries.length - good.length)} in ${it.name} could not be extracted (encrypted, damaged or unsupported compression).`);
+    if (renamed) log('warn', `${plural(renamed, 'entry name')} in ${it.name} pointed outside the archive or used unsafe characters; ${renamed === 1 ? 'it was' : 'they were'} cleaned up.`);
   }
 
   // ---- Files in: picker, hub hand-over, drop, paste ----
-  async function addFiles(files: File[]) {
-    let first: Item | undefined;
-    for (const f of files) {
-      const sniffed = await sniff(f);
-      const text = await decodeText(f, MAX_TEXT);
-      let note: string | undefined;
-      if (text === null && sniffed === 'unknown' && f.size > MAX_TEXT) note = `Larger than ${formatBytes(MAX_TEXT)}, so it is not opened as text.`;
-      else if (text === null && sniffed === 'unknown') note = 'Not UTF-8 text, so it is shown as binary.';
-      const it = addItem({ name: f.name, text: text ?? undefined, blob: f, size: f.size, sniffed, generated: false, mtime: f.lastModified, note });
-      if (text !== null && f.size > WARN_TEXT) log('warn', `${f.name} is ${formatBytes(f.size)}: the editor may be slow.`);
-      first ??= it;
-    }
-    if (first) {
-      openItem(first.id);
-      say(`Added ${files.length} file${files.length === 1 ? '' : 's'}.`);
-    }
+  /** Adds bytes to the Explorer: UTF-8 text up to `maxText` becomes an editable document, anything else a binary file. */
+  async function addBlob(name: string, blob: Blob, mtime: number, generated: boolean, maxText = MAX_TEXT): Promise<Item> {
+    const sniffed = await sniff(blob);
+    const text = await decodeText(blob, maxText);
+    let note: string | undefined;
+    if (text === null && sniffed === 'unknown') note = blob.size > maxText ? `Larger than ${formatBytes(maxText)}, so it is not opened as text.` : 'Not UTF-8 text, so it is shown as binary.';
+    if (text !== null && blob.size > WARN_TEXT) log('warn', `${name} is ${formatBytes(blob.size)}: the editor may be slow.`);
+    return addItem({ name, text: text ?? undefined, blob, size: blob.size, sniffed, generated, mtime, note });
+  }
+
+  async function addFiles(files: File[], toTray = false) {
+    const added: Item[] = [];
+    for (const f of files) added.push(await addBlob(f.name, f, f.lastModified, false));
+    if (!added.length) return;
+    if (toTray) tray.push(...added.map((it) => it.id));
+    openItem(added[0].id, false, toTray);
+    say(`Added ${plural(added.length)}${toTray ? ' to the archive tray' : ''}.`);
   }
 
   async function pasteFromClipboard() {
@@ -858,7 +1038,7 @@ export function initFilesApp(): void {
   input.addEventListener('change', () => {
     const files = [...(input.files ?? [])];
     input.value = '';
-    void addFiles(files);
+    void addFiles(files, tool === 'zip' || tool === 'gzip');
   });
   $$('[data-open]').forEach((b) => b.addEventListener('click', () => input.click()));
   $$('[data-new]').forEach((b) => b.addEventListener('click', () => newDoc()));
@@ -897,11 +1077,325 @@ export function initFilesApp(): void {
     'minify-json': () => runJson('minify'),
     format: () => runJson('format'),
     'minify-js': runJs,
-    zip: runZip,
-    gzip: () => runGzip(true),
-    gunzip: () => runGzip(false),
+    zip: () => trayRun('Reading files…', createZip),
+    gzip: () =>
+      trayRun('Compressing…', async (signal) => {
+        const list = trayItems();
+        if (list.length !== 1) throw new UserError('Gzip compresses a single file: keep exactly one file in the tray.');
+        await gzipItem(list[0], true, signal);
+      }),
+    gunzip: () =>
+      trayRun('Decompressing…', async (signal) => {
+        for (const it of trayItems().filter((x) => x.sniffed === 'gzip')) await gzipItem(it, false, signal);
+      }),
+    unzip: () =>
+      trayRun('Extracting…', async (signal) => {
+        for (const it of trayItems().filter((x) => x.sniffed === 'zip')) await unzipItem(it, signal);
+      }),
+    compare: () => void compareChosen(),
+    'compare-clip': async () => {
+      try {
+        void compareChosen(await navigator.clipboard.readText());
+      } catch {
+        log('warn', 'Clipboard access was blocked. Paste the text into a new document (New, then Ctrl+V or ⌘V) and compare the two documents.');
+      }
+    },
   };
+
+  // ---- Compare ----
+  interface Source { name: string; id?: number; text?: string }
+  let diffSrc: { a: Source; b: Source } | undefined;
+  let diffBlocks: HTMLElement[][] = [];
+  let diffCur = -1;
+  const diffEl = $('[data-diff]');
+  const diffBody = $('[data-diff-body]');
+  const diffTitle = () => (diffSrc ? `${diffSrc.a.name} ↔ ${diffSrc.b.name}` : 'Compare');
+  const textItems = () => items.filter((it) => it.text !== undefined);
+
+  function renderCompareChoices() {
+    const list = textItems();
+    const [sa, sb] = ['cmpA', 'cmpB'].map((n) => root.querySelector<HTMLSelectElement>(`[name="${n}"]`)!);
+    const keepA = Number(sa.value);
+    const keepB = Number(sb.value);
+    for (const s of [sa, sb]) s.replaceChildren(...list.map((it) => el('option', { value: String(it.id), textContent: it.name })));
+    const a = list.find((it) => it.id === keepA) ?? curText() ?? list[0];
+    const b = list.find((it) => it.id === keepB && it !== a) ?? list.find((it) => it !== a && open.includes(it.id)) ?? list.find((it) => it !== a);
+    if (a) sa.value = String(a.id);
+    if (b) sb.value = String(b.id);
+    $<HTMLButtonElement>('[data-act="compare"]').disabled = list.length < 2;
+    $<HTMLButtonElement>('[data-act="compare-clip"]').disabled = !list.length;
+  }
+
+  async function compare(a: Source, b: Source) {
+    diffSrc = { a, b };
+    saveView();
+    if (!open.includes(DIFF)) open.push(DIFF);
+    active = DIFF;
+    say('Comparing…');
+    const painted = Promise.withResolvers<void>();
+    requestAnimationFrame(() => setTimeout(painted.resolve));
+    await painted.promise;
+    renderDiff();
+    showActive();
+    diffBody.focus({ preventScroll: true });
+  }
+
+  function compareChosen(clipboardText?: string) {
+    const pick = (n: string) => byId(Number(root.querySelector<HTMLSelectElement>(`[name="${n}"]`)!.value));
+    const a = pick('cmpA');
+    if (!a) return say('Open or paste a text document first.', 'error');
+    if (clipboardText !== undefined) return compare({ name: a.name, id: a.id }, { name: 'Clipboard', text: clipboardText });
+    const b = pick('cmpB');
+    if (!b || b === a) return say('Choose two different documents to compare.', 'error');
+    return compare({ name: a.name, id: a.id }, { name: b.name, id: b.id });
+  }
+
+  const sourceText = (s: Source) => (s.id !== undefined ? (sync(), byId(s.id)?.text) : s.text);
+
+  function renderDiff() {
+    if (!diffSrc) return;
+    let ta = sourceText(diffSrc.a);
+    let tb = sourceText(diffSrc.b);
+    const notices: string[] = [];
+    $('[data-diff-names]').textContent = diffTitle();
+    if (ta === undefined || tb === undefined) {
+      ta ??= '';
+      tb ??= '';
+      notices.push('One of the documents was removed.');
+    }
+    if (field('normJson').checked) {
+      if (jsonError(ta) || jsonError(tb)) notices.push('Normalize JSON needs valid JSON on both sides, so the plain text is compared.');
+      else {
+        try {
+          const indent = INDENTS[checkedValue('indent')];
+          [ta, tb] = [formatJson(sortJsonKeys(ta), indent), formatJson(sortJsonKeys(tb), indent)];
+        } catch {
+          notices.push('The JSON is nested too deeply to normalize, so the plain text is compared.');
+        }
+      }
+    }
+    const la = ta.split(/\r?\n/);
+    const lb = tb.split(/\r?\n/);
+    const { edits, exact } = diffLines(la, lb, field('ignoreWs').checked);
+    if (!exact) notices.push('These texts are too different to compare precisely; the changed middle part is shown as one block.');
+    const notice = $('[data-diff-notice]');
+    notice.textContent = notices.join(' ');
+    notice.hidden = !notices.length;
+
+    // Rows: side by side pairs removed and added lines of each change block; unified (narrow) lists them one after another.
+    const unified = narrow.matches;
+    diffEl.toggleAttribute('data-unified', unified);
+    type Row = { k: 'eq' | 'del' | 'add' | 'chg'; a?: number; b?: number; wa?: Array<[number, number]>; wb?: Array<[number, number]> };
+    const rows: Row[] = [];
+    const blocks: Array<[number, number]> = [];
+    let adds = 0;
+    let dels = 0;
+    let runA: number[] = [];
+    let runB: number[] = [];
+    const flush = () => {
+      if (!runA.length && !runB.length) return;
+      const start = rows.length;
+      const n = Math.max(runA.length, runB.length);
+      const pairs: Row[] = [];
+      for (let i = 0; i < n; i++) {
+        const a = runA[i];
+        const b = runB[i];
+        const w = a !== undefined && b !== undefined ? diffWords(la[a], lb[b]) : null;
+        pairs.push({ k: a === undefined ? 'add' : b === undefined ? 'del' : 'chg', a, b, wa: w?.[0], wb: w?.[1] });
+      }
+      if (unified) {
+        for (const p of pairs) if (p.a !== undefined) rows.push({ k: 'del', a: p.a, wa: p.wa });
+        for (const p of pairs) if (p.b !== undefined) rows.push({ k: 'add', b: p.b, wb: p.wb });
+      } else rows.push(...pairs);
+      blocks.push([start, rows.length]);
+      adds += runB.length;
+      dels += runA.length;
+      runA = [];
+      runB = [];
+    };
+    for (const [op, a, b] of edits) {
+      if (op === 0) {
+        flush();
+        rows.push({ k: 'eq', a, b });
+      } else if (op === 1) runA.push(a);
+      else runB.push(b);
+    }
+    flush();
+
+    const sum = $('[data-diff-sum]');
+    sum.replaceChildren(
+      el('span', { className: 'fx-sum-add', textContent: `+${adds.toLocaleString()}` }),
+      ' ',
+      el('span', { className: 'fx-sum-del', textContent: `−${dels.toLocaleString()}` }),
+      ` · ${plural(blocks.length, 'change')}`,
+    );
+    sum.ariaLabel = `${plural(adds, 'addition')}, ${plural(dels, 'deletion')}, ${plural(blocks.length, 'change')}`;
+    diffEl.style.setProperty('--fx-dn', `${String(Math.max(la.length, lb.length)).length + 1}ch`);
+
+    const marked = (text: string, ranges?: Array<[number, number]>) => {
+      if (!ranges?.length) return [text];
+      const out: (string | HTMLElement)[] = [];
+      let p = 0;
+      for (const [s, e] of ranges) {
+        out.push(text.slice(p, s), el('mark', { textContent: text.slice(s, e) }));
+        p = e;
+      }
+      out.push(text.slice(p));
+      return out;
+    };
+    const side = (kind: string, n: number | undefined, text: string | undefined, ranges?: Array<[number, number]>) => {
+      const cells = [el('span', { className: 'fx-dn', textContent: n === undefined ? '' : String(n + 1) }), el('span', { className: 'fx-dm', textContent: kind === 'del' ? '−' : kind === 'add' ? '+' : '' }), el('span', { className: 'fx-dt' }, ...(text === undefined ? [] : marked(text, ranges)))];
+      cells.forEach((c) => (c.dataset.s = kind));
+      return cells;
+    };
+    const lineEl = (r: Row) => {
+      const row = el('div', { className: 'fx-dl' });
+      if (unified) {
+        const kind = r.k === 'eq' ? 'eq' : r.k;
+        const text = r.a !== undefined ? la[r.a] : lb[r.b!];
+        const [, m, t] = side(kind, undefined, text, r.k === 'del' ? r.wa : r.wb);
+        row.append(el('span', { className: 'fx-dn', textContent: r.a === undefined ? '' : String(r.a + 1) }), el('span', { className: 'fx-dn', textContent: r.b === undefined ? '' : String(r.b + 1) }), m, t);
+        row.dataset.s = kind;
+      } else {
+        const ka = r.a === undefined ? 'none' : r.k === 'eq' ? 'eq' : 'del';
+        const kb = r.b === undefined ? 'none' : r.k === 'eq' ? 'eq' : 'add';
+        row.append(...side(ka, r.a, r.a === undefined ? undefined : la[r.a], r.wa), ...side(kb, r.b, r.b === undefined ? undefined : lb[r.b], r.wb));
+      }
+      return row;
+    };
+
+    // Unchanged stretches longer than 2×CONTEXT+2 lines fold into an expandable marker.
+    const CONTEXT = 3;
+    const near = new Uint8Array(rows.length);
+    for (const [s, e] of blocks) near.fill(1, Math.max(0, s - CONTEXT), Math.min(rows.length, e + CONTEXT));
+    const els: (HTMLElement | undefined)[] = new Array(rows.length);
+    const frag: HTMLElement[] = [];
+    for (let i = 0; i < rows.length; ) {
+      if (near[i] || !blocks.length) {
+        frag.push((els[i] = lineEl(rows[i])));
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < rows.length && !near[j]) j++;
+      const from = i;
+      const fold = el('button', { type: 'button', className: 'fx-fold', textContent: `⋯ ${plural(j - from, 'unchanged line')}` });
+      fold.onclick = () => {
+        fold.replaceWith(...rows.slice(from, j).map(lineEl));
+        diffBody.focus({ preventScroll: true });
+      };
+      frag.push(fold);
+      i = j;
+    }
+    if (!blocks.length) frag.unshift(el('p', { className: 'fx-diff-same', textContent: field('ignoreWs').checked ? 'No differences apart from whitespace.' : 'The two texts are identical.' }));
+    diffBody.replaceChildren(...frag);
+    diffBlocks = blocks.map(([s, e]) => els.slice(s, e) as HTMLElement[]);
+    diffCur = -1;
+    $('[data-diff-pos]').textContent = '';
+    $<HTMLButtonElement>('[data-diff-prev]').disabled = $<HTMLButtonElement>('[data-diff-next]').disabled = !blocks.length;
+    say(blocks.length ? `${plural(blocks.length, 'change')}: ${plural(adds, 'line')} added, ${plural(dels, 'line')} removed.` : 'No differences.', 'ok');
+    renderTabs();
+  }
+
+  function goChange(step: 1 | -1) {
+    if (!diffBlocks.length) return;
+    diffBlocks[diffCur]?.forEach((r) => r.removeAttribute('data-cur'));
+    diffCur = diffCur < 0 ? (step > 0 ? 0 : diffBlocks.length - 1) : (diffCur + step + diffBlocks.length) % diffBlocks.length;
+    const rows = diffBlocks[diffCur];
+    rows.forEach((r) => r.setAttribute('data-cur', ''));
+    diffBody.scrollTop = rows[0].offsetTop - diffBody.clientHeight / 3;
+    const pos = `Change ${diffCur + 1} of ${diffBlocks.length}`;
+    $('[data-diff-pos]').textContent = pos;
+    say(pos);
+  }
+
+  $('[data-diff-next]').addEventListener('click', () => goChange(1));
+  $('[data-diff-prev]').addEventListener('click', () => goChange(-1));
+  $$('[name="ignoreWs"], [name="normJson"], [name="indent"]').forEach((c) => c.addEventListener('change', () => active === DIFF && renderDiff()));
+  narrow.addEventListener('change', () => diffSrc && open.includes(DIFF) && renderDiff());
+  $('[data-sel-compare]').addEventListener('click', () => {
+    const [a, b] = items.filter((it) => ticked.has(it.id));
+    ticked.clear();
+    setTool('compare');
+    void compare({ name: a.name, id: a.id }, { name: b.name, id: b.id });
+  });
+
+  // ---- Resizable Explorer and Output panel ----
+  resizable($('[data-resize-side]'), {
+    key: 'files.explorer',
+    min: () => 180,
+    max: () => Math.max(180, Math.round(root.clientWidth / 2)),
+    initial: 280,
+    apply: (v) => root.style.setProperty('--fx-sw', `${v}px`),
+    // The handle sits on the Explorer's left edge and the Explorer ends at the app's right edge.
+    fromPointer: (e) => root.getBoundingClientRect().right - e.clientX,
+    growKey: 'ArrowLeft',
+    shrinkKey: 'ArrowRight',
+    container: root,
+  });
+  resizable($('[data-resize-out]'), {
+    key: 'files.output',
+    min: () => 60,
+    max: () => Math.max(60, Math.round(root.clientHeight * 0.6)),
+    initial: narrow.matches ? 96 : 132,
+    apply: (v) => root.style.setProperty('--fx-out-h', `${v}px`),
+    fromPointer: (e, s) => s.size + s.y - e.clientY,
+    growKey: 'ArrowUp',
+    shrinkKey: 'ArrowDown',
+    container: root,
+  });
   $$('[data-act]').forEach((b) => b.addEventListener('click', () => acts[b.dataset.act!]()));
+  $$('[data-tray-add]').forEach((b) => b.addEventListener('click', addSelectedToTray));
+  $('[data-tray-focus]').addEventListener('click', () => showTray(true));
+  $('[data-hex-tray]').addEventListener('click', () => {
+    if (active !== undefined) addToTray([active]);
+    showTray(true);
+  });
+  $('[data-tray-clear]').addEventListener('click', () => {
+    tray = [];
+    renderTools();
+    trayEl.focus();
+  });
+  $('[data-sel-clear]').addEventListener('click', () => {
+    ticked.clear();
+    renderExplorer();
+    renderTools();
+    filesEl.querySelector<HTMLElement>('.fx-open[tabindex="0"]')?.focus();
+  });
+
+  // Drag rows from the Explorer into the tray (all ticked rows when the dragged row is ticked).
+  filesEl.addEventListener('dragstart', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('.fx-row');
+    if (!row || !e.dataTransfer) return;
+    const id = Number(row.dataset.id);
+    const ids = ticked.has(id) ? items.filter((it) => ticked.has(it.id)).map((it) => it.id) : [id];
+    e.dataTransfer.setData(DRAG_TYPE, ids.join(','));
+    e.dataTransfer.effectAllowed = 'copy';
+    row.classList.add('fx-dragging');
+  });
+  filesEl.addEventListener('dragend', (e) => (e.target as HTMLElement).closest('.fx-row')?.classList.remove('fx-dragging'));
+  const trayAccepts = (e: DragEvent) => !!e.dataTransfer && (e.dataTransfer.types.includes(DRAG_TYPE) || e.dataTransfer.types.includes('Files'));
+  trayEl.addEventListener('dragover', (e) => {
+    if (!trayAccepts(e) || busy) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer!.dropEffect = 'copy';
+    root.classList.remove('fx-over');
+    trayEl.classList.add('over');
+  });
+  trayEl.addEventListener('dragleave', (e) => {
+    if (!trayEl.contains(e.relatedTarget as Node | null)) trayEl.classList.remove('over');
+  });
+  trayEl.addEventListener('drop', (e) => {
+    if (!trayAccepts(e) || busy) return;
+    e.preventDefault();
+    e.stopPropagation();
+    trayEl.classList.remove('over');
+    root.classList.remove('fx-over');
+    const ids = e.dataTransfer!.getData(DRAG_TYPE);
+    if (ids) addToTray(ids.split(',').map(Number));
+    else void addFiles([...e.dataTransfer!.files], true);
+  });
 
   ta.addEventListener('input', () => {
     dirty = true;
@@ -937,6 +1431,9 @@ export function initFilesApp(): void {
       e.preventDefault();
       closeTab(active);
       focusAfterClose();
+    } else if (active === DIFF && !mod && !(e.target as HTMLElement).matches('input, textarea, select') && ((!e.altKey && (key === 'n' || key === 'p')) || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')))) {
+      e.preventDefault();
+      goChange(key === 'n' || e.key === 'ArrowDown' ? 1 : -1);
     } else if (active === undefined && e.key.length === 1 && !mod && !e.altKey && !(e.target as HTMLElement).matches('input, textarea, select')) {
       // Start typing on the empty state.
       e.preventDefault();
@@ -972,8 +1469,8 @@ export function initFilesApp(): void {
     }
   });
 
-  const mode = new URLSearchParams(location.search).get('mode') as Tool | null;
-  setTool(mode && TOOLS.includes(mode) ? mode : 'json');
   if (narrow.matches) setExplorer(false);
+  const mode = new URLSearchParams(location.search).get('mode') as Tool | null;
+  setTool(mode && TOOLS.includes(mode) ? mode : 'json', true);
   showActive();
 }

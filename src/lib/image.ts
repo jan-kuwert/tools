@@ -35,10 +35,86 @@ async function headerSize(file: Blob, kind: string): Promise<[number, number] | 
   }
 }
 
-/** Decode a JPEG/PNG/WebP with EXIF orientation applied. Caller must `close()` the bitmap. */
-export async function decodeImage(file: File): Promise<{ bitmap: ImageBitmap; type: ImageType }> {
+/** Text SVG: optional BOM, whitespace, XML declaration, comments and doctype, then `<svg`. */
+export async function isSvg(file: Blob): Promise<boolean> {
+  const head = await file.slice(0, 4096).text();
+  return /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*|<!DOCTYPE[^>[]*(?:\[[\s\S]*?\])?\s*>\s*)*<svg[\s>/]/i.test(head);
+}
+
+export type ImageKind = 'jpeg' | 'png' | 'webp' | 'svg';
+export async function imageKind(file: Blob): Promise<ImageKind | undefined> {
   const kind = await sniff(file);
-  if (kind !== 'jpeg' && kind !== 'png' && kind !== 'webp') throw new UserError(`${file.name} is not a JPEG, PNG or WebP image.`);
+  if (kind === 'jpeg' || kind === 'png' || kind === 'webp') return kind;
+  if (kind === 'unknown' && (await isSvg(file))) return 'svg';
+}
+
+const UNITS: Record<string, number> = { '': 1, px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, em: 16, rem: 16 };
+const svgLength = (v: string | null) => {
+  const m = v?.trim().match(/^(\d*\.?\d+(?:e[+-]?\d+)?)\s*([a-z]*)$/i);
+  const n = m ? Number(m[1]) * (UNITS[m[2].toLowerCase()] ?? NaN) : NaN;
+  return n > 0 && Number.isFinite(n) ? n : undefined;
+};
+
+/** Parsed (inert, never attached) SVG document and its intrinsic size in CSS px, fitted under MAX_PIXELS. */
+const svgDocs = new WeakMap<Blob, Promise<{ doc: XMLDocument; w: number; h: number }>>();
+function readSvg(file: Blob) {
+  let p = svgDocs.get(file);
+  if (!p) {
+    p = file.text().then((text) => {
+      const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+      const svg = doc.documentElement;
+      if (svg.localName !== 'svg' || doc.getElementsByTagName('parsererror').length) throw new UserError('This SVG could not be read. The file may be damaged.');
+      const vb = (svg.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number);
+      const ratio = vb.length === 4 && vb[2] > 0 && vb[3] > 0 ? vb[2] / vb[3] : undefined;
+      let w = svgLength(svg.getAttribute('width'));
+      let h = svgLength(svg.getAttribute('height'));
+      if (w && !h && ratio) h = w / ratio;
+      if (h && !w && ratio) w = h * ratio;
+      // Without a size, use the viewBox units as px; without either, a 1024 px square.
+      if (!w || !h) [w, h] = ratio ? [vb[2], vb[3]] : [1024, 1024];
+      // Content without a viewBox is laid out in px; give it one so it scales with the raster size.
+      if (!ratio) svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+      const k = Math.min(1, Math.sqrt(MAX_PIXELS / (w * h)));
+      return { doc, w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
+    });
+    svgDocs.set(file, p);
+  }
+  return p;
+}
+
+export const svgSize = async (file: Blob): Promise<[number, number]> => readSvg(file).then(({ w, h }) => [w, h]);
+
+/** Rasterize an SVG at w×h through an <img> from a blob URL, where scripts never run. Transparency is kept. */
+export async function rasterizeSvg(file: Blob, w: number, h: number): Promise<HTMLCanvasElement> {
+  if (w * h > MAX_PIXELS) throw tooLarge('The result', w, h);
+  const { doc } = await readSvg(file);
+  doc.documentElement.setAttribute('width', String(w));
+  doc.documentElement.setAttribute('height', String(h));
+  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' }));
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const canvas = canvasOf(w, h);
+    canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+    return canvas;
+  } catch {
+    throw new UserError('This SVG could not be drawn. It may use features browsers do not show in images, such as external files.');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Decode a JPEG/PNG/WebP with EXIF orientation applied, or rasterize an SVG at its own size. Caller must `close()` the bitmap. */
+export async function decodeImage(file: File): Promise<{ bitmap: ImageBitmap; type: ImageType }> {
+  const kind = await imageKind(file);
+  if (!kind) throw new UserError(`${file.name} is not a JPEG, PNG, WebP or SVG image.`);
+  if (kind === 'svg') {
+    const canvas = await rasterizeSvg(file, ...(await svgSize(file)));
+    const bitmap = await createImageBitmap(canvas);
+    canvas.width = 0;
+    return { bitmap, type: 'image/png' };
+  }
   const size = await headerSize(file, kind);
   if (size && size[0] * size[1] > MAX_PIXELS) throw tooLarge(file.name, ...size);
   let bitmap: ImageBitmap;
@@ -106,7 +182,7 @@ export async function encodeCanvas(canvas: HTMLCanvasElement, type: ImageType, q
 
 /** Whether any pixel is not fully opaque. JPEG, and PNG/WebP whose header rules out alpha, skip the pixel scan. */
 async function hasAlpha(file: File, preview?: HTMLCanvasElement): Promise<boolean> {
-  const kind = await sniff(file);
+  const kind = await imageKind(file);
   const b = new Uint8Array(await file.slice(0, 1 << 16).arrayBuffer());
   const v = new DataView(b.buffer);
   const ascii = (at: number) => String.fromCharCode(...b.subarray(at, at + 4));
@@ -116,21 +192,30 @@ async function hasAlpha(file: File, preview?: HTMLCanvasElement): Promise<boolea
       for (let i = 8; i + 8 <= b.length && ascii(i + 4) !== 'tRNS'; i += 12 + v.getUint32(i)) if (ascii(i + 4) === 'IDAT') return false;
   } else if (kind === 'webp') {
     if (ascii(12) === 'VP8 ' || (ascii(12) === 'VP8X' && !(b[20] & 0x10))) return false;
-  } else return false;
+  } else if (kind !== 'svg') return false;
 
   let canvas = preview;
   if (!canvas) {
-    const size = await headerSize(file, kind);
+    const size = kind === 'svg' ? await svgSize(file) : await headerSize(file, kind);
     if (!size || size[0] * size[1] > MAX_PIXELS) return false;
     const k = Math.min(1, 1024 / Math.max(...size));
     const [w, h] = size.map((n) => Math.max(1, Math.round(n * k)));
-    const bitmap = await createImageBitmap(file, { resizeWidth: w, resizeHeight: h, resizeQuality: 'medium' });
-    canvas = canvasOf(w, h);
-    canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
-    bitmap.close();
+    if (kind === 'svg') canvas = await rasterizeSvg(file, w, h);
+    else {
+      const bitmap = await createImageBitmap(file, { resizeWidth: w, resizeHeight: h, resizeQuality: 'medium' });
+      canvas = canvasOf(w, h);
+      canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+      bitmap.close();
+    }
   }
-  const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+  const alpha = canvasHasAlpha(canvas);
   if (!preview) canvas.width = 0;
+  return alpha;
+}
+
+/** Whether any pixel of the canvas is not fully opaque; stops at the first one. */
+export function canvasHasAlpha(canvas: HTMLCanvasElement): boolean {
+  const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
   for (let i = 3; i < data.length; i += 4) if (data[i] < 255) return true;
   return false;
 }

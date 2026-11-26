@@ -17,6 +17,14 @@
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
   --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* Full-screen app surfaces, shared by the image, PDF and files apps (audio keeps its hardware deck inside --app-bg). */
+  --app-bg: var(--bg);                                 /* page / frame background */
+  --app-bar: light-dark(#fbfbfa, #16171a);             /* top toolbars, status bars */
+  --app-side: light-dark(#f4f4f1, #141518);            /* sidebars, inspectors, explorers */
+  --app-stage: light-dark(#e9e8e4, #0c0d0f);           /* canvas / page viewer / waveform well */
+  --app-line: var(--border);                           /* dividers between panes */
+  --app-hover: light-dark(rgb(0 0 0 / 0.045), rgb(255 255 255 / 0.05));
+  --app-selected: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 :root[data-theme='light'] { color-scheme: light; }
 :root[data-theme='dark'] { color-scheme: dark; }
@@ -271,3 +279,13 @@ dialog form { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top:
 @media (max-width: 600px) {
   :root[data-embed] main, :root[data-embed] main:has(.tool-shell[data-wide]) { width: calc(100% - 1.5rem); padding: 1rem 0 2rem; }
 }
+
+/* Pane resize handle (lib/resize.ts): thin hit area on a pane edge, line on hover/focus/drag. */
+.pane-resizer { position: relative; flex: none; width: 6px; margin: 0 -3px; z-index: 5; cursor: col-resize; touch-action: none; background: transparent; }
+.pane-resizer[aria-orientation='horizontal'] { width: auto; height: 6px; margin: -3px 0; cursor: row-resize; }
+.pane-resizer::after { content: ''; position: absolute; inset: 0 2px; border-radius: 2px; background: var(--accent); opacity: 0; transition: opacity 0.12s; }
+.pane-resizer[aria-orientation='horizontal']::after { inset: 2px 0; }
+.pane-resizer:hover::after, .pane-resizer:focus-visible::after, .pane-resizing .pane-resizer:active::after { opacity: 0.7; }
+.pane-resizer:focus-visible { outline: none; }
+.pane-resizing, .pane-resizing * { cursor: col-resize !important; user-select: none !important; }
+.pane-resizing iframe { pointer-events: none; }

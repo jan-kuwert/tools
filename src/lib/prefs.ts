@@ -9,6 +9,8 @@ export interface Prefs {
   imageQuality?: number;
   editorRatio?: RatioId;
   editorSize?: SizeId;
+  /** Resizable app panes (sidebars, inspectors), CSS pixels by pane key; see lib/resize.ts. */
+  paneSizes?: Record<string, number>;
 }
 
 export const loadPrefs = (): Prefs => {

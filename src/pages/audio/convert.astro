@@ -229,13 +229,14 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
 <style is:global>
   .deck {
     --deck-w: min(100vw - 2rem, 1320px);
-    --chassis: light-dark(#e2e2dd, #18191c);
-    --face: light-dark(#ecece8, #202125);
-    --face-hi: light-dark(#f6f6f3, #26272b);
-    --edge: light-dark(#c3c3bc, #0b0c0e);
+    /* Surfaces follow the shared app tokens; keys, LEDs and the glass display keep the hardware look. */
+    --chassis: var(--app-bg);
+    --face: var(--app-side);
+    --face-hi: var(--app-bar);
+    --edge: color-mix(in srgb, var(--app-line) 82%, #000);
     --bevel: light-dark(rgb(255 255 255 / 0.85), rgb(255 255 255 / 0.06));
     --engrave: light-dark(#5a5d63, #9b9ea6);
-    --glass: light-dark(#141816, #0a0c0c);
+    --glass: light-dark(#141816, #050606);
     --phos: light-dark(#86e6b9, #74e2b2);
     --phos-dim: color-mix(in srgb, var(--phos) 52%, transparent);
     --phos-glow: color-mix(in srgb, var(--phos) 45%, transparent);
@@ -254,7 +255,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
     padding: 10px;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
     grid-template-areas: 'display display display' 'edit out cloud' 'tray tray tray';
-    background: repeating-linear-gradient(0deg, transparent 0 2px, light-dark(rgb(0 0 0 / 0.018), rgb(255 255 255 / 0.012)) 2px 3px), var(--chassis);
+    background: var(--chassis);
     border: 1px solid var(--edge);
     border-radius: 14px;
     box-shadow: var(--shadow);
@@ -473,7 +474,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   .fader-scale li[data-on] { color: var(--fg); }
   .fader-input {
     -webkit-appearance: none; appearance: none; writing-mode: vertical-lr; direction: rtl; width: 30px; height: 100%; margin: 0; padding: 0;
-    background: linear-gradient(90deg, transparent 13px, #0a0b0c 13px 17px, transparent 17px); border-radius: 3px; cursor: ns-resize;
+    background: linear-gradient(90deg, transparent 13px, light-dark(#0a0b0c, #34363b) 13px 17px, transparent 17px); border-radius: 3px; cursor: ns-resize;
   }
   .fader-input::-webkit-slider-runnable-track { background: transparent; }
   .fader-input::-webkit-slider-thumb {

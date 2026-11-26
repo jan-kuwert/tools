@@ -9,6 +9,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import qpdfWasmUrl from '@neslinesli93/qpdf-wasm/dist/qpdf.wasm?url';
 import { downloadBlob, el, formatBytes, setDial, sniff, throwIfAborted, tick, UserError, type Result } from './tool';
 import { loadPdf, parseRanges, pdfBlob, SIGNATURE_NOTE } from './pdf';
+import { resizable } from './resize';
 
 type Mode = 'organize' | 'merge' | 'split' | 'from-images' | 'compress';
 const MODES: Mode[] = ['organize', 'merge', 'split', 'from-images', 'compress'];
@@ -17,7 +18,6 @@ const MAX_TOTAL = 200 * MB;
 const MAX_ONE = 100 * MB;
 const MAX_PAGES = 500;
 const MAX_IMAGES = 100;
-const THUMB_PX = 128;
 /** CSS px per PDF point at 100 % (96 dpi screen, 72 pt per inch). */
 const PT = 96 / 72;
 const ZOOMS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
@@ -54,7 +54,8 @@ interface Page {
   thumb: HTMLLIElement;
   art: HTMLElement;
   label: HTMLElement;
-  thumbQueued: boolean;
+  /** CSS px size the thumbnail was (or is queued to be) rendered at; 0 = none. */
+  thumbPx: number;
   view: HTMLElement;
   /** Scale/rotation the view canvas was rendered for. */
   key: string;
@@ -86,6 +87,8 @@ export function initPdfApp(): void {
   const docsBox = $('[data-docs]');
   const imgList = $<HTMLOListElement>('[data-images]');
   const side = $('[data-side]');
+  const tools = $('[data-tools]');
+  const toolBtns = [...tools.querySelectorAll<HTMLButtonElement>('[data-mode]')];
   const view = $('[data-view]');
   const pagesBox = $('[data-pages]');
   const runBtn = $<HTMLButtonElement>('[data-run]');
@@ -319,7 +322,7 @@ export function initPdfApp(): void {
     const label = el('span', { className: 'pa-thumb-label' });
     const thumb = el('li', { className: 'pa-thumb', role: 'option', tabIndex: -1, draggable: true }, el('span', { className: 'pa-thumb-box' }, art), label);
     const view = el('div', { className: 'pa-page', role: 'img' });
-    const page: Page = { doc, index, w, h, base, rot: 0, deleted: false, thumb, art, label, thumbQueued: false, view, key: '' };
+    const page: Page = { doc, index, w, h, base, rot: 0, deleted: false, thumb, art, label, thumbPx: 0, view, key: '' };
     // Placeholder sheet with the page's shape until the thumbnail renders.
     const [tw, th] = base % 180 ? [h, w] : [w, h];
     paper.style.aspectRatio = `${tw} / ${th}`;
@@ -697,12 +700,14 @@ export function initPdfApp(): void {
     if (p.doc.proxy && p.key !== keyOf(p)) viewQueue.add(p);
     pump();
   }
+  /** Thumbnails follow the sidebar width; rendered in 32 px steps and only re-rendered when they need to grow. */
+  const thumbSize = () => Math.ceil(Math.max(64, side.querySelector('.pa-thumb-box')?.clientWidth || 128) / 32) * 32;
   function queueThumb(p: Page) {
-    if (p.doc.proxy && !p.thumbQueued) {
-      p.thumbQueued = true;
-      thumbQueue.push(p);
-      pump();
-    }
+    const px = thumbSize();
+    if (!p.doc.proxy || p.thumbPx >= px) return;
+    p.thumbPx = px;
+    if (!thumbQueue.includes(p)) thumbQueue.push(p);
+    pump();
   }
 
   function pump() {
@@ -744,7 +749,7 @@ export function initPdfApp(): void {
     if (!proxy || !docs.includes(p.doc)) return;
     const pg = await proxy.getPage(p.index + 1);
     const base = pg.getViewport({ scale: 1 });
-    const viewport = pg.getViewport({ scale: (THUMB_PX * Math.min(devicePixelRatio || 1, 2)) / Math.max(base.width, base.height) });
+    const viewport = pg.getViewport({ scale: (p.thumbPx * Math.min(devicePixelRatio || 1, 2)) / Math.max(base.width, base.height) });
     const canvas = el('canvas', { width: Math.ceil(viewport.width), height: Math.ceil(viewport.height) });
     canvas.setAttribute('aria-hidden', 'true');
     await pg.render({ canvas, viewport }).promise;
@@ -794,11 +799,15 @@ export function initPdfApp(): void {
     const switched = next !== mode;
     mode = next;
     root.dataset.mode = mode;
-    const radio = root.querySelector<HTMLInputElement>(`input[name="pa-mode"][value="${mode}"]`)!;
-    radio.checked = true;
-    // The switcher scrolls sideways on narrow screens.
-    radio.parentElement!.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    runLabel.textContent = radio.dataset.action!;
+    for (const b of toolBtns) {
+      const on = b.dataset.mode === mode;
+      b.setAttribute('aria-pressed', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (!on) continue;
+      runLabel.textContent = b.dataset.action!;
+      // Stacked layout: the tools strip scrolls sideways; keep the active tool in view without scrolling the page.
+      if (tools.scrollWidth > tools.clientWidth) tools.scrollLeft += b.getBoundingClientRect().left - tools.getBoundingClientRect().left - (tools.clientWidth - b.offsetWidth) / 2;
+    }
     $('[data-empty-title]').textContent = mode === 'from-images' ? 'Drop JPEG or PNG images, or choose files' : 'Drop PDFs or images, or choose files';
     if (pin) {
       const url = new URL(location.href);
@@ -1162,7 +1171,46 @@ export function initPdfApp(): void {
     void addFiles(files);
   });
 
-  for (const r of root.querySelectorAll<HTMLInputElement>('input[name="pa-mode"]')) r.addEventListener('change', () => setMode(r.value as Mode, true));
+  for (const b of toolBtns) b.addEventListener('click', () => setMode(b.dataset.mode as Mode, true));
+  // Roving focus: arrows move between tools (either axis, as the strip is horizontal when stacked), Enter/Space choose.
+  tools.addEventListener('keydown', (e) => {
+    const i = toolBtns.indexOf(document.activeElement as HTMLButtonElement);
+    const to = { ArrowUp: i - 1, ArrowLeft: i - 1, ArrowDown: i + 1, ArrowRight: i + 1, Home: 0, End: toolBtns.length - 1 }[e.key];
+    if (i < 0 || to === undefined) return;
+    e.preventDefault();
+    const b = toolBtns[(to + toolBtns.length) % toolBtns.length];
+    for (const t of toolBtns) t.tabIndex = t === b ? 0 : -1;
+    b.focus();
+  });
+
+  resizable($('[data-resize="left"]'), {
+    key: 'pdf.left',
+    min: () => 150,
+    max: () => Math.max(150, Math.min(440, root.clientWidth * 0.3)),
+    initial: 220,
+    apply: (px) => root.style.setProperty('--pa-left', `${px}px`),
+    fromPointer: (e, s) => s.size + e.clientX - s.x,
+    growKey: 'ArrowRight',
+    shrinkKey: 'ArrowLeft',
+    container: root,
+  });
+  resizable($('[data-resize="right"]'), {
+    key: 'pdf.right',
+    min: () => 240,
+    max: () => Math.max(240, Math.min(480, root.clientWidth * 0.35)),
+    initial: 300,
+    apply: (px) => root.style.setProperty('--pa-right', `${px}px`),
+    fromPointer: (e, s) => s.size - (e.clientX - s.x),
+    growKey: 'ArrowLeft',
+    shrinkKey: 'ArrowRight',
+    container: root,
+  });
+  // Bigger thumbnails after the sidebar grows: re-render the ones already seen, once resizing settles.
+  let thumbTimer = 0;
+  new ResizeObserver(() => {
+    clearTimeout(thumbTimer);
+    thumbTimer = window.setTimeout(() => thumbsSeen.forEach(queueThumb), 200);
+  }).observe(side);
   for (const b of root.querySelectorAll<HTMLButtonElement>('[data-act]')) b.addEventListener('click', () => act(b.dataset.act!));
   $('[data-zoom-in]').addEventListener('click', () => stepZoom(1));
   $('[data-zoom-out]').addEventListener('click', () => stepZoom(-1));

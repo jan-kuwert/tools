@@ -914,6 +914,8 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   async function kindOf(f: File): Promise<Kind> {
     const t = await sniff(f);
     if (t === 'jpeg' || t === 'png' || t === 'webp') return 'image';
+    // SVG has no magic bytes; the editor re-checks the content before rasterizing.
+    if (f.type === 'image/svg+xml' || /\.svg$/i.test(f.name)) return 'image';
     if (t === 'pdf' || t === 'gzip') return t;
     if (t === 'zip') return 'other';
     const b = new Uint8Array(await f.slice(0, 12).arrayBuffer());
