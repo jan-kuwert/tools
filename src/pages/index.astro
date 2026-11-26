@@ -74,7 +74,7 @@ import { categories, href, tools } from '../tools';
 </Base>
 
 <script>
-  import { el, sniff } from '../lib/tool';
+  import { el, sniff, UserError } from '../lib/tool';
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
@@ -118,8 +118,14 @@ import { categories, href, tools } from '../tools';
 
   let files: File[] = [];
   let current: View = 'home';
-  let prev: View = 'home';
   let frame: HTMLIFrameElement | undefined;
+  let editorOpen = false;
+
+  // Each view below home is a history entry, so the browser back/forward buttons step through them.
+  // Files live only in memory: entries restored without them (e.g. after reload) fall back to home.
+  type Entry = { view: Exclude<View, 'home'>; slug?: string; depth: number };
+  const entry = () => history.state as Entry | null;
+  const push = (view: Entry['view'], slug?: string) => history.pushState({ view, slug, depth: (entry()?.depth ?? 0) + 1 } satisfies Entry, '');
 
   const AUDIO_EXT = /\.(m4a|aac|mp3|wav|ogg|oga|opus|flac|weba)$/i;
   // ISO-BMFF brands that carry audio; excludes HEIC/AVIF (also "ftyp").
@@ -153,12 +159,19 @@ import { categories, href, tools } from '../tools';
     editor.hidden = view !== 'editor';
     // The editor has its own close control.
     back.hidden = view === 'editor';
-    restart.hidden = !(view === 'tool' && prev !== 'home');
+    restart.hidden = !(view === 'tool' && (entry()?.depth ?? 0) > 1);
     stage.hidden = view === 'home' || (view === 'editor' && cloudAlt.hidden);
   }
 
+  /** Leave to home by unwinding our history entries, so Back doesn't return into a cleared view. */
   function goHome() {
     files = [];
+    const depth = entry()?.depth ?? 0;
+    if (depth > 0) history.go(-depth);
+    else showHome();
+  }
+
+  function showHome() {
     show('home');
     input.focus();
   }
@@ -169,13 +182,19 @@ import { categories, href, tools } from '../tools';
     const list = $('[data-choices]');
     slugs.forEach((s) => list.append(list.querySelector(`[data-choice="${s}"]`)!));
     $('[data-file-summary]').textContent = files.length === 1 ? files[0].name : `${files.length} files`;
+    push('choose');
+    showChooser();
+  }
+
+  function showChooser() {
     show('choose');
     $('[data-chooser-title]').focus();
   }
 
-  function openTool(slug: string) {
+  function openTool(slug: string, record = true) {
     const pick = $(`[data-pick="${slug}"][data-url]`);
-    prev = current === 'tool' ? prev : current;
+    if (record) push('tool', slug);
+    frame?.remove();
     frame = el('iframe', { src: `${pick.dataset.url}?embed`, title: pick.dataset.title!, className: 'tool-frame' });
     const f = frame;
     f.addEventListener('load', () => onFrameLoad(f));
@@ -210,13 +229,15 @@ import { categories, href, tools } from '../tools';
   }
 
   async function openEditor() {
+    push('editor');
     show('editor');
     try {
-      (await import('../lib/editor')).openImageEditor(files);
+      await (await import('../lib/editor')).openImageEditor(files);
+      editorOpen = true;
     } catch (err) {
       console.error(err);
       goHome();
-      status.textContent = 'The image editor could not be loaded. Please reload the page.';
+      status.textContent = err instanceof UserError ? err.message : 'The image editor could not be loaded. Please reload the page.';
     }
   }
 
@@ -231,7 +252,6 @@ import { categories, href, tools } from '../tools';
       return;
     }
     files = list;
-    prev = 'home';
     const kind = kinds.every((k) => k === kinds[0]) ? kinds[0] : 'other';
     const single = list.length === 1;
     if (kind === 'image') return openEditor();
@@ -276,18 +296,30 @@ import { categories, href, tools } from '../tools';
     const pick = (e.target as Element).closest<HTMLElement>('[data-pick]');
     if (pick) openTool(pick.dataset.pick!);
   });
-  back.addEventListener('click', () => {
-    if (current === 'tool' && prev !== 'home') {
-      show(prev);
-      if (prev === 'choose') $('[data-chooser-title]').focus();
-    } else goHome();
-  });
+  back.addEventListener('click', () => history.back());
   restart.addEventListener('click', goHome);
-  editor.addEventListener('editor:close', goHome);
-  // Header category links point at #anchors on this page.
-  addEventListener('hashchange', () => {
-    if (current === 'home') return;
+  editor.addEventListener('editor:close', () => {
+    editorOpen = false;
     goHome();
-    document.getElementById(location.hash.slice(1))?.scrollIntoView();
   });
+  addEventListener('popstate', () => {
+    const e = entry();
+    if (!e) {
+      // Home, or a header #category link (fragment navigation also lands here).
+      if (location.hash) {
+        show('home');
+        document.getElementById(location.hash.slice(1))?.scrollIntoView();
+      } else showHome();
+      return;
+    }
+    if (!files.length || (e.view === 'editor' && !editorOpen)) {
+      history.replaceState(null, '');
+      return showHome();
+    }
+    if (e.view === 'choose') showChooser();
+    else if (e.view === 'tool') openTool(e.slug!, false);
+    else show('editor');
+  });
+  // A reload keeps history.state but not the in-memory files.
+  if (entry()) history.replaceState(null, '');
 </script>

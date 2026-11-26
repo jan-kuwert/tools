@@ -77,6 +77,7 @@ function bind(root: HTMLElement) {
     qualityOut: q('[data-quality-out]'),
     jpegWarn: q('[data-jpeg-warn]'),
     problem: q('[data-problem]'),
+    upscaleWarn: q('[data-upscale-warn]'),
     dims: q('[data-dims]'),
     estimate: q('[data-estimate]'),
     download: q<HTMLButtonElement>('[data-download]'),
@@ -350,6 +351,10 @@ function readouts() {
   zoom.value = String(it.zoom);
   zoom.setAttribute('aria-valuetext', `${Math.round(g.s * 100)}% of original pixels`);
   const pct = `${Math.round(g.s * 100)}%`;
+  // Enlarging invents pixels; tolerate rounding noise just above 100%.
+  const upscaled = !err && g.s > 1.01;
+  ui.upscaleWarn.hidden = !upscaled;
+  if (upscaled) ui.upscaleWarn.textContent = `Enlarged to ${pct} of the original pixels, so the result may look soft or blurry. Use a larger image or a smaller output size for a sharp result.`;
   if (err) ui.crop.textContent = '';
   else if (g.original) ui.crop.textContent = `${W} × ${H} → ${FW} × ${FH} px`;
   else {
