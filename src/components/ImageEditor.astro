@@ -1,5 +1,6 @@
 ---
 // Image editor markup. Behaviour: openImageEditor() in src/lib/editor.ts. Include at most once per page.
+import Icon from './Icon.astro';
 import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
 ---
 <section class="image-editor" data-image-editor hidden tabindex="-1" aria-labelledby="ie-title">
@@ -7,7 +8,7 @@ import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
     <h2 id="ie-title">Image editor</h2>
     <span class="ie-name" data-name></span>
     <label class="btn ie-add">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      <Icon name="plus" />
       Add images
       <input class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple data-add />
     </label>
@@ -18,13 +19,13 @@ import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
     <div class="ie-main">
       <div class="ie-toolbar">
         <button class="icon-btn" type="button" data-rotate-left aria-label="Rotate left" title="Rotate left">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v5h5" /><path d="M4.6 9A8 8 0 1 1 6 17.7" /></svg>
+          <Icon name="undo" />
         </button>
         <button class="icon-btn" type="button" data-rotate-right aria-label="Rotate right" title="Rotate right">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4v5h-5" /><path d="M19.4 9A8 8 0 1 0 18 17.7" /></svg>
+          <Icon name="redo" />
         </button>
         <button class="icon-btn" type="button" data-flip aria-label="Flip horizontally" title="Flip horizontally">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18" /><path d="M8 7 3 12l5 5V7zM16 7l5 5-5 5V7z" /></svg>
+          <Icon name="flip" />
         </button>
         <div class="ie-zoom" data-zoom-controls>
           <button class="icon-btn" type="button" data-zoom-out aria-label="Zoom out" title="Zoom out">−</button>
@@ -134,7 +135,7 @@ import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
     scroll-margin-top: 72px; /* below the sticky site header */
   }
   .image-editor:focus { outline: none; }
-  .image-editor svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
+  .image-editor .icon svg { width: 18px; height: 18px; }
   .ie-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.6rem 0.55rem 1rem; border-bottom: 1px solid var(--border); }
   .ie-head h2 { margin: 0; font-size: 1rem; white-space: nowrap; }
   .ie-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.88rem; }

@@ -1,107 +1,129 @@
 ---
 import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
 import ImageEditor from '../components/ImageEditor.astro';
 import ModeBadge from '../components/ModeBadge.astro';
-import { categories, href, tools, type Category } from '../tools';
+import { categories, href, tools, type Category, type Tool } from '../tools';
 
 type Dir = 'n' | 'e' | 's' | 'w';
-// The hub: each category sits one screen away from the centre in a fixed direction.
-const placement: Record<Category, Dir> = { files: 'n', pdf: 'e', images: 's', audio: 'w' };
-const opposite: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' };
-
-// Stroke paths (24×24).
-const glyphs: Record<Category | 'code', string[]> = {
-  images: ['M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z', 'm4 16 5-5 4 4 2-2 5 5', 'M14 9.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0'],
-  pdf: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5', 'M9 13h6M9 17h4'],
-  audio: ['M9 18V5l11-2v13', 'M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0', 'M14 16a3 3 0 1 0 6 0 3 3 0 1 0-6 0'],
-  files: ['M3 4h18v4H3z', 'M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8', 'M10 12h4'],
-  code: ['m8 8-4 4 4 4', 'm16 8 4 4-4 4', 'm13.5 5-3 14'],
+type Screen = Category | 'centre';
+// Navigation graph: from any screen, the edges lead to all other screens one move away, never to an empty one.
+const graph: Record<Screen, Partial<Record<Dir, Screen>>> = {
+  centre: { n: 'files', e: 'pdf', s: 'images', w: 'audio' },
+  audio: { n: 'files', e: 'centre', s: 'images' },
+  pdf: { n: 'files', s: 'images', w: 'centre' },
+  images: { n: 'centre', e: 'pdf', w: 'audio' },
+  files: { e: 'pdf', s: 'centre', w: 'audio' },
 };
-const dropTypes: [keyof typeof glyphs, string][] = [['images', 'Images'], ['pdf', 'PDF'], ['audio', 'Audio'], ['code', 'JSON & JS'], ['files', 'Archives']];
+const screens: Screen[] = ['centre', ...categories.map((c) => c.id)];
+
+const dropTypes: [Category | 'code', string][] = [['images', 'Images'], ['pdf', 'PDF'], ['audio', 'Audio'], ['code', 'JSON & JS'], ['files', 'Archives']];
 const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
-const labelOf = (c: Category) => categories.find((x) => x.id === c)!.label;
-// Pointing down; .ha-* rotates it toward its edge.
-const ARROW = 'M12 5v14M6 13l6 6 6-6';
+const labelOf = (s: Screen) => (s === 'centre' ? 'Start' : categories.find((x) => x.id === s)!.label);
+const iconOf = (s: Screen) => (s === 'centre' ? 'home' : s);
+const toolIcon = (t: Tool) => (t.slug.startsWith('text/') ? 'code' : t.category);
+const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left' } as const;
 ---
 <Base title="Tools · fast, private file tools" wide>
 <div class="home" data-at="centre">
-  <div class="hub" data-home data-hub tabindex="0" role="region" aria-label="Tools. Arrow keys move between Images, PDF, Audio and Files & text; Escape returns to the start.">
-    <section class="hub-cell hub-centre" data-panel="centre" aria-label="Start">
-      <div class="cell-scroll">
-        <div class="cell-inner centre-inner">
-          <h1>Quick file tools that respect your files.</h1>
-          <p class="lede">Almost everything runs right here in your browser. Your files never leave your device.</p>
-          <label class="drop hero-drop" data-hero-drop>
-            <input type="file" multiple data-hero-input />
-            <span class="drop-types" aria-hidden="true">
-              {dropTypes.map(([g, label]) => (
-                <span class="drop-type"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[g].map((d) => <path d={d} />)}</svg>{label}</span>
-              ))}
-            </span>
-            <span class="drop-title">Drop any file to start</span>
-            <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
-            <span class="drop-hint">Or paste from the clipboard. We pick the right tool for you.</span>
-          </label>
-          <p class="status" data-drop-status role="status" aria-live="polite"></p>
-          <div class="hub-search">
-            <label class="visually-hidden" for="search">Search tools</label>
-            <input id="search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" aria-controls="search-results" data-search />
-            <ul class="search-results" id="search-results" data-search-results hidden>
-              {tools.map((t) => (
-                <li data-keywords={`${t.title} ${t.summary} ${labelOf(t.category)} ${t.slug}`.toLowerCase()} hidden>
-                  <a href={href(t.slug)}>
-                    <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[t.category].map((d) => <path d={d} />)}</svg></span>
-                    <span class="sr-text"><strong>{t.title}</strong><small>{labelOf(t.category)}</small></span>
-                    <ModeBadge mode={t.mode} />
-                  </a>
-                </li>
-              ))}
-              <li class="muted sr-empty" data-empty hidden>No tool matches that search.</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      {categories.map((c) => (
-        <a class={`hub-arrow ha-${placement[c.id]}`} href={`#${c.id}`} data-go={c.id}>
-          <svg class="ico ha-ico" viewBox="0 0 24 24" aria-hidden="true"><path d={ARROW} /></svg>
-          <span>{c.label}</span>
-          <span class="ha-meta">{toolsIn(c.id).length === 1 ? '1 tool' : `${toolsIn(c.id).length} tools`}</span>
-        </a>
-      ))}
-    </section>
-
-    {categories.map((c) => (
-      <section class="hub-cell hub-panel" data-panel={c.id} data-dir={placement[c.id]} aria-labelledby={`hub-${c.id}`}>
+  <div class="hub" data-home data-hub tabindex="0" role="region" aria-label="Tools. Arrow keys move between screens; Escape returns to the start.">
+    {screens.map((id) => (
+      <section
+        class={`screen ${id === 'centre' ? 'screen-centre' : 'screen-panel'}`}
+        data-screen={id}
+        {...Object.fromEntries(Object.entries(graph[id]).map(([d, to]) => [`data-${d}`, to]))}
+        aria-label={id === 'centre' ? 'Start' : undefined}
+        aria-labelledby={id === 'centre' ? undefined : `hub-${id}`}
+      >
         <div class="cell-scroll">
-          <div class="cell-inner" style={`--cols: ${Math.min(toolsIn(c.id).length, 4)}`}>
-            <div class="panel-head">
-              <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg></span>
-              <h2 id={`hub-${c.id}`} tabindex="-1">{c.label}</h2>
+          {id === 'centre' ? (
+            <div class="cell-inner centre-inner">
+              <h1>Quick file tools that respect your privacy.</h1>
+              <p class="lede">Almost everything runs right here in your browser. Your files never leave your device.</p>
+              <label class="drop hero-drop" data-hero-drop>
+                <input type="file" multiple data-hero-input />
+                <span class="drop-types" aria-hidden="true">
+                  {dropTypes.map(([g, label]) => (
+                    <span class="drop-type"><Icon name={g} />{label}</span>
+                  ))}
+                </span>
+                <span class="drop-title">Drop any file to start</span>
+                <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
+                <span class="drop-hint">Or paste from the clipboard. We pick the right tool for you.</span>
+              </label>
+              <p class="status" data-drop-status role="status" aria-live="polite"></p>
+              <button class="btn all-tools" type="button" data-all-tools aria-haspopup="dialog">
+                <Icon name="grid" />Show all tools
+              </button>
             </div>
-            <p class="panel-blurb">{c.blurb}</p>
-            <ul class="tool-grid">
-              {toolsIn(c.id).map((t) => (
-                <li>
-                  <a class="tool-card" href={href(t.slug)}>
-                    <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg></span>
-                    <h3>{t.title}</h3>
-                    <p>{t.summary}</p>
-                    <span class="card-mode"><ModeBadge mode={t.mode} /></span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-            <p class="panel-hint">Drop files anywhere on this page and we pick the right tool.</p>
-          </div>
+          ) : (
+            <div class="cell-inner" style={`--cols: ${Math.min(toolsIn(id).length, 4)}`}>
+              <div class="panel-head">
+                <span class="tile"><Icon name={id} /></span>
+                <h2 id={`hub-${id}`} tabindex="-1">{labelOf(id)}</h2>
+              </div>
+              <p class="panel-blurb">{categories.find((c) => c.id === id)!.blurb}</p>
+              <ul class="tool-grid">
+                {toolsIn(id).map((t) => (
+                  <li>
+                    <a class="tool-card" href={href(t.slug)}>
+                      <span class="tile"><Icon name={toolIcon(t)} /></span>
+                      <h3>{t.title}</h3>
+                      <p>{t.summary}</p>
+                      <span class="card-mode"><ModeBadge mode={t.mode} /></span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <p class="panel-hint">Drop files anywhere on this page and we pick the right tool.</p>
+            </div>
+          )}
         </div>
-        <a class={`hub-arrow ha-${opposite[placement[c.id]]}`} href={href()} data-go="centre">
-          <svg class="ico ha-ico" viewBox="0 0 24 24" aria-hidden="true"><path d={ARROW} /></svg>
-          <span>Start</span>
-        </a>
+        {(Object.entries(graph[id]) as [Dir, Screen][]).map(([dir, to]) => (
+          <a class={`edge ea-${dir}`} href={to === 'centre' ? href() : `#${to}`} data-go={to} data-dir={dir} aria-label={`Go to ${labelOf(to)}`} data-tip={labelOf(to)}>
+            <span class="edge-circle"><Icon name={iconOf(to)} /></span>
+            <span class="edge-chev"><Icon name={ARROW[dir]} /></span>
+          </a>
+        ))}
       </section>
     ))}
   </div>
   <div class="hub-veil" aria-hidden="true"><span>Drop to start</span></div>
+
+  <dialog class="picker" data-picker aria-labelledby="picker-title">
+    <div class="picker-head">
+      <h2 id="picker-title">All tools</h2>
+      <button class="icon-btn" type="button" data-picker-close aria-label="Close"><Icon name="xmark" /></button>
+    </div>
+    <div class="picker-search">
+      <label class="visually-hidden" for="picker-search">Search tools</label>
+      <Icon name="search" class="picker-search-icon" />
+      <input id="picker-search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" autofocus aria-controls="picker-list" data-picker-search />
+    </div>
+    <div class="picker-list" id="picker-list" data-picker-list>
+      {categories.map((c) => (
+        <section data-picker-group>
+          <h3><Icon name={c.id} />{c.label}</h3>
+          <ul>
+            {toolsIn(c.id).map((t) => (
+              <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
+                <a href={href(t.slug)}>
+                  <span class="tile"><Icon name={toolIcon(t)} /></span>
+                  <span class="pk-text"><strong>{t.title}</strong><small>{t.summary}</small></span>
+                  <ModeBadge mode={t.mode} />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      <p class="muted pk-empty" data-picker-empty hidden>No tool matches that search.</p>
+    </div>
+    <dl class="picker-legend">
+      <div><dt><Icon name="device" />On your device</dt><dd>Runs in your browser. Your files never leave your device.</dd></div>
+      <div><dt><Icon name="cloud" />Cloud · EU</dt><dd>Uploaded to our server in Belgium only after you confirm. Nothing is stored.</dd></div>
+    </dl>
+  </dialog>
 
   <div class="home-inner home-work">
     <section class="stage" data-stage hidden aria-label="Your files">
@@ -116,7 +138,7 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
           {tools.map((t) => (
             <li data-choice={t.slug} hidden>
               <button class="tool-card choice-card" type="button" data-pick={t.slug} data-url={href(t.slug)} data-title={t.title}>
-                <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[t.category].map((d) => <path d={d} />)}</svg></span>
+                <span class="tile"><Icon name={toolIcon(t)} /></span>
                 <h3>{t.title}</h3>
                 <p>{t.summary}</p>
                 <span class="card-mode"><ModeBadge mode={t.mode} /></span>
@@ -137,40 +159,30 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
 </Base>
 
 <style is:global>
-  /* Home only. Neutral surfaces; --accent only on the primary button, focus and drop hover. */
+  /* Home only. Neutral surfaces; --accent only on the primary button, focus, drop hover and arrow chevrons. */
   main.wide { width: 100%; padding: 0; }
-  /* Line the header and footer up with the full-width content. */
-  body:has(main.wide) :is(.site-header, .site-footer) .inner { width: min(100% - 2 * clamp(1rem, 4vw, 3rem), 1600px); }
   .home { --gutter: clamp(1rem, 4vw, 3rem); position: relative; }
   .home-inner { width: min(100% - 2 * var(--gutter), 1600px); margin-inline: auto; }
-  .home .ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   .home .tile {
     display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 12px; flex: none;
     color: var(--muted); background: var(--surface-2);
   }
 
-  /* Hub: 3×3 snap grid, one cell per screen. Corners are empty and have no snap points. */
+  /* Hub: screens stacked in one stage; JS slides them in and out (transform/opacity only). */
   .hub {
-    position: relative; display: grid;
-    grid-template-columns: repeat(3, 100%); grid-template-rows: repeat(3, 100%);
-    height: calc(100dvh - 57px); /* sticky header: 56px + border */
-    overflow: auto; scroll-snap-type: both mandatory; overscroll-behavior-x: contain;
-    scrollbar-width: none; background: var(--surface-2);
+    position: relative; isolation: isolate; overflow: hidden; touch-action: none;
+    height: 100dvh; /* site chrome floats in the corners (Base.astro, wide) */
   }
-  .hub::-webkit-scrollbar { display: none; }
-  .hub.moving { scroll-snap-type: none; }
+  .hub.dragging { user-select: none; }
   .hub:focus-visible { outline-offset: -4px; }
   /* The global rule shows every .mode tooltip inside a focused ancestor; the hub itself is focusable. */
   .hub:focus-visible .mode::after { opacity: 0; transform: translateY(-3px); }
   .hub:focus-visible .mode:hover::after { opacity: 1; transform: none; }
-  .hub-cell { position: relative; min-width: 0; min-height: 0; background: var(--bg); scroll-snap-align: center; scroll-snap-stop: always; }
-  .hub-centre { grid-area: 2 / 2; scroll-initial-target: nearest; }
-  .hub-panel[data-dir='n'] { grid-area: 1 / 2; }
-  .hub-panel[data-dir='e'] { grid-area: 2 / 3; }
-  .hub-panel[data-dir='s'] { grid-area: 3 / 2; }
-  .hub-panel[data-dir='w'] { grid-area: 2 / 1; }
-  /* Faint edge washes hint that there is more in every direction. */
-  .hub-centre::before {
+  .screen { position: absolute; inset: 0; background: var(--bg); visibility: hidden; }
+  .screen[data-active], .screen.leaving, .screen.peek { visibility: visible; }
+  .screen[data-active] { z-index: 1; }
+  /* Faint edge washes on the start screen hint that there is more in every direction. */
+  .screen-centre::before {
     --edge: color-mix(in srgb, var(--accent) 7%, transparent);
     content: ''; position: absolute; inset: 0; pointer-events: none;
     background:
@@ -178,41 +190,62 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
       linear-gradient(to right, var(--edge), transparent 5rem), linear-gradient(to left, var(--edge), transparent 5rem);
   }
   .cell-scroll {
-    position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column;
-    padding: 4.25rem 3.75rem; scrollbar-width: thin;
+    position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: none;
+    display: flex; flex-direction: column; padding: 5.25rem 5.5rem; scrollbar-width: thin;
   }
+  /* Tall content (small screens) scrolls natively; horizontal swipes still reach the hub. */
+  .scrolls > .cell-scroll { touch-action: pan-y; }
   /* Auto margins centre short content but keep tall content scrollable from its top. */
-  .cell-inner {
-    margin: auto; width: min(100%, 1120px);
-    opacity: 0.4; transform: scale(0.985); transition: opacity 0.22s ease-out, transform 0.22s ease-out;
-  }
-  [data-active] > .cell-scroll > .cell-inner { opacity: 1; transform: none; }
-  @media (max-width: 600px) { .cell-scroll { padding: 3.75rem 3rem; } }
+  .cell-inner { margin: auto; width: min(100%, 1120px); }
+  @media (max-width: 600px) { .cell-scroll { padding: 4.75rem 3.5rem; } }
 
-  /* Edge arrows. Positioning uses `translate`; hover/press feedback uses `transform`/`scale`. */
-  .hub-arrow {
-    position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 0.45rem;
-    padding: 0.45rem 0.95rem 0.45rem 0.65rem; border-radius: 999px; border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(8px);
-    color: var(--fg); font-size: 0.9rem; font-weight: 600; text-decoration: none; white-space: nowrap;
-    box-shadow: var(--shadow); transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s;
+  /* Edge arrows: big destination icon in a round button, small accent chevron toward the edge. */
+  .edge { position: absolute; z-index: 2; display: grid; place-items: center; color: var(--fg); text-decoration: none; }
+  .edge-circle {
+    display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%;
+    border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 90%, transparent);
+    backdrop-filter: blur(8px); box-shadow: var(--shadow); color: var(--muted);
+    transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s, color 0.1s;
   }
-  .hub-arrow:hover { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
-  .hub-arrow:active { scale: 0.96; }
-  .ha-meta { color: var(--muted); font-weight: 500; font-size: 0.82rem; }
-  .ha-ico { width: 18px; height: 18px; color: var(--accent); }
-  .ha-n { top: 0.75rem; left: 50%; translate: -50% 0; }
-  .ha-s { bottom: 0.75rem; left: 50%; translate: -50% 0; }
-  .ha-e, .ha-w { top: 50%; translate: 0 -50%; writing-mode: vertical-rl; padding: 0.95rem 0.45rem 0.65rem; }
-  .ha-e { right: 0.5rem; }
-  .ha-w { left: 0.5rem; rotate: 180deg; }
-  .ha-n .ha-ico { rotate: 180deg; }
-  .ha-e .ha-ico, .ha-w .ha-ico { rotate: -90deg; }
-  .ha-n:hover { transform: translateY(-2px); }
-  .ha-s:hover { transform: translateY(2px); }
-  .ha-e:hover, .ha-w:hover { transform: translateX(2px); }
+  .edge-circle .icon svg { width: 26px; height: 26px; }
+  .edge-chev {
+    position: absolute; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-fg);
+  }
+  .home .edge-chev svg { width: 14px; height: 14px; stroke-width: 2.4; }
+  .edge:hover .edge-circle, .edge:focus-visible .edge-circle { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
+  .edge:active .edge-circle { scale: 0.94; }
+  .edge:focus-visible { outline: none; }
+  .edge:focus-visible .edge-circle { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .ea-n { top: 1.4rem; left: 50%; translate: -50% 0; }
+  .ea-s { bottom: 1.4rem; left: 50%; translate: -50% 0; }
+  .ea-e { right: 1.4rem; top: 50%; translate: 0 -50%; }
+  .ea-w { left: 1.4rem; top: 50%; translate: 0 -50%; }
+  .ea-n .edge-chev { top: -8px; }
+  .ea-s .edge-chev { bottom: -8px; }
+  .ea-e .edge-chev { right: -8px; }
+  .ea-w .edge-chev { left: -8px; }
+  .ea-n:hover .edge-circle { transform: translateY(-2px); }
+  .ea-s:hover .edge-circle { transform: translateY(2px); }
+  .ea-e:hover .edge-circle { transform: translateX(2px); }
+  .ea-w:hover .edge-circle { transform: translateX(-2px); }
+  .edge::after {
+    content: attr(data-tip); position: absolute; z-index: 3; width: max-content; padding: 0.35rem 0.6rem; border-radius: 8px;
+    background: var(--fg); color: var(--bg); font-size: 0.8rem; font-weight: 600; pointer-events: none;
+    opacity: 0; transition: opacity 0.1s;
+  }
+  .edge:hover::after, .edge:focus-visible::after { opacity: 1; }
+  .ea-n::after { top: calc(100% + 8px); }
+  .ea-s::after { bottom: calc(100% + 8px); }
+  .ea-e::after { right: calc(100% + 12px); }
+  .ea-w::after { left: calc(100% + 12px); }
+  @media (max-width: 600px) {
+    .edge-circle { width: 44px; height: 44px; }
+    .edge-circle .icon svg { width: 22px; height: 22px; }
+    .ea-n { top: 1rem; } .ea-s { bottom: 1rem; } .ea-e { right: 0.6rem; } .ea-w { left: 0.6rem; }
+  }
 
-  /* Centre */
+  /* Start screen */
   .centre-inner { width: min(100%, 46rem); text-align: center; }
   .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.7rem); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 0.6rem; }
   .lede { color: var(--muted); margin: 0 auto 1.5rem; max-width: 40ch; }
@@ -234,28 +267,10 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
     display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem 0.25rem 0.45rem;
     border-radius: 999px; font-size: 0.82rem; font-weight: 600; color: var(--fg); border: 1px solid var(--border);
   }
-  .drop-type .ico { color: var(--muted); width: 16px; height: 16px; }
+  .home .drop-type .icon svg { color: var(--muted); width: 16px; height: 16px; }
   .centre-inner .status { min-height: 0; margin: 0.5rem 0 0; }
-  .hub-search { position: relative; margin: 1rem auto 0; max-width: 30rem; text-align: left; }
-  .home .search {
-    width: 100%; margin: 0; border-radius: 999px; padding: 0.6rem 1rem 0.6rem 2.6rem; font-size: 0.98rem;
-    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8f98' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 0.9rem center / 18px;
-  }
-  .search-results {
-    position: absolute; z-index: 3; left: 0; right: 0; top: calc(100% + 0.4rem);
-    list-style: none; margin: 0; padding: 0.35rem; max-height: min(45vh, 22rem); overflow-y: auto;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 16px 40px -16px rgb(0 0 0 / 0.3);
-  }
-  .search-results a {
-    display: flex; align-items: center; gap: 0.7rem; padding: 0.45rem 0.6rem; border-radius: 10px;
-    color: var(--fg); text-decoration: none; transition: background 0.1s;
-  }
-  .search-results a:hover, .search-results a:focus-visible { background: var(--surface-2); }
-  .search-results .tile { width: 2rem; height: 2rem; border-radius: 9px; }
-  .search-results .ico { width: 17px; height: 17px; }
-  .sr-text { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
-  .sr-text small { color: var(--muted); }
-  .sr-empty { padding: 0.5rem 0.6rem; }
+  .all-tools { margin-top: 1rem; border-radius: 999px; transition: transform 0.1s ease-out, border-color 0.1s; }
+  .home .all-tools .icon svg { width: 18px; height: 18px; color: var(--muted); }
 
   /* Category panels */
   .panel-head { display: flex; align-items: center; gap: 0.75rem; }
@@ -265,7 +280,7 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
   .panel-hint { color: var(--muted); font-size: 0.88rem; margin: 1.25rem 0 0; text-align: center; }
   .home .tool-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.9rem; }
   /* Size panels to their card count so short categories don't sit in an empty half-screen. */
-  .hub-panel .cell-inner { width: min(100%, max(26rem, var(--cols) * 16rem + (var(--cols) - 1) * 0.9rem)); }
+  .screen-panel .cell-inner { width: min(100%, max(26rem, var(--cols) * 16rem + (var(--cols) - 1) * 0.9rem)); }
   .home .tool-card {
     display: grid; grid-template-columns: auto 1fr; grid-template-areas: 'tile mode' 'title title' 'text text';
     align-content: start; gap: 0.6rem 0.5rem; border-radius: 16px; padding: 1rem 1.1rem 1.15rem;
@@ -282,9 +297,48 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
     .home .tool-card h3 { margin: 0; font-size: 0.98rem; }
   }
 
-  /* Shown while dragging files over a category panel (the centre has its own drop zone). */
+  /* All-tools dialog */
+  dialog.picker {
+    width: min(94vw, 40rem); max-width: none; max-height: min(86dvh, 46rem); padding: 0; overflow: hidden;
+  }
+  dialog.picker[open] { display: flex; flex-direction: column; animation: picker-in 0.16s ease-out; }
+  @keyframes picker-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
+  .picker-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1rem 0 1.25rem; }
+  .picker-head h2 { margin: 0; }
+  .picker-search { position: relative; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+  .picker-search-icon { position: absolute; left: 1.85rem; top: 50%; translate: 0 -50%; color: var(--muted); pointer-events: none; }
+  .home .picker-search-icon svg { width: 18px; height: 18px; }
+  .home .search { width: 100%; margin: 0; border-radius: 999px; padding: 0.6rem 1rem 0.6rem 2.6rem; font-size: 1rem; background: var(--surface); }
+  .picker-list { overflow-y: auto; overscroll-behavior: contain; padding: 0.25rem 0.6rem 1rem; }
+  .picker-list h3 {
+    display: flex; align-items: center; gap: 0.45rem; margin: 0.9rem 0.6rem 0.35rem;
+    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+  }
+  .home .picker-list h3 .icon svg { width: 16px; height: 16px; }
+  .picker-list ul { list-style: none; margin: 0; padding: 0; }
+  .picker-list a {
+    display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.6rem; border-radius: 12px;
+    color: var(--fg); text-decoration: none; transition: background 0.1s;
+  }
+  .picker-list a:hover, .picker-list a:focus-visible { background: var(--surface-2); }
+  .picker-list a:focus-visible { outline-offset: -2px; }
+  .picker-list .tile { width: 2.25rem; height: 2.25rem; border-radius: 10px; }
+  .pk-text { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
+  .pk-text small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pk-empty { padding: 1rem 0.6rem; margin: 0; }
+  /* Arrow-key focus moves through rows; their mode tooltips would cover the next row. */
+  .picker :focus-visible .mode::after { opacity: 0; transform: translateY(-3px); }
+  .picker .mode:hover::after { opacity: 1; transform: none; }
+  .picker-legend { display: grid; gap: 0.4rem; margin: 0; padding: 0.75rem 1.25rem 0.9rem; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); }
+  .picker-legend div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0.5rem; }
+  .picker-legend dt { display: flex; align-items: center; gap: 0.35rem; font-weight: 600; color: var(--fg); }
+  .home .picker-legend .icon svg { width: 16px; height: 16px; color: var(--muted); }
+  .picker-legend dd { margin: 0; }
+  @media (max-width: 520px) { .picker-legend div { grid-template-columns: 1fr; gap: 0.1rem; } }
+
+  /* Shown while dragging files over a category panel (the start screen has its own drop zone). */
   .hub-veil {
-    position: absolute; inset: 0.75rem; height: calc(100dvh - 57px - 1.5rem); z-index: 4; pointer-events: none;
+    position: absolute; inset: 0.75rem; height: calc(100dvh - 1.5rem); z-index: 4; pointer-events: none;
     display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 24px;
     background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(4px);
     font-size: 1.4rem; font-weight: 650; opacity: 0; transition: opacity 0.12s;
@@ -309,128 +363,138 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
-  // Search: matches open as a list under the field on the centre screen.
-  const search = $<HTMLInputElement>('[data-search]');
-  const results = $('[data-search-results]');
-  const empty = $('[data-empty]');
-  search.addEventListener('input', () => {
-    const terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
-    let shown = 0;
-    for (const li of results.querySelectorAll<HTMLElement>('li[data-keywords]')) {
-      const match = terms.length > 0 && terms.every((t) => li.dataset.keywords!.includes(t));
-      li.hidden = !match;
-      if (match) shown++;
-    }
-    results.hidden = terms.length === 0;
-    empty.hidden = shown > 0;
+  // All-tools dialog: live filter, ↑/↓ moves through results, Enter opens, Escape closes (native).
+  const picker = $<HTMLDialogElement>('[data-picker]');
+  const pickSearch = $<HTMLInputElement>('[data-picker-search]');
+  const pickRows = [...picker.querySelectorAll<HTMLElement>('li[data-keywords]')];
+  const pickGroups = [...picker.querySelectorAll<HTMLElement>('[data-picker-group]')];
+  const pickEmpty = $('[data-picker-empty]');
+  const visiblePicks = () => [...picker.querySelectorAll<HTMLAnchorElement>('li[data-keywords]:not([hidden]) a')];
+
+  function filterPicks() {
+    const terms = pickSearch.value.toLowerCase().split(/\s+/).filter(Boolean);
+    for (const li of pickRows) li.hidden = !terms.every((t) => li.dataset.keywords!.includes(t));
+    for (const g of pickGroups) g.hidden = !g.querySelector('li:not([hidden])');
+    pickEmpty.hidden = pickRows.some((li) => !li.hidden);
+  }
+  pickSearch.addEventListener('input', filterPicks);
+  $('[data-all-tools]').addEventListener('click', () => {
+    pickSearch.value = '';
+    filterPicks();
+    picker.showModal();
   });
-  search.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') results.querySelector<HTMLAnchorElement>('li[data-keywords]:not([hidden]) a')?.click();
+  $('[data-picker-close]').addEventListener('click', () => picker.close());
+  // The dialog has no padding, so a click on the element itself is a click on the backdrop.
+  picker.addEventListener('click', (e) => {
+    if (e.target === picker) picker.close();
+  });
+  picker.addEventListener('keydown', (e) => {
+    const links = visiblePicks();
+    const i = links.indexOf(document.activeElement as HTMLAnchorElement);
+    if (e.key === 'Enter' && e.target === pickSearch) {
+      e.preventDefault();
+      links[0]?.click();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = e.key === 'ArrowDown' ? Math.min(i + 1, links.length - 1) : i - 1;
+      (next < 0 ? pickSearch : links[next])?.focus();
+    }
   });
 
-  // Hub navigation. Native scroll snap does wheel/touch/drag; JS only handles buttons, keys and the URL hash.
+  // Hub: one full-size stage; screens slide in from the edge in the direction of travel.
   type Dir = 'n' | 'e' | 's' | 'w';
   const home = $('.home');
   const hub = $('[data-hub]');
-  const cells = new Map([...hub.querySelectorAll<HTMLElement>('[data-panel]')].map((c) => [c.dataset.panel!, c]));
+  const screens = new Map([...hub.querySelectorAll<HTMLElement>('[data-screen]')].map((s) => [s.dataset.screen!, s]));
+  const DIRS: Dir[] = ['n', 'e', 's', 'w'];
   const KEY_DIR: Record<string, Dir> = { ArrowUp: 'n', ArrowDown: 's', ArrowLeft: 'w', ArrowRight: 'e' };
-  const OPPOSITE: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' };
+  const VEC: Record<Dir, [number, number]> = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
+  const EASE = 'cubic-bezier(0.33, 1, 0.68, 1)';
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
   let active = 'centre';
-  let anim = 0;
+  let running: Animation[] = [];
+  let leaving: HTMLElement | undefined;
+  let peeking: HTMLElement | undefined;
 
-  const neighbour = (from: string, dir: Dir): string | undefined => {
-    if (from === 'centre') return [...cells.values()].find((c) => c.dataset.dir === dir)?.dataset.panel;
-    return cells.get(from)?.dataset.dir === OPPOSITE[dir] ? 'centre' : undefined;
-  };
-  const panelFromHash = () => (cells.has(location.hash.slice(1)) ? location.hash.slice(1) : 'centre');
+  const neighbour = (from: string, dir: Dir) => screens.get(from)?.dataset[dir];
+  const dirTo = (from: string, to: string) => DIRS.find((d) => neighbour(from, d) === to);
+  const screenFromHash = () => (screens.has(location.hash.slice(1)) ? location.hash.slice(1) : 'centre');
+  const scrollerOf = (id: string) => screens.get(id)!.querySelector<HTMLElement>('.cell-scroll')!;
+  const tf = (xPct: number, yPct: number, x = 0, y = 0) => `translate(calc(${xPct}% + ${x}px), calc(${yPct}% + ${y}px))`;
 
   function setActive(id: string) {
     active = id;
     home.dataset.at = id;
-    for (const [key, cell] of cells) {
-      cell.inert = key !== id;
-      cell.toggleAttribute('data-active', key === id);
+    for (const [key, s] of screens) {
+      s.inert = key !== id;
+      s.toggleAttribute('data-active', key === id);
     }
-    // Keep the URL shareable without adding a history entry per swipe.
-    if (current === 'home' && panelFromHash() !== id) history.replaceState(history.state, '', id === 'centre' ? location.pathname + location.search : `#${id}`);
+    // Keep the URL shareable without adding a history entry per move.
+    if (current === 'home' && screenFromHash() !== id) history.replaceState(history.state, '', id === 'centre' ? location.pathname + location.search : `#${id}`);
   }
 
-  function cancelMove() {
-    if (!anim) return;
-    cancelAnimationFrame(anim);
-    anim = 0;
-    hub.classList.remove('moving');
+  /** Jump every running transition to its end state. */
+  function settle() {
+    running.forEach((a) => a.cancel());
+    running = [];
+    leaving?.classList.remove('leaving');
+    peeking?.classList.remove('peek');
+    leaving = peeking = undefined;
+    for (const s of screens.values()) s.style.transform = '';
   }
 
-  /** Scroll the hub to a cell. Native smooth scrolling is too slow here, so ease it over ~280 ms with snapping paused. */
-  function move(id: string, instant = reduceMotion.matches) {
-    const cell = cells.get(id);
-    if (!cell) return;
-    cancelMove();
-    cell.inert = false;
-    const x = cell.offsetLeft;
-    const y = cell.offsetTop;
-    if (instant) {
-      hub.scrollTo(x, y);
-      return setActive(id);
+  /** Show `to`, sliding it in from the `dir` edge; screens that aren't neighbours cross-fade. (x, y): drag offset in px. */
+  function navigate(to: string, dir = dirTo(active, to), x = 0, y = 0) {
+    if (to === active) return;
+    const from = screens.get(active)!;
+    const target = screens.get(to)!;
+    settle();
+    setActive(to);
+    if (reduceMotion.matches) return;
+    leaving = from;
+    from.classList.add('leaving');
+    const opts: KeyframeAnimationOptions = { duration: 280, easing: EASE };
+    if (dir) {
+      const [vx, vy] = VEC[dir];
+      running = [
+        from.animate([{ transform: tf(0, 0, x, y), opacity: 1 }, { transform: tf(-vx * 100, -vy * 100), opacity: 0.4 }], opts),
+        target.animate([{ transform: tf(vx * 100, vy * 100, x, y) }, { transform: tf(0, 0) }], opts),
+      ];
+    } else {
+      running = [
+        from.animate([{ opacity: 1 }, { opacity: 0 }], opts),
+        target.animate([{ opacity: 0, transform: 'scale(0.98)' }, { opacity: 1, transform: 'none' }], opts),
+      ];
     }
-    const x0 = hub.scrollLeft;
-    const y0 = hub.scrollTop;
-    const t0 = performance.now();
-    hub.classList.add('moving');
-    const step = (t: number) => {
-      const k = Math.min(1, (t - t0) / 280);
-      const e = 1 - (1 - k) ** 3;
-      hub.scrollTo(x0 + (x - x0) * e, y0 + (y - y0) * e);
-      if (k < 1) anim = requestAnimationFrame(step);
-      else {
-        anim = 0;
-        hub.classList.remove('moving');
-      }
-    };
-    anim = requestAnimationFrame(step);
+    running[0].onfinish = () => leaving === from && settle();
   }
 
-  /** Move and, when focus is inside the hub, carry it to the destination so it isn't lost in an inert cell. */
-  function go(id: string) {
+  /** Navigate and, when focus is inside the hub, carry it along so it isn't lost in an inert screen. */
+  function go(to: string, dir?: Dir) {
     const focusInside = hub.contains(document.activeElement) && document.activeElement !== hub;
-    move(id);
-    if (focusInside) (id === 'centre' ? hub : cells.get(id)!.querySelector<HTMLElement>('h2[tabindex]')!).focus({ preventScroll: true });
+    navigate(to, dir);
+    if (focusInside) (to === 'centre' ? hub : screens.get(to)!.querySelector<HTMLElement>('h2[tabindex]')!).focus({ preventScroll: true });
   }
 
-  const io = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) if (e.intersectionRatio >= 0.6) setActive((e.target as HTMLElement).dataset.panel!);
-    },
-    { root: hub, threshold: 0.6 },
-  );
-  cells.forEach((c) => io.observe(c));
-  for (const type of ['pointerdown', 'touchstart'] as const) hub.addEventListener(type, cancelMove, { passive: true });
+  /** True when the active screen's content can still scroll toward `dir` (only vertical content scrolls). */
+  function canScroll(dir: Dir) {
+    const sc = scrollerOf(active);
+    if (dir === 's') return sc.scrollTop + sc.clientHeight < sc.scrollHeight - 1;
+    if (dir === 'n') return sc.scrollTop > 0;
+    return false;
+  }
 
-  // A mouse-wheel notch (~100 px) is too small to cross mandatory snap on a full-screen panel, so it would snap
-  // back. Treat notches as "next panel"; leave trackpad (small, fractional deltas) to native snapping.
-  let wheelLock = 0;
-  hub.addEventListener(
-    'wheel',
-    (e) => {
-      const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY);
-      const delta = dx ? e.deltaX : e.deltaY;
-      const notch = e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || (Math.abs(delta) >= 50 && Number.isInteger(delta));
-      if (!notch || e.ctrlKey) return cancelMove();
-      const dir: Dir = dx ? (delta > 0 ? 'e' : 'w') : delta > 0 ? 's' : 'n';
-      const inner = cells.get(active)?.querySelector<HTMLElement>('.cell-scroll');
-      const room = !inner ? 0 : dir === 's' ? inner.scrollHeight - inner.clientHeight - inner.scrollTop : dir === 'n' ? inner.scrollTop : 0;
-      if (room > 1) return; // let a tall panel scroll its own content first
-      const next = neighbour(active, dir);
-      if (!next && !anim) return; // edge of the hub: let the page scroll on (e.g. to the footer)
-      e.preventDefault();
-      if (anim || performance.now() < wheelLock || !next) return; // one panel per notch burst
-      wheelLock = performance.now() + 450;
-      go(next);
-    },
-    { passive: false },
-  );
+  // Which screens have content taller than the stage (they get native vertical touch scrolling).
+  const ro = new ResizeObserver(() => {
+    for (const s of screens.values()) {
+      const sc = s.querySelector<HTMLElement>('.cell-scroll')!;
+      s.classList.toggle('scrolls', sc.scrollHeight > sc.clientHeight + 1);
+    }
+  });
+  for (const s of screens.values()) {
+    ro.observe(s.querySelector('.cell-scroll')!);
+    ro.observe(s.querySelector('.cell-inner')!);
+  }
 
   hub.addEventListener('keydown', (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -442,23 +506,197 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
     const dir = KEY_DIR[e.key];
     if (!dir) return;
     e.preventDefault();
-    // Tall panels (small screens) scroll their own content before moving on.
-    const inner = cells.get(active)!.querySelector<HTMLElement>('.cell-scroll')!;
-    const room = dir === 's' ? inner.scrollHeight - inner.clientHeight - inner.scrollTop : dir === 'n' ? inner.scrollTop : 0;
-    if (room > 1) return inner.scrollBy({ top: (dir === 's' ? 1 : -1) * inner.clientHeight * 0.8, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+    // Tall screens (small viewports) scroll their own content before moving on.
+    if (canScroll(dir)) {
+      const sc = scrollerOf(active);
+      return sc.scrollBy({ top: (dir === 's' ? 1 : -1) * sc.clientHeight * 0.8, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+    }
     const next = neighbour(active, dir);
-    if (next) go(next);
+    if (next) go(next, dir);
   });
 
-  // Arrow links, header category links and the brand link move the hub instead of navigating.
+  // Wheel: a mouse notch or ~60 px of trackpad travel moves one screen, then input is ignored until the
+  // wheel has been idle for 180 ms, so trackpad inertia can't trigger a second move.
+  let wheelSum = 0;
+  let wheelDir: Dir | undefined;
+  let wheelLocked = false;
+  let wheelScrolled = false;
+  let wheelIdle = 0;
+  hub.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey) return; // pinch zoom
+      clearTimeout(wheelIdle);
+      wheelIdle = window.setTimeout(() => {
+        wheelLocked = wheelScrolled = false;
+        wheelSum = 0;
+      }, 180);
+      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? hub.clientHeight : 1;
+      const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+      const delta = (horizontal ? e.deltaX : e.deltaY) * unit;
+      if (!delta) return;
+      const dir: Dir = horizontal ? (delta > 0 ? 'e' : 'w') : delta > 0 ? 's' : 'n';
+      if (wheelLocked) return e.preventDefault();
+      if (canScroll(dir)) {
+        wheelScrolled = true;
+        return;
+      }
+      // Content that just scrolled to its edge needs a fresh gesture to navigate.
+      if (wheelScrolled) return e.preventDefault();
+      const next = neighbour(active, dir);
+      e.preventDefault();
+      if (!next) return;
+      if (dir !== wheelDir) {
+        wheelDir = dir;
+        wheelSum = 0;
+      }
+      wheelSum += Math.abs(delta);
+      if (wheelSum < 60) return;
+      wheelLocked = true;
+      wheelSum = 0;
+      go(next, dir);
+    },
+    { passive: false },
+  );
+
+  // Touch/pen swipes: the screen follows the finger (rubber-banded where there is nothing to go to).
+  type Drag = { id: number; x0: number; y0: number; axis?: 'x' | 'y'; d: number; v: number; t: number; dir?: Dir; next?: string };
+  let drag: Drag | undefined;
+  let dragFrame = 0;
+  let suppressClick = false;
+  let swiped = false;
+
+  function paintDrag() {
+    dragFrame = 0;
+    if (!drag?.axis) return;
+    const cur = screens.get(active)!;
+    const along = drag.next ? drag.d : drag.d * 0.3;
+    const [x, y] = drag.axis === 'x' ? [along, 0] : [0, along];
+    cur.style.transform = tf(0, 0, x, y);
+    const peek = drag.next ? screens.get(drag.next) : undefined;
+    if (peeking && peeking !== peek) {
+      peeking.classList.remove('peek');
+      peeking.style.transform = '';
+    }
+    peeking = peek;
+    if (peek && drag.dir) {
+      const [vx, vy] = VEC[drag.dir];
+      peek.classList.add('peek');
+      peek.style.transform = tf(vx * 100, vy * 100, x, y);
+    }
+  }
+
+  function snapBack() {
+    const cur = screens.get(active)!;
+    const from = cur.style.transform;
+    const peek = peeking;
+    const peekFrom = peek?.style.transform;
+    settle();
+    if (reduceMotion.matches || !from) return;
+    const opts: KeyframeAnimationOptions = { duration: 200, easing: EASE };
+    running = [cur.animate([{ transform: from }, { transform: 'none' }], opts)];
+    if (peek && peekFrom && drag?.dir) {
+      const [vx, vy] = VEC[drag.dir];
+      peeking = peek;
+      peek.classList.add('peek');
+      running.push(peek.animate([{ transform: peekFrom }, { transform: tf(vx * 100, vy * 100) }], { ...opts, fill: 'forwards' }));
+      running[1].onfinish = () => peeking === peek && settle();
+    }
+  }
+
+  hub.addEventListener('pointerdown', (e) => {
+    suppressClick = swiped = false;
+    if (e.pointerType === 'mouse' || !e.isPrimary || current !== 'home') return;
+    settle();
+    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, d: 0, v: 0, t: e.timeStamp };
+  });
+  hub.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x0;
+    const dy = e.clientY - drag.y0;
+    if (!drag.axis) {
+      if (Math.hypot(dx, dy) < 10) return;
+      drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      hub.setPointerCapture(e.pointerId);
+      hub.classList.add('dragging');
+    }
+    const d = drag.axis === 'x' ? dx : dy;
+    const dt = e.timeStamp - drag.t;
+    if (dt > 0) drag.v = 0.8 * ((d - drag.d) / dt) + 0.2 * drag.v;
+    drag.t = e.timeStamp;
+    drag.d = d;
+    // The finger moves opposite to the direction of travel.
+    drag.dir = drag.axis === 'x' ? (d < 0 ? 'e' : 'w') : d < 0 ? 's' : 'n';
+    drag.next = neighbour(active, drag.dir);
+    dragFrame ||= requestAnimationFrame(paintDrag);
+  });
+  function endDrag(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.id) return;
+    const done = drag;
+    cancelAnimationFrame(dragFrame);
+    dragFrame = 0;
+    hub.classList.remove('dragging');
+    if (!done.axis) return void (drag = undefined);
+    suppressClick = true;
+    // Cancelled: the browser took the gesture for native scrolling; touchend decides edge swipes.
+    swiped = e.type === 'pointerup';
+    const commit = e.type === 'pointerup' && done.next && (Math.abs(done.d) > 50 || (Math.abs(done.v) > 0.4 && Math.abs(done.d) > 15));
+    if (commit) {
+      const along = done.d;
+      navigate(done.next!, done.dir, done.axis === 'x' ? along : 0, done.axis === 'y' ? along : 0);
+    } else {
+      paintDrag();
+      snapBack();
+    }
+    drag = undefined;
+  }
+  hub.addEventListener('pointerup', endDrag);
+  hub.addEventListener('pointercancel', endDrag);
+  // A swipe that started on a link or the drop zone must not also click it.
+  hub.addEventListener(
+    'click',
+    (e) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
+  // Tall screens pan vertically natively (the pointer is cancelled), so decide edge swipes on touchend.
+  let touch: { y: number; top: boolean; bottom: boolean } | undefined;
+  hub.addEventListener(
+    'touchstart',
+    (e) => {
+      touch = undefined;
+      if (!screens.get(active)!.classList.contains('scrolls') || e.touches.length > 1) return;
+      touch = { y: e.touches[0].clientY, top: !canScroll('n'), bottom: !canScroll('s') };
+    },
+    { passive: true },
+  );
+  hub.addEventListener(
+    'touchend',
+    (e) => {
+      if (!touch || swiped || current !== 'home') return;
+      const dy = e.changedTouches[0].clientY - touch.y;
+      const dir: Dir | undefined = dy > 60 && touch.top && !canScroll('n') ? 'n' : dy < -60 && touch.bottom && !canScroll('s') ? 's' : undefined;
+      touch = undefined;
+      if (!dir) return;
+      const next = neighbour(active, dir);
+      if (next) go(next, dir);
+    },
+    { passive: true },
+  );
+
+  // Edge arrows, header category links and the brand link move the hub instead of navigating.
   document.addEventListener('click', (e) => {
     if (current !== 'home' || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = (e.target as Element).closest<HTMLAnchorElement>('a[href]');
-    if (!a) return;
+    if (!a || picker.contains(a)) return;
     const id = a.dataset.go ?? (a.pathname === location.pathname && a.search === location.search ? a.hash.slice(1) || 'centre' : undefined);
-    if (!id || !cells.has(id)) return;
+    if (!id || !screens.has(id)) return;
     e.preventDefault();
-    go(id);
+    go(id, a.dataset.dir as Dir | undefined);
   });
 
   // Universal drop zone → chooser, embedded tool or image editor.
@@ -532,10 +770,11 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
     else showHome();
   }
 
-  /** Back on the hub at the panel the files were dropped on (kept in the URL hash). */
+  /** Back on the hub at the screen the files were dropped on (kept in the URL hash). */
   function showHome() {
     show('home');
-    move(panelFromHash(), true);
+    settle();
+    setActive(screenFromHash());
     (active === 'centre' ? input : hub).focus({ preventScroll: true });
   }
 
@@ -606,6 +845,7 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
 
   async function handle(list: File[]) {
     if (!list.length) return;
+    if (picker.open) picker.close();
     status.textContent = '';
     let kinds: Kind[];
     try {
@@ -683,5 +923,5 @@ const ARROW = 'M12 5v14M6 13l6 6 6-6';
   });
   // A reload keeps history.state but not the in-memory files.
   if (entry()) history.replaceState(null, '');
-  move(panelFromHash(), true);
+  setActive(screenFromHash());
 </script>

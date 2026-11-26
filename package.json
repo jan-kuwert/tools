@@ -23,6 +23,7 @@
     "@neslinesli93/qpdf-wasm": "^0.3.1",
     "astro": "^7.4.13",
     "fflate": "^0.8.3",
+    "iconoir": "^7.12.2",
     "pdfjs-dist": "^6.5.438",
     "terser": "^5.51.4",
     "typescript": "^6.0.3",

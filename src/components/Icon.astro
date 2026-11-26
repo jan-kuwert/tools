@@ -1,11 +1,44 @@
 ---
-// Small inline icon set; stroke icons inherit currentColor.
-interface Props { name: 'device' | 'cloud' | 'lock' | 'upload' }
-const { name } = Astro.props;
+// Iconoir icons (same set as the portfolio), inlined at build time; strokes use currentColor.
+import archive from 'iconoir/icons/regular/archive.svg?raw';
+import arrowDown from 'iconoir/icons/regular/arrow-down.svg?raw';
+import arrowLeft from 'iconoir/icons/regular/arrow-left.svg?raw';
+import arrowRight from 'iconoir/icons/regular/arrow-right.svg?raw';
+import arrowUp from 'iconoir/icons/regular/arrow-up.svg?raw';
+import cloud from 'iconoir/icons/regular/cloud.svg?raw';
+import computer from 'iconoir/icons/regular/computer.svg?raw';
+import laptop from 'iconoir/icons/regular/laptop.svg?raw';
+import code from 'iconoir/icons/regular/code.svg?raw';
+import home from 'iconoir/icons/regular/home-simple-door.svg?raw';
+import flip from 'iconoir/icons/regular/flip.svg?raw';
+import halfMoon from 'iconoir/icons/regular/half-moon.svg?raw';
+import lock from 'iconoir/icons/regular/lock.svg?raw';
+import mediaImage from 'iconoir/icons/regular/media-image.svg?raw';
+import music from 'iconoir/icons/regular/music-double-note.svg?raw';
+import page from 'iconoir/icons/regular/page.svg?raw';
+import plus from 'iconoir/icons/regular/plus.svg?raw';
+import redo from 'iconoir/icons/regular/redo.svg?raw';
+import search from 'iconoir/icons/regular/search.svg?raw';
+import settings from 'iconoir/icons/regular/settings.svg?raw';
+import shield from 'iconoir/icons/regular/shield-check.svg?raw';
+import sun from 'iconoir/icons/regular/sun-light.svg?raw';
+import undo from 'iconoir/icons/regular/undo.svg?raw';
+import upload from 'iconoir/icons/regular/upload.svg?raw';
+import viewGrid from 'iconoir/icons/regular/view-grid.svg?raw';
+import xmark from 'iconoir/icons/regular/xmark.svg?raw';
+
+const icons = {
+  // Local-mode marker; distinct from the theme's computer icon.
+  device: laptop, code, home, cloud, lock, upload, plus, undo, redo, flip, search, settings, shield, xmark, grid: viewGrid,
+  'arrow-up': arrowUp, 'arrow-down': arrowDown, 'arrow-left': arrowLeft, 'arrow-right': arrowRight,
+  'theme-system': computer, 'theme-light': sun, 'theme-dark': halfMoon,
+  images: mediaImage, pdf: page, audio: music, files: archive,
+};
+type IconName = keyof typeof icons;
+
+interface Props { name: IconName; class?: string }
+const { name, class: cls } = Astro.props;
+// Drop the fixed 24px size so CSS controls it; mark decorative.
+const svg = icons[name].replace(/ width="24" height="24"/, ' aria-hidden="true" focusable="false"');
 ---
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  {name === 'device' && <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>}
-  {name === 'cloud' && <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5H7z" />}
-  {name === 'lock' && <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>}
-  {name === 'upload' && <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></>}
-</svg>
+<span class:list={['icon', cls]} set:html={svg} />
