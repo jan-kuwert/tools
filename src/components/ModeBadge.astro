@@ -1,9 +1,14 @@
 ---
+// Colourless local/cloud marker; details appear in a tooltip on hover/focus and in the site footer.
 import Icon from './Icon.astro';
 import type { Mode } from '../tools';
-interface Props { mode: Mode }
-const { mode } = Astro.props;
+interface Props { mode: Mode; /** Show the short text label next to the icon. */ label?: boolean }
+const { mode, label = false } = Astro.props;
+const info =
+  mode === 'local'
+    ? { icon: 'device' as const, name: 'On your device', tip: 'Runs in your browser. Your files never leave your device.' }
+    : { icon: 'cloud' as const, name: 'Cloud · EU', tip: 'Uploads your file to our server in Belgium (EU) for processing, only after you confirm. Nothing is stored.' };
 ---
-{mode === 'local'
-  ? <span class="badge badge-local" title="Runs in your browser. Files never leave your device."><Icon name="device" />On your device</span>
-  : <span class="badge badge-cloud" title="Uploads your file to our server in the EU for processing."><Icon name="cloud" />Cloud · EU</span>}
+<span class="mode" data-tip={info.tip} role="img" aria-label={`${info.name}. ${info.tip}`}>
+  <Icon name={info.icon} />{label && <span aria-hidden="true">{info.name}</span>}
+</span>

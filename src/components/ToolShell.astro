@@ -40,7 +40,7 @@ const cloud = tool.mode === 'cloud';
     <div class="privacy-note privacy-local" role="note">
       <Icon name="lock" />
       {optionalCloud
-        ? <p><strong>Your files stay on this device by default.</strong> Converting and editing happen in your browser. Only the optional <strong>Cloud export</strong> (marked in amber) uploads the original file, and only after you confirm each time. <a href={href('privacy')}>How we check</a></p>
+        ? <p><strong>Your files stay on this device by default.</strong> Converting and editing happen in your browser. Only the optional <strong>Cloud export</strong> (marked with the cloud icon) uploads the original file, and only after you confirm each time. <a href={href('privacy')}>How we check</a></p>
         : <p><strong>Your files stay on this device.</strong> Processing happens in your browser; nothing is uploaded. <a href={href('privacy')}>How we check</a></p>}
     </div>
   )}

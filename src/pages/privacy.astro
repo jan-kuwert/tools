@@ -8,11 +8,11 @@ import { tools } from '../tools';
     <h1>Privacy</h1>
     <p>Every tool is labelled with where your file is processed.</p>
 
-    <h2><ModeBadge mode="local" /></h2>
+    <h2><ModeBadge mode="local" label /></h2>
     <p>The file is opened and processed by JavaScript running in your browser tab. File contents and file names are never sent anywhere: not to our servers, not to analytics, not into URLs or error reports. You can verify this in your browser's developer tools (Network tab) while using a tool. Results are created in memory and downloaded directly.</p>
     <p>Closing or clearing the tool releases our references to your file. This is not a secure-erase guarantee against your browser's memory, operating-system swap, extensions or malware on your device.</p>
 
-    <h2><ModeBadge mode="cloud" /></h2>
+    <h2><ModeBadge mode="cloud" label /></h2>
     <p>Some tasks need more computing power than a browser offers. Before each upload you are asked to confirm; that answer is never remembered.</p>
     <ul>
       <li>Your file is sent over HTTPS directly to our processing service on Google Cloud Run in Belgium (<code>europe-west1</code>).</li>
@@ -24,7 +24,7 @@ import { tools } from '../tools';
     <h2>Which tools use the cloud?</h2>
     <table>
       <thead><tr><th>Tool</th><th>Processing</th></tr></thead>
-      <tbody>{tools.map((t) => <tr><td>{t.title}</td><td><ModeBadge mode={t.mode} /></td></tr>)}</tbody>
+      <tbody>{tools.map((t) => <tr><td>{t.title}</td><td><ModeBadge mode={t.mode} label /></td></tr>)}</tbody>
     </table>
 
     <h2>Stored on your device</h2>

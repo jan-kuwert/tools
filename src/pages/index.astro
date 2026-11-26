@@ -19,7 +19,7 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
   <section class="home-hero" data-home>
     <div class="home-inner hero-grid">
       <div class="hero-copy">
-        <h1>Quick file tools that <span class="pop">respect your files.</span></h1>
+        <h1>Quick file tools that respect your files.</h1>
         <p>Convert, compress and edit images, PDFs, audio and text. Almost everything runs right here in your browser, so your files never leave your device.</p>
       </div>
       <div>
@@ -27,7 +27,7 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
           <input type="file" multiple data-hero-input />
           <span class="drop-types" aria-hidden="true">
             {dropTypes.map(([c, label]) => (
-              <span class={`drop-type cat-${c}`}><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c].map((d) => <path d={d} />)}</svg>{label}</span>
+              <span class="drop-type"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c].map((d) => <path d={d} />)}</svg>{label}</span>
             ))}
           </span>
           <span class="drop-title">Drop any file to start</span>
@@ -35,10 +35,6 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
           <span class="drop-hint">Or paste from the clipboard. We pick the right tool for you.</span>
         </label>
         <p class="status" data-drop-status role="status" aria-live="polite"></p>
-        <div class="legend">
-          <span><ModeBadge mode="local" /> processed in your browser, never uploaded</span>
-          <span><ModeBadge mode="cloud" /> uploaded to our EU server, asked first, not stored</span>
-        </div>
       </div>
     </div>
   </section>
@@ -49,7 +45,7 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
       <input id="search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" data-search />
       <nav class="cat-jump" aria-label="Jump to category">
         {categories.map((c) => (
-          <a class={`cat-chip cat-${c.id}`} href={`#${c.id}`}><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg>{c.label}</a>
+          <a class="cat-chip" href={`#${c.id}`}><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg>{c.label}</a>
         ))}
       </nav>
     </div>
@@ -58,7 +54,7 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
       {categories.map((c) => {
         const list = tools.filter((t) => t.category === c.id);
         return (
-          <section class={`category cat-${c.id}`} id={c.id} data-category style={`--n: ${list.length}`}>
+          <section class="category" id={c.id} data-category style={`--n: ${list.length}`}>
             <h2><span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg></span>{c.label}</h2>
             <ul class="tool-grid">
               {list.map((t) => (
@@ -67,7 +63,7 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
                     <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg></span>
                     <h3>{t.title}</h3>
                     <p>{t.summary}</p>
-                    <ModeBadge mode={t.mode} />
+                    <span class="card-mode"><ModeBadge mode={t.mode} /></span>
                   </a>
                 </li>
               ))}
@@ -91,11 +87,11 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
       <ul class="tool-grid" data-choices>
         {tools.map((t) => (
           <li data-choice={t.slug} hidden>
-            <button class={`tool-card choice-card cat-${t.category}`} type="button" data-pick={t.slug} data-url={href(t.slug)} data-title={t.title}>
+            <button class="tool-card choice-card" type="button" data-pick={t.slug} data-url={href(t.slug)} data-title={t.title}>
               <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[t.category].map((d) => <path d={d} />)}</svg></span>
               <h3>{t.title}</h3>
               <p>{t.summary}</p>
-              <ModeBadge mode={t.mode} />
+              <span class="card-mode"><ModeBadge mode={t.mode} /></span>
             </button>
           </li>
         ))}
@@ -113,113 +109,51 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
 </Base>
 
 <style is:global>
-  /* Home only. Palette per category; light-dark() keeps contrast in both themes. */
+  /* Home only. Neutral surfaces; --accent only on the primary button, focus and drop hover. */
   main.wide { width: 100%; padding: 0 0 4rem; }
   /* Line the header and footer up with the full-width content. */
   body:has(main.wide) :is(.site-header, .site-footer) .inner { width: min(100% - 2 * clamp(1rem, 4vw, 3rem), 1600px); }
-  .home {
-    --c-images: light-dark(#be185d, #f472b6);
-    --c-pdf: light-dark(#c2410c, #fb923c);
-    --c-audio: light-dark(#6d28d9, #a78bfa);
-    --c-files: light-dark(#0f766e, #2dd4bf);
-    --c-text: light-dark(#1d4ed8, #60a5fa);
-    --c: var(--accent);
-    --gutter: clamp(1rem, 4vw, 3rem);
-  }
-  .cat-images { --c: var(--c-images); }
-  .cat-pdf { --c: var(--c-pdf); }
-  .cat-audio { --c: var(--c-audio); }
-  .cat-files { --c: var(--c-files); }
-  .cat-text { --c: var(--c-text); }
+  .home { --gutter: clamp(1rem, 4vw, 3rem); }
   .home-inner { width: min(100% - 2 * var(--gutter), 1600px); margin-inline: auto; }
   .home .ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   .home .tile {
     display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 12px; flex: none;
-    color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface));
-    transition: rotate 0.2s, scale 0.2s;
+    color: var(--muted); background: var(--surface-2);
   }
 
-  /* Hero: full-bleed band with soft colour blobs and a fading dot grid. */
+  /* Hero: full-bleed band with one faint accent wash. */
   .home-hero {
-    position: relative; isolation: isolate; overflow: hidden;
     padding-block: clamp(2rem, 6vw, 5rem);
     border-bottom: 1px solid var(--border);
-    background:
-      radial-gradient(40rem 28rem at 5% 0%, color-mix(in srgb, var(--c-audio) 20%, transparent), transparent 70%),
-      radial-gradient(36rem 26rem at 100% 10%, color-mix(in srgb, var(--c-images) 16%, transparent), transparent 70%),
-      radial-gradient(44rem 24rem at 55% 115%, color-mix(in srgb, var(--c-files) 16%, transparent), transparent 70%),
-      var(--bg);
+    background: radial-gradient(60rem 30rem at 75% 0%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 70%), var(--bg);
   }
-  .home-hero::before {
-    content: ''; position: absolute; inset: 0; z-index: -1;
-    background: radial-gradient(color-mix(in srgb, var(--fg) 13%, transparent) 1px, transparent 1.5px) 0 0 / 22px 22px;
-    mask-image: linear-gradient(to bottom, #000, transparent 85%);
-  }
-  .home-hero::after {
-    content: ''; position: absolute; z-index: -1; width: 24rem; aspect-ratio: 1; left: 30%; top: -10rem;
-    border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
-    background: radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--c-text) 22%, transparent), transparent 70%);
-    animation: home-blob 20s ease-in-out infinite alternate;
-  }
-  @keyframes home-blob { to { transform: translate(-4rem, 5rem) rotate(50deg) scale(1.2); } }
   .hero-grid { display: grid; gap: clamp(1.5rem, 4vw, 4rem); align-items: center; }
   @media (min-width: 960px) { .hero-grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); } }
   .hero-copy h1 { font-size: clamp(2.1rem, 5.2vw, 4.2rem); line-height: 1.04; letter-spacing: -0.035em; margin: 0 0 1rem; }
   .hero-copy p { color: var(--muted); font-size: clamp(1.05rem, 1.5vw, 1.25rem); max-width: 44ch; margin: 0; }
-  .pop {
-    background: linear-gradient(100deg, var(--c-audio), var(--c-images) 55%, var(--c-pdf));
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
-  @media (forced-colors: active) { .pop { color: CanvasText; background: none; } }
 
-  /* Drop zone: lifts and gets a spinning rainbow border on hover, focus and drag-over. */
-  @property --spin { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+  /* Drop zone: dashed border turns accent and lifts on hover, focus and drag-over. */
   .home .hero-drop {
-    --drop-bg: color-mix(in srgb, var(--accent) 4%, var(--surface));
     min-height: clamp(16rem, 30vw, 23rem); align-content: center; gap: 0.9rem;
-    padding: 2rem 1.25rem; border-radius: 28px;
-    border: 3px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
-    background: var(--drop-bg);
-    box-shadow: 0 18px 50px -24px color-mix(in srgb, var(--accent) 45%, transparent);
-    transition: transform 0.2s, box-shadow 0.2s;
+    padding: 2rem 1.25rem; border-radius: 24px; border: 2px dashed var(--border);
+    background: var(--surface); box-shadow: var(--shadow);
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
   }
   .home .hero-drop:is(:hover, .over, :focus-within) {
-    --drop-bg: color-mix(in srgb, var(--accent) 7%, var(--surface));
-    border-style: solid; border-color: transparent;
-    background:
-      linear-gradient(var(--drop-bg), var(--drop-bg)) padding-box,
-      conic-gradient(from var(--spin), var(--c-audio), var(--c-images), var(--c-pdf), var(--c-files), var(--c-text), var(--c-audio)) border-box;
-    transform: translateY(-4px);
-    box-shadow: 0 26px 60px -24px color-mix(in srgb, var(--accent) 60%, transparent);
-    animation: home-spin 4s linear infinite;
+    border-color: var(--accent); background: var(--surface);
+    transform: translateY(-3px);
+    box-shadow: 0 16px 40px -20px rgb(0 0 0 / 0.25);
   }
-  .home .hero-drop.over { transform: translateY(-4px) scale(1.01); }
-  @keyframes home-spin { to { --spin: 360deg; } }
   .hero-drop:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 3px; }
   .hero-drop .drop-title { font-size: clamp(1.4rem, 3vw, 2rem); letter-spacing: -0.02em; }
   .drop-btn { pointer-events: none; font-size: 1.05rem; padding: 0.75rem 1.5rem; border-radius: 12px; }
   .drop-types { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin-bottom: 0.25rem; }
   .drop-type {
-    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.75rem 0.3rem 0.45rem;
-    border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: var(--fg);
-    background: color-mix(in srgb, var(--c) 12%, var(--surface));
-    border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
-    rotate: var(--tilt, 0deg); transition: rotate 0.25s, translate 0.25s;
+    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.75rem 0.3rem 0.5rem;
+    border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: var(--fg); border: 1px solid var(--border);
   }
-  .drop-type .ico { color: var(--c); width: 18px; height: 18px; }
-  .drop-type:nth-child(1) { --tilt: -5deg; }
-  .drop-type:nth-child(2) { --tilt: 3deg; transition-delay: 30ms; }
-  .drop-type:nth-child(3) { --tilt: -2deg; transition-delay: 60ms; }
-  .drop-type:nth-child(4) { --tilt: 4deg; transition-delay: 90ms; }
-  .drop-type:nth-child(5) { --tilt: -3deg; transition-delay: 120ms; }
-  .hero-drop:is(:hover, .over, :focus-within) .drop-type { rotate: 0deg; translate: 0 -3px; }
+  .drop-type .ico { color: var(--muted); width: 18px; height: 18px; }
   .home-hero .status { min-height: 0; margin: 0.5rem 0 0; }
-  .home .legend { gap: 0.5rem; margin-top: 1rem; }
-  .home .legend > span {
-    display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.85rem 0.3rem 0.3rem;
-    border-radius: 1.2rem; border: 1px solid var(--border); color: var(--fg);
-    background: color-mix(in srgb, var(--surface) 80%, transparent);
-  }
 
   /* Tool catalogue: categories flow side by side, each sized by its tool count. */
   .home-tools { padding-top: clamp(1.5rem, 4vw, 3rem); }
@@ -232,38 +166,31 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
   .cat-chip {
     display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.85rem 0.4rem 0.6rem;
     border-radius: 999px; font-size: 0.9rem; font-weight: 600; color: var(--fg); text-decoration: none;
-    background: color-mix(in srgb, var(--c) 10%, var(--surface));
-    border: 1px solid color-mix(in srgb, var(--c) 28%, var(--border));
-    transition: translate 0.15s, border-color 0.15s;
+    background: var(--surface); border: 1px solid var(--border);
+    transition: border-color 0.15s;
   }
-  .cat-chip .ico { color: var(--c); width: 18px; height: 18px; }
-  .cat-chip:hover { translate: 0 -2px; border-color: var(--c); }
+  .cat-chip .ico { color: var(--muted); width: 18px; height: 18px; }
+  .cat-chip:hover { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
   .home-cats { display: flex; flex-wrap: wrap; gap: 1.25rem; }
   .home .category {
     flex: var(--n) 1 calc(var(--n) * 14rem + (var(--n) - 1) * 0.75rem + 2.5rem); min-width: 0;
     margin: 0; padding: 1.25rem; border-radius: 22px; scroll-margin-top: 72px;
-    background: color-mix(in srgb, var(--c) 6%, var(--surface));
-    border: 1px solid color-mix(in srgb, var(--c) 18%, var(--border));
+    background: color-mix(in srgb, var(--surface-2) 55%, transparent); border: 1px solid var(--border);
   }
-  .home .category h2 { display: flex; align-items: center; gap: 0.6rem; color: color-mix(in srgb, var(--c) 70%, var(--fg)); }
-  .home .category h2 .tile { width: 2rem; height: 2rem; border-radius: 10px; }
+  .home .category h2 { display: flex; align-items: center; gap: 0.6rem; }
+  .home .category h2 .tile { width: 2rem; height: 2rem; border-radius: 10px; background: var(--surface); }
   .home .category h2 .ico { width: 18px; height: 18px; }
   .home .tool-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); }
   .home .tool-card {
-    display: grid; grid-template-columns: auto 1fr; grid-template-areas: 'tile badge' 'title title' 'text text';
+    display: grid; grid-template-columns: auto 1fr; grid-template-areas: 'tile mode' 'title title' 'text text';
     align-content: start; gap: 0.6rem 0.5rem; border-radius: 16px; padding: 1rem 1.1rem 1.15rem;
     transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
   }
   .home .tool-card .tile { grid-area: tile; }
-  .home .tool-card .badge { grid-area: badge; justify-self: end; align-self: center; margin: 0; }
+  .card-mode { grid-area: mode; justify-self: end; align-self: start; display: flex; }
   .home .tool-card h3 { grid-area: title; margin-top: 0.15rem; }
   .home .tool-card p { grid-area: text; }
-  .home .tool-card:hover {
-    transform: translateY(-4px);
-    border-color: color-mix(in srgb, var(--c) 55%, var(--border));
-    box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--c) 55%, transparent);
-  }
-  .home .tool-card:hover .tile { rotate: -8deg; scale: 1.08; }
+  .home .tool-card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -16px rgb(0 0 0 / 0.3); }
 
   /* Handoff stage (chooser, embedded tool) and the image editor. */
   .home-work { padding-top: 2rem; max-width: 1280px; }
@@ -274,7 +201,6 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
   .choice-card { width: 100%; font: inherit; text-align: left; cursor: pointer; }
   .stage h2[tabindex]:focus { outline: none; }
   .cloud-alt { display: flex; gap: 0.5rem 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; color: var(--muted); font-size: 0.93rem; }
-  .cloud-alt .btn { border-color: color-mix(in srgb, var(--cloud) 45%, var(--border)); }
   .tool-frame { display: block; width: 100%; height: 70vh; border: 0; }
 </style>
 

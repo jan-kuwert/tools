@@ -59,6 +59,12 @@ a { color: var(--accent); }
 
 .site-footer { border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; }
 .site-footer .inner { width: min(100% - 2rem, 960px); margin: 0 auto; padding: 1.5rem 0; display: flex; gap: 1rem; flex-wrap: wrap; justify-content: space-between; }
+.footer-legend { display: grid; gap: 0.6rem; margin: 0; max-width: 60ch; }
+.footer-legend div { display: grid; grid-template-columns: 9.5rem 1fr; gap: 0.75rem; align-items: start; }
+.footer-legend dt { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; color: var(--fg); }
+.footer-legend dt svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.footer-legend dd { margin: 0; }
+@media (max-width: 520px) { .footer-legend div { grid-template-columns: 1fr; gap: 0.15rem; } }
 
 /* Buttons */
 .btn {
@@ -82,24 +88,25 @@ a { color: var(--accent); }
 .icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--fg); }
 .icon-btn:disabled { opacity: 0.3; cursor: default; }
 
-/* Privacy badges */
-.badge {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  font-size: 0.78rem; font-weight: 650; letter-spacing: 0.02em;
-  padding: 0.2rem 0.6rem; border-radius: 999px; white-space: nowrap;
+/* Local/cloud marker: colourless icon, details in a tooltip (hover, or focus of the containing control). */
+.mode { position: relative; display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); font-size: 0.85rem; font-weight: 600; white-space: nowrap; cursor: help; }
+.mode svg { width: 18px; height: 18px; flex: none; }
+.mode::after {
+  content: attr(data-tip); position: absolute; top: calc(100% + 8px); right: -6px; z-index: 30;
+  width: max-content; max-width: 260px; padding: 0.5rem 0.65rem; border-radius: 8px;
+  background: var(--fg); color: var(--bg); box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+  font-size: 0.8rem; font-weight: 500; line-height: 1.4; white-space: normal; text-align: left;
+  opacity: 0; transform: translateY(-3px); pointer-events: none; transition: opacity 0.12s, transform 0.12s;
 }
-.badge svg { width: 14px; height: 14px; }
-.badge-local { color: var(--local); background: var(--local-bg); }
-.badge-cloud { color: var(--cloud); background: var(--cloud-bg); }
+.mode:hover::after, :focus-visible > .mode::after, :focus-visible .mode::after { opacity: 1; transform: none; }
 
 .privacy-note {
   display: flex; gap: 0.75rem; align-items: flex-start;
   padding: 0.85rem 1rem; border-radius: var(--radius); margin: 1rem 0 1.5rem; font-size: 0.93rem;
+  background: var(--surface-2); color: var(--fg);
 }
-.privacy-note svg { flex: none; width: 20px; height: 20px; margin-top: 2px; }
+.privacy-note svg { flex: none; width: 20px; height: 20px; margin-top: 2px; color: var(--muted); }
 .privacy-note p { margin: 0; }
-.privacy-local { background: var(--local-bg); color: color-mix(in srgb, var(--local) 70%, var(--fg)); }
-.privacy-cloud { background: var(--cloud-bg); color: color-mix(in srgb, var(--cloud) 60%, var(--fg)); }
 
 /* Home */
 .hero { margin: 1rem 0 2rem; }

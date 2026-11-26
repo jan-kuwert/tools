@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import Icon from '../components/Icon.astro';
 import { categories, href } from '../tools';
 interface Props { title: string; description?: string; category?: string; /** Full-width main (home page). */ wide?: boolean }
 const { title, description = 'Fast, private file tools that run in your browser.', category, wide = false } = Astro.props;
@@ -30,7 +31,10 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <main id="main" class={wide ? 'wide' : undefined}><slot /></main>
     <footer class="site-footer">
       <div class="inner">
-        <span>Most tools run entirely in your browser. Cloud tools are clearly marked.</span>
+        <dl class="footer-legend">
+          <div><dt><Icon name="device" /><span>On your device</span></dt><dd>Runs in your browser. Your files never leave your device.</dd></div>
+          <div><dt><Icon name="cloud" /><span>Cloud · EU</span></dt><dd>Uploaded to our server in Belgium (EU) for processing, only after you confirm each time. Nothing is stored.</dd></div>
+        </dl>
         <span><a href={href('privacy')}>Privacy</a> · <a href={href('settings')}>Settings</a></span>
       </div>
     </footer>
