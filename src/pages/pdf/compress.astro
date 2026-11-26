@@ -1,0 +1,43 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="pdf/compress" accept="application/pdf,.pdf" action="Optimize PDF">
+  <p class="muted">Lossless: streams are recompressed and objects packed. Images and text are not altered, so savings vary.</p>
+</ToolShell>
+
+<script>
+  import wasmUrl from '@neslinesli93/qpdf-wasm/dist/qpdf.wasm?url';
+  import { createTool, throwIfAborted, UserError } from '../../lib/tool';
+  import { loadPdf, pdfBlob, SIGNATURE_NOTE } from '../../lib/pdf';
+
+  const MAX = 100 * 1024 * 1024;
+
+  createTool({
+    async run([f], { signal, progress }) {
+      if (f.size > MAX) throw new UserError('File exceeds 100 MB.');
+      progress('Checking PDF…');
+      const { hasSignature } = await loadPdf(f);
+      progress('Loading optimizer…');
+      // Dynamic: qpdf glue + wasm are large; load only when the user runs it.
+      const { default: createQpdf } = await import('@neslinesli93/qpdf-wasm');
+      const qpdf = await createQpdf({ locateFile: () => wasmUrl });
+      // Shipped typings omit these standard Emscripten FS calls.
+      const fs = qpdf.FS as typeof qpdf.FS & { writeFile(path: string, data: Uint8Array): void; unlink(path: string): void };
+      throwIfAborted(signal);
+      progress('Optimizing…');
+      fs.writeFile('/in.pdf', new Uint8Array(await f.arrayBuffer()));
+      let out: Uint8Array;
+      try {
+        // Exit 3 = succeeded with warnings.
+        const rc = qpdf.callMain(['--object-streams=generate', '--compress-streams=y', '--recompress-flate', '--compression-level=9', '/in.pdf', '/out.pdf']);
+        if (rc !== 0 && rc !== 3) throw new UserError('This PDF could not be optimized. It may be damaged.');
+        out = fs.readFile('/out.pdf');
+      } finally {
+        for (const p of ['/in.pdf', '/out.pdf']) try { fs.unlink(p); } catch {}
+      }
+      throwIfAborted(signal);
+            if (out.length >= f.size) return [{ name: f.name, blob: f, inputSize: f.size, note: 'Already optimized — no smaller version found' }];
+      return [{ name: f.name.replace(/(\.pdf)?$/i, '-optimized.pdf'), blob: pdfBlob(out), inputSize: f.size, note: hasSignature ? SIGNATURE_NOTE : undefined }];
+    },
+  });
+</script>

@@ -1,0 +1,32 @@
+{
+  "name": "tools",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jan-kuwert/tools.git"
+  },
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/jan-kuwert/tools/issues"
+  },
+  "homepage": "https://github.com/jan-kuwert/tools#readme",
+  "dependencies": {
+    "@astrojs/check": "^0.9.12",
+    "@cantoo/pdf-lib": "^2.11.1",
+    "@neslinesli93/qpdf-wasm": "^0.3.1",
+    "astro": "^7.4.13",
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^6.5.438",
+    "terser": "^5.51.4",
+    "typescript": "^6.0.3",
+    "wasm-media-encoders": "^0.7.0"
+  },
+  "private": true
+}
