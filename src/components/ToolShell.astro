@@ -22,14 +22,22 @@ const { slug, accept, multiple = false, action, noFiles = false, optionalCloud =
 const tool = toolBySlug(slug);
 const category = categories.find((c) => c.id === tool.category)!;
 const cloud = tool.mode === 'cloud';
+// Embedded in the home hub, editor-like tools use the full width instead of a reading-width column.
+const wide = ['pdf/organize', 'audio/convert'].includes(slug);
 ---
 <Base title={`${tool.title} · Tools`} description={tool.summary}>
+  <div class="tool-shell" data-wide={wide || undefined}>
   <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#' + category.id}>{category.label}</a></div>
   <div class="tool-head">
     <h1>{tool.title}</h1>
     <ModeBadge mode={tool.mode} />
   </div>
   <p class="tool-summary">{tool.summary}</p>
+  <p class="privacy-line">
+    <Icon name={cloud ? 'cloud' : 'lock'} />
+    <span>{cloud ? 'Uploads your file to our EU server only after you confirm. Nothing is stored.' : optionalCloud ? 'Stays on this device. The optional cloud export asks first.' : 'Your files stay on this device.'}</span>
+    <a href={href('privacy')}>Details</a>
+  </p>
 
   {cloud ? (
     <div class="privacy-note privacy-cloud" role="note">
@@ -89,4 +97,5 @@ const cloud = tool.mode === 'cloud';
       </form>
     </dialog>
   )}
+  </div>
 </Base>

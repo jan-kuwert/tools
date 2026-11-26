@@ -251,7 +251,24 @@ dialog form { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top:
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 
-/* Tool pages embedded on the home page (?embed inside a same-origin frame, set by theme.js) */
-:root[data-embed] .corner, :root[data-embed] .site-footer, :root[data-embed] .crumbs, :root[data-embed] body > .visually-hidden { display: none; }
+/* Tool pages embedded in the home hub (?embed inside a same-origin frame, set by theme.js).
+   The hub's top bar carries the tool name, so the page shows only its summary, a one-line privacy note and the tool. */
+:root:not([data-embed]) .privacy-line { display: none; }
+:root[data-embed] :is(.corner, .site-footer, .crumbs, body > .visually-hidden, .tool-shell > .tool-head, .tool-shell > .privacy-note) { display: none; }
 :root[data-embed] body { min-height: 0; }
-:root[data-embed] main { width: 100%; padding: 0.25rem 0.25rem 1rem; }
+/* Side room for the hub's floating edge buttons. */
+:root[data-embed] main { width: min(100% - 2.5rem, 1100px); padding: 1.5rem 0 2rem; }
+:root[data-embed] main:has(.tool-shell[data-wide]) { width: calc(100% - 7rem); }
+:root[data-embed] .tool-summary { margin: 0; }
+:root[data-embed] .privacy-line { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin: 0.3rem 0 1.25rem; color: var(--muted); font-size: 0.85rem; }
+:root[data-embed] .privacy-line .icon svg { width: 16px; height: 16px; }
+/* Flat sections instead of cards inside the hub's frame. */
+:root[data-embed] .tool-shell > .panel { background: none; border: 0; border-radius: 0; box-shadow: none; padding: 0; }
+:root[data-embed] .tool-shell > .panel + .panel { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+:root[data-embed] .panel[data-tool] > .actions {
+  position: sticky; bottom: 0; z-index: 5; margin: 1.25rem 0 0; padding: 0.75rem 0;
+  background: var(--bg); border-top: 1px solid var(--border);
+}
+@media (max-width: 600px) {
+  :root[data-embed] main, :root[data-embed] main:has(.tool-shell[data-wide]) { width: calc(100% - 1.5rem); padding: 1rem 0 2rem; }
+}

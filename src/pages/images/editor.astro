@@ -8,12 +8,14 @@ import { href, toolBySlug } from '../../tools';
 const tool = toolBySlug('images/editor');
 ---
 <Base title={`${tool.title} · Tools`} description={tool.summary}>
+  <div class="tool-shell" data-wide>
   <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#images'}>Images</a></div>
   <div class="tool-head">
     <h1>{tool.title}</h1>
     <ModeBadge mode={tool.mode} />
   </div>
   <p class="tool-summary">{tool.summary}</p>
+  <p class="privacy-line"><Icon name="lock" /><span>Your files stay on this device.</span> <a href={href('privacy')}>Details</a></p>
   <div class="privacy-note privacy-local" role="note">
     <Icon name="lock" />
     <p><strong>Your files stay on this device.</strong> Processing happens in your browser; nothing is uploaded. <a href={href('privacy')}>How we check</a></p>
@@ -30,7 +32,15 @@ const tool = toolBySlug('images/editor');
   </section>
 
   <ImageEditor />
+  </div>
 </Base>
+
+<style is:global>
+  /* Embedded in the home hub: the editor fills the frame below the summary line. */
+  :root[data-embed] .image-editor { --ie-w: 100%; margin: 0.5rem 0 0; }
+  :root[data-embed] .ie-body { height: max(480px, calc(100dvh - 9.5rem)); }
+  @media (max-width: 820px) { :root[data-embed] .ie-body { height: auto; } }
+</style>
 
 <script>
   import { openImageEditor } from '../../lib/editor';

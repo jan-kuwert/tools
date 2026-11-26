@@ -1,9 +1,8 @@
 ---
 import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
-import ImageEditor from '../components/ImageEditor.astro';
 import ModeBadge from '../components/ModeBadge.astro';
-import { categories, href, tools, type Category, type Tool } from '../tools';
+import { categories, href, toolBySlug, type Category, type Tool } from '../tools';
 
 type Dir = 'n' | 'e' | 's' | 'w';
 type Screen = Category | 'centre';
@@ -15,99 +14,110 @@ const graph: Record<Screen, Partial<Record<Dir, Screen>>> = {
   images: { n: 'centre', e: 'pdf', w: 'audio' },
   files: { e: 'pdf', s: 'centre', w: 'audio' },
 };
-const screens: Screen[] = ['centre', ...categories.map((c) => c.id)];
-
-const dropTypes: [Category | 'code', string][] = [['images', 'Images'], ['pdf', 'PDF'], ['audio', 'Audio'], ['code', 'JSON & JS'], ['files', 'Archives']];
-const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
 const labelOf = (s: Screen) => (s === 'centre' ? 'Start' : categories.find((x) => x.id === s)!.label);
 const iconOf = (s: Screen) => (s === 'centre' ? 'home' : s);
 const toolIcon = (t: Tool) => (t.slug.startsWith('text/') ? 'code' : t.category);
+const tabKey = (slug: string) => slug.split('/')[1];
 const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left' } as const;
+const dirFromCentre = (c: Category) => (Object.entries(graph.centre) as [Dir, Screen][]).find(([, to]) => to === c)![0];
+const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
 ---
 <Base title="Tools · fast, private file tools" wide>
 <div class="home" data-at="centre">
-  <div class="hub" data-home data-hub tabindex="0" role="region" aria-label="Tools. Arrow keys move between screens; Escape returns to the start.">
-    {screens.map((id) => (
-      <section
-        class={`screen ${id === 'centre' ? 'screen-centre' : 'screen-panel'}`}
-        data-screen={id}
-        {...Object.fromEntries(Object.entries(graph[id]).map(([d, to]) => [`data-${d}`, to]))}
-        aria-label={id === 'centre' ? 'Start' : undefined}
-        aria-labelledby={id === 'centre' ? undefined : `hub-${id}`}
-      >
-        <div class="cell-scroll">
-          {id === 'centre' ? (
-            <div class="cell-inner centre-inner">
-              <h1>Quick file tools that respect your privacy.</h1>
-              <p class="lede">Almost everything runs right here in your browser. Your files never leave your device.</p>
-              <label class="drop hero-drop" data-hero-drop>
-                <input type="file" multiple data-hero-input />
-                <span class="drop-types" aria-hidden="true">
-                  {dropTypes.map(([g, label]) => (
-                    <span class="drop-type"><Icon name={g} />{label}</span>
-                  ))}
-                </span>
-                <span class="drop-title">Drop any file to start</span>
-                <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
-                <span class="drop-hint">Or paste from the clipboard. We pick the right tool for you.</span>
-              </label>
-              <p class="status" data-drop-status role="status" aria-live="polite"></p>
-              <button class="btn all-tools" type="button" data-all-tools aria-haspopup="dialog">
-                <Icon name="grid" />Show all tools
-              </button>
-            </div>
-          ) : (
-            <div class="cell-inner" style={`--cols: ${Math.min(toolsIn(id).length, 4)}`}>
-              <div class="panel-head">
-                <span class="tile"><Icon name={id} /></span>
-                <h2 id={`hub-${id}`} tabindex="-1">{labelOf(id)}</h2>
-              </div>
-              <p class="panel-blurb">{categories.find((c) => c.id === id)!.blurb}</p>
-              <ul class="tool-grid">
-                {toolsIn(id).map((t) => (
-                  <li>
-                    <a class="tool-card" href={href(t.slug)}>
-                      <span class="tile"><Icon name={toolIcon(t)} /></span>
-                      <h3>{t.title}</h3>
-                      <p>{t.summary}</p>
-                      <span class="card-mode"><ModeBadge mode={t.mode} /></span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-              <p class="panel-hint">Drop files anywhere on this page and we pick the right tool.</p>
-            </div>
-          )}
+  <div class="hub" data-hub tabindex="-1" role="region" aria-label="Tools. Press question mark for keyboard shortcuts.">
+    <section class="screen screen-centre" data-screen="centre" {...Object.fromEntries(edgesOf('centre').map(([d, to]) => [`data-${d}`, to]))} aria-label="Start">
+      <div class="cell-scroll">
+        <div class="cell-inner centre-inner">
+          <h1>Quick file tools that respect your privacy.</h1>
+          <p class="lede">Almost everything runs right here in your browser. Your files never leave your device.</p>
+          <nav class="jump" aria-label="Categories">
+            {categories.map((c) => (
+              <a class="jump-chip" href={`#${c.id}`} data-go={c.id} data-dir={dirFromCentre(c.id)}><Icon name={c.id} />{c.label}</a>
+            ))}
+          </nav>
+          <label class="drop hero-drop" data-hero-drop>
+            <input type="file" multiple data-hero-input />
+            <span class="drop-title">Drop any file to start</span>
+            <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
+            <span class="drop-hint">Or paste from the clipboard. We open the right tool with your files.</span>
+          </label>
+          <p class="status" data-drop-status role="status" aria-live="polite"></p>
+          <div class="centre-actions">
+            <button class="btn all-tools" type="button" data-all-tools aria-haspopup="dialog"><Icon name="grid" />Show all tools</button>
+            <button class="btn btn-ghost keys-btn" type="button" data-help-open aria-haspopup="dialog" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+          </div>
         </div>
-        {(Object.entries(graph[id]) as [Dir, Screen][]).map(([dir, to]) => (
-          <a class={`edge ea-${dir}`} href={to === 'centre' ? href() : `#${to}`} data-go={to} data-dir={dir} aria-label={`Go to ${labelOf(to)}`} data-tip={labelOf(to)}>
-            <span class="edge-circle"><Icon name={iconOf(to)} /></span>
-            <span class="edge-chev"><Icon name={ARROW[dir]} /></span>
-          </a>
-        ))}
-      </section>
-    ))}
+      </div>
+      {edgesOf('centre').map(([dir, to]) => (
+        <a class={`edge ea-${dir}`} href={`#${to}`} data-go={to} data-dir={dir} aria-label={`Go to ${labelOf(to)}`} data-tip={labelOf(to)}>
+          <span class="edge-circle"><Icon name={iconOf(to)} /></span>
+          <span class="edge-chev"><Icon name={ARROW[dir]} /></span>
+        </a>
+      ))}
+    </section>
+
+    {categories.map((c) => {
+      const list = c.tabs.map(toolBySlug);
+      return (
+        <section class="screen screen-cat" data-screen={c.id} {...Object.fromEntries(edgesOf(c.id).map(([d, to]) => [`data-${d}`, to]))} aria-labelledby={`hub-${c.id}`}>
+          <header class="cat-bar">
+            <div class="cat-title">
+              <span class="tile"><Icon name={c.id} /></span>
+              <h2 id={`hub-${c.id}`} tabindex="-1">{c.label}</h2>
+              {list.length === 1 && (
+                <span class="cat-single" data-slug={list[0].slug} data-tab={tabKey(list[0].slug)} data-url={href(list[0].slug)} data-title={list[0].title}>{list[0].short}</span>
+              )}
+            </div>
+            {list.length > 1 && (
+              <div class="tabs" role="tablist" aria-label={`${c.label} tools`}>
+                {list.map((t, i) => (
+                  <button
+                    class="tab" type="button" role="tab" id={`tab-${c.id}-${tabKey(t.slug)}`}
+                    aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? 0 : -1} aria-controls={`panel-${c.id}`}
+                    data-slug={t.slug} data-tab={tabKey(t.slug)} data-url={href(t.slug)} data-title={t.title}
+                  >
+                    <span>{t.short}</span>
+                    <Icon name={t.mode === 'cloud' ? 'cloud' : 'device'} class="tab-mode" />
+                    {t.mode === 'cloud' && <span class="visually-hidden">(uploads to our EU server after you confirm)</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            <nav class="cat-nav" aria-label="Other screens">
+              {edgesOf(c.id).map(([dir, to]) => (
+                <a class={`edge ea-${dir}`} href={to === 'centre' ? href() : `#${to}`} data-go={to} data-dir={dir} aria-label={`Go to ${labelOf(to)}`} data-tip={labelOf(to)}>
+                  <span class="edge-circle"><Icon name={iconOf(to)} /></span>
+                  <span class="edge-chev"><Icon name={ARROW[dir]} /></span>
+                </a>
+              ))}
+            </nav>
+          </header>
+          <div class="cat-body" id={`panel-${c.id}`} role={list.length > 1 ? 'tabpanel' : undefined} aria-labelledby={list.length > 1 ? `tab-${c.id}-${tabKey(list[0].slug)}` : `hub-${c.id}`} data-panel></div>
+          <div class="cat-foot" aria-hidden="true"></div>
+        </section>
+      );
+    })}
   </div>
-  <div class="hub-veil" aria-hidden="true"><span>Drop to start</span></div>
+  <div class="hub-veil" aria-hidden="true"><span>Drop to open the right tool</span></div>
 
   <dialog class="picker" data-picker aria-labelledby="picker-title">
     <div class="picker-head">
       <h2 id="picker-title">All tools</h2>
-      <button class="icon-btn" type="button" data-picker-close aria-label="Close"><Icon name="xmark" /></button>
+      <button class="icon-btn" type="button" data-dialog-close aria-label="Close"><Icon name="xmark" /></button>
     </div>
     <div class="picker-search">
       <label class="visually-hidden" for="picker-search">Search tools</label>
       <Icon name="search" class="picker-search-icon" />
       <input id="picker-search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" autofocus aria-controls="picker-list" data-picker-search />
     </div>
-    <div class="picker-list" id="picker-list" data-picker-list>
+    <div class="picker-list" id="picker-list">
       {categories.map((c) => (
         <section data-picker-group>
           <h3><Icon name={c.id} />{c.label}</h3>
           <ul>
-            {toolsIn(c.id).map((t) => (
-              <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
-                <a href={href(t.slug)}>
+            {c.tabs.map(toolBySlug).map((t) => (
+              <li data-keywords={`${t.title} ${t.short} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
+                <a href={href(t.slug)} data-open-screen={c.id} data-open-slug={t.slug}>
                   <span class="tile"><Icon name={toolIcon(t)} /></span>
                   <span class="pk-text"><strong>{t.title}</strong><small>{t.summary}</small></span>
                   <ModeBadge mode={t.mode} />
@@ -125,63 +135,44 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     </dl>
   </dialog>
 
-  <div class="home-inner home-work">
-    <section class="stage" data-stage hidden aria-label="Your files">
-      <div class="stage-bar" data-stage-bar>
-        <button class="btn" type="button" data-back>← Back</button>
-        <button class="btn btn-ghost" type="button" data-restart>Start over</button>
-      </div>
-      <div data-chooser>
-        <h2 tabindex="-1" data-chooser-title>What do you want to do?</h2>
-        <p class="muted" data-file-summary></p>
-        <ul class="tool-grid" data-choices>
-          {tools.map((t) => (
-            <li data-choice={t.slug} hidden>
-              <button class="tool-card choice-card" type="button" data-pick={t.slug} data-url={href(t.slug)} data-title={t.title}>
-                <span class="tile"><Icon name={toolIcon(t)} /></span>
-                <h3>{t.title}</h3>
-                <p>{t.summary}</p>
-                <span class="card-mode"><ModeBadge mode={t.mode} /></span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div class="cloud-alt" data-cloud-alt>
-        <span>Need a transparent cutout instead?</span>
-        <button class="btn" type="button" data-pick="images/remove-background">Remove background <ModeBadge mode="cloud" /></button>
-      </div>
-    </section>
-
-    <ImageEditor />
-  </div>
+  <dialog class="picker help" data-help aria-labelledby="help-title">
+    <div class="picker-head">
+      <h2 id="help-title">Keyboard shortcuts</h2>
+      <button class="icon-btn" type="button" data-dialog-close aria-label="Close"><Icon name="xmark" /></button>
+    </div>
+    <dl class="keys">
+      <div><dt><kbd>←</kbd><kbd>↓</kbd><kbd>↑</kbd><kbd>→</kbd> <span>or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>Move to the screen in that direction</dd></div>
+      <div><dt><kbd>Alt</kbd> + <span>arrow or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>Move, even from inside a field</dd></div>
+      <div><dt><kbd>Esc</kbd> <span>or</span> <kbd>0</kbd></dt><dd>Back to Start</dd></div>
+      <div><dt><kbd>1</kbd> <span>–</span> <kbd>9</kbd></dt><dd>Switch tool on a category screen</dd></div>
+      <div><dt><kbd>/</kbd></dt><dd>Search all tools</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
+    </dl>
+    <p class="keys-note">Shortcuts pause while you type in a field or work in the image editor or waveform.</p>
+  </dialog>
 </div>
 </Base>
 
 <style is:global>
   /* Home only. Neutral surfaces; --accent only on the primary button, focus, drop hover and arrow chevrons. */
   main.wide { width: 100%; padding: 0; }
-  .home { --gutter: clamp(1rem, 4vw, 3rem); position: relative; }
-  .home-inner { width: min(100% - 2 * var(--gutter), 1600px); margin-inline: auto; }
+  .home { position: relative; }
   .home .tile {
     display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 12px; flex: none;
     color: var(--muted); background: var(--surface-2);
   }
 
-  /* Hub: screens stacked in one stage; JS slides them in and out (transform/opacity only). */
-  .hub {
-    position: relative; isolation: isolate; overflow: hidden; touch-action: none;
-    height: 100dvh; /* site chrome floats in the corners (Base.astro, wide) */
-  }
+  /* Hub: screens stacked in one full-viewport stage; JS slides them in and out (transform/opacity only).
+     Site chrome (title, theme, privacy, settings) floats in the four corners (Base.astro, wide). */
+  /* clip, not hidden: focus moving into a tool frame must not scroll the stage. */
+  .hub { position: relative; isolation: isolate; overflow: clip; touch-action: none; height: 100dvh; }
+  .hub:focus { outline: none; }
   .hub.dragging { user-select: none; }
-  .hub:focus-visible { outline-offset: -4px; }
-  /* The global rule shows every .mode tooltip inside a focused ancestor; the hub itself is focusable. */
-  .hub:focus-visible .mode::after { opacity: 0; transform: translateY(-3px); }
-  .hub:focus-visible .mode:hover::after { opacity: 1; transform: none; }
-  .screen { position: absolute; inset: 0; background: var(--bg); visibility: hidden; }
+  .screen { position: absolute; inset: 0; overflow: clip; background: var(--bg); visibility: hidden; }
   .screen[data-active], .screen.leaving, .screen.peek { visibility: visible; }
   .screen[data-active] { z-index: 1; }
-  /* Faint edge washes on the start screen hint that there is more in every direction. */
+
+  /* Start screen */
   .screen-centre::before {
     --edge: color-mix(in srgb, var(--accent) 7%, transparent);
     content: ''; position: absolute; inset: 0; pointer-events: none;
@@ -196,24 +187,54 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
   /* Tall content (small screens) scrolls natively; horizontal swipes still reach the hub. */
   .scrolls > .cell-scroll { touch-action: pan-y; }
   /* Auto margins centre short content but keep tall content scrollable from its top. */
-  .cell-inner { margin: auto; width: min(100%, 1120px); }
+  .cell-inner { margin: auto; width: min(100%, 46rem); text-align: center; }
   @media (max-width: 600px) { .cell-scroll { padding: 4.75rem 3.5rem; } }
+  .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.7rem); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 0.6rem; }
+  .lede { color: var(--muted); margin: 0 auto 1.25rem; max-width: 40ch; }
+  .jump { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.45rem; margin-bottom: 1rem; }
+  .jump-chip {
+    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.8rem 0.3rem 0.55rem;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--fg); font-size: 0.88rem; font-weight: 600; text-decoration: none;
+    transition: border-color 0.1s, transform 0.1s ease-out;
+  }
+  .jump-chip:hover { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); transform: translateY(-1px); }
+  .jump-chip:active { transform: scale(0.97); }
+  .jump-chip .icon svg { width: 16px; height: 16px; color: var(--muted); }
+  .home .hero-drop {
+    min-height: clamp(11rem, 28vh, 17rem); align-content: center; gap: 0.8rem;
+    padding: 1.75rem 1rem; border-radius: 24px; border: 2px dashed var(--border);
+    background: var(--surface); box-shadow: var(--shadow);
+    transition: transform 0.12s ease-out, box-shadow 0.12s, border-color 0.12s;
+  }
+  .home .hero-drop:is(:hover, .over, :focus-within) {
+    border-color: var(--accent); background: var(--surface);
+    transform: translateY(-2px); box-shadow: 0 16px 40px -20px rgb(0 0 0 / 0.25);
+  }
+  .hero-drop:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .hero-drop .drop-title { font-size: clamp(1.3rem, 3vw, 1.75rem); letter-spacing: -0.02em; }
+  .drop-btn { pointer-events: none; font-size: 1.02rem; padding: 0.7rem 1.4rem; border-radius: 12px; }
+  .cell-inner .status { min-height: 0; margin: 0.5rem 0 0; }
+  .centre-actions { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem; }
+  .all-tools { border-radius: 999px; }
+  .all-tools .icon svg { width: 18px; height: 18px; color: var(--muted); }
+  .keys-btn { width: 2.6rem; padding-inline: 0; border-radius: 999px; font-weight: 700; }
 
-  /* Edge arrows: big destination icon in a round button, small accent chevron toward the edge. */
+  /* Edge buttons: destination icon in a round button with a small accent arrow toward the edge. */
   .edge { position: absolute; z-index: 2; display: grid; place-items: center; color: var(--fg); text-decoration: none; }
   .edge-circle {
     display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%;
     border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 90%, transparent);
     backdrop-filter: blur(8px); box-shadow: var(--shadow); color: var(--muted);
-    transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s, color 0.1s;
+    transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s, color 0.1s, opacity 0.12s;
   }
   .edge-circle .icon svg { width: 26px; height: 26px; }
   .edge-chev {
     position: absolute; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
     background: var(--accent); color: var(--accent-fg);
   }
-  .home .edge-chev svg { width: 14px; height: 14px; stroke-width: 2.4; }
-  .edge:hover .edge-circle, .edge:focus-visible .edge-circle { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
+  .edge-chev .icon svg { width: 14px; height: 14px; stroke-width: 2.4; }
+  .edge:hover .edge-circle, .edge:focus-visible .edge-circle { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); opacity: 1; }
   .edge:active .edge-circle { scale: 0.94; }
   .edge:focus-visible { outline: none; }
   .edge:focus-visible .edge-circle { outline: 3px solid var(--accent); outline-offset: 2px; }
@@ -240,81 +261,80 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
   .ea-e::after { right: calc(100% + 12px); }
   .ea-w::after { left: calc(100% + 12px); }
   @media (max-width: 600px) {
-    .edge-circle { width: 44px; height: 44px; }
-    .edge-circle .icon svg { width: 22px; height: 22px; }
-    .ea-n { top: 1rem; } .ea-s { bottom: 1rem; } .ea-e { right: 0.6rem; } .ea-w { left: 0.6rem; }
+    .screen-centre .edge-circle { width: 44px; height: 44px; }
+    .screen-centre .edge-circle .icon svg { width: 22px; height: 22px; }
+    .screen-centre .ea-n { top: 1rem; } .screen-centre .ea-s { bottom: 1rem; }
+    .screen-centre .ea-e { right: 0.6rem; } .screen-centre .ea-w { left: 0.6rem; }
   }
 
-  /* Start screen */
-  .centre-inner { width: min(100%, 46rem); text-align: center; }
-  .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.7rem); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 0.6rem; }
-  .lede { color: var(--muted); margin: 0 auto 1.5rem; max-width: 40ch; }
-  .home .hero-drop {
-    min-height: clamp(12rem, 32vh, 19rem); align-content: center; gap: 0.8rem;
-    padding: 1.75rem 1rem; border-radius: 24px; border: 2px dashed var(--border);
-    background: var(--surface); box-shadow: var(--shadow);
-    transition: transform 0.12s ease-out, box-shadow 0.12s, border-color 0.12s;
+  /* Category screens: slim top bar, the tool fills the rest. The bottom strip keeps the corner links off the tool. */
+  .screen-cat { display: grid; grid-template-rows: auto minmax(0, 1fr) 44px; }
+  .cat-bar {
+    display: flex; align-items: center; gap: 1rem; min-width: 0; min-height: 56px;
+    padding: 0.5rem 7.5rem 0.5rem 6rem; border-bottom: 1px solid var(--border);
   }
-  .home .hero-drop:is(:hover, .over, :focus-within) {
-    border-color: var(--accent); background: var(--surface);
-    transform: translateY(-2px); box-shadow: 0 16px 40px -20px rgb(0 0 0 / 0.25);
+  .cat-title { display: flex; align-items: center; gap: 0.6rem; flex: none; }
+  .cat-title .tile { width: 2rem; height: 2rem; border-radius: 9px; }
+  .cat-title .icon svg { width: 18px; height: 18px; }
+  .cat-title h2 { margin: 0; font-size: 1.05rem; white-space: nowrap; }
+  .cat-title h2:focus { outline: none; }
+  .cat-single { color: var(--muted); font-weight: 550; white-space: nowrap; }
+  .cat-single::before { content: '·'; margin-right: 0.6rem; }
+  .tabs {
+    display: flex; gap: 2px; padding: 3px; min-width: 0; overflow-x: auto; scrollbar-width: none;
+    border-radius: 12px; background: var(--surface-2);
   }
-  .hero-drop:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 3px; }
-  .hero-drop .drop-title { font-size: clamp(1.3rem, 3vw, 1.75rem); letter-spacing: -0.02em; }
-  .drop-btn { pointer-events: none; font-size: 1.02rem; padding: 0.7rem 1.4rem; border-radius: 12px; }
-  .drop-types { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.45rem; }
-  .drop-type {
-    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem 0.25rem 0.45rem;
-    border-radius: 999px; font-size: 0.82rem; font-weight: 600; color: var(--fg); border: 1px solid var(--border);
+  .tab {
+    display: inline-flex; align-items: center; gap: 0.35rem; flex: none; padding: 0.35rem 0.75rem;
+    border: 0; border-radius: 9px; background: none; color: var(--muted);
+    font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+    transition: background 0.1s, color 0.1s;
   }
-  .home .drop-type .icon svg { color: var(--muted); width: 16px; height: 16px; }
-  .centre-inner .status { min-height: 0; margin: 0.5rem 0 0; }
-  .all-tools { margin-top: 1rem; border-radius: 999px; transition: transform 0.1s ease-out, border-color 0.1s; }
-  .home .all-tools .icon svg { width: 18px; height: 18px; color: var(--muted); }
+  .tab:hover { color: var(--fg); }
+  .tab[aria-selected='true'] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }
+  .tab:focus-visible { outline-offset: -2px; }
+  .tab-mode svg { width: 15px; height: 15px; opacity: 0.7; }
+  .cat-body { position: relative; min-height: 0; overflow: clip; }
+  .tool-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); color-scheme: normal; }
+  .cat-foot { border-top: 1px solid var(--border); }
+  /* Desktop: the nav's buttons float on the screen edges, smaller and quieter than on the start screen. */
+  .cat-nav { display: contents; }
+  .screen-cat .edge-circle { width: 38px; height: 38px; opacity: 0.6; }
+  .screen-cat .edge-circle .icon svg { width: 20px; height: 20px; }
+  .screen-cat .edge-chev { width: 16px; height: 16px; }
+  .screen-cat .edge-chev .icon svg { width: 11px; height: 11px; }
+  .screen-cat .ea-n { top: 9px; left: auto; right: 4.25rem; translate: none; }
+  .screen-cat .ea-s { bottom: 3px; }
+  .screen-cat .ea-e { right: 0.6rem; }
+  .screen-cat .ea-w { left: 0.6rem; }
+  @media (max-width: 760px) {
+    .cat-bar { flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0.75rem; }
+    .cat-title { order: 1; margin-left: 4.5rem; }
+    .cat-nav { order: 2; display: flex; gap: 0.55rem; margin: 0 3rem 0 auto; }
+    .tabs { order: 3; flex-basis: 100%; }
+    .cat-nav .edge { position: relative; inset: auto; translate: none; }
+    /* In the row the arrow badge sits on the corner, so it never overlaps the neighbouring button. */
+    .cat-nav .edge-chev { inset: auto -4px -4px auto; }
+    .screen-cat .edge-circle { width: 34px; height: 34px; opacity: 1; }
+    .cat-title .tile { display: none; }
+  }
 
-  /* Category panels */
-  .panel-head { display: flex; align-items: center; gap: 0.75rem; }
-  .panel-head h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); letter-spacing: -0.02em; margin: 0; }
-  .panel-head h2:focus { outline: none; }
-  .panel-blurb { color: var(--muted); margin: 0.4rem 0 1.5rem; }
-  .panel-hint { color: var(--muted); font-size: 0.88rem; margin: 1.25rem 0 0; text-align: center; }
-  .home .tool-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.9rem; }
-  /* Size panels to their card count so short categories don't sit in an empty half-screen. */
-  .screen-panel .cell-inner { width: min(100%, max(26rem, var(--cols) * 16rem + (var(--cols) - 1) * 0.9rem)); }
-  .home .tool-card {
-    display: grid; grid-template-columns: auto 1fr; grid-template-areas: 'tile mode' 'title title' 'text text';
-    align-content: start; gap: 0.6rem 0.5rem; border-radius: 16px; padding: 1rem 1.1rem 1.15rem;
-    transition: transform 0.12s ease-out, border-color 0.12s, box-shadow 0.12s;
-  }
-  .home .tool-card .tile { grid-area: tile; }
-  .card-mode { grid-area: mode; justify-self: end; align-self: start; display: flex; }
-  .home .tool-card h3 { grid-area: title; margin-top: 0.15rem; }
-  .home .tool-card p { grid-area: text; }
-  .home .tool-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -16px rgb(0 0 0 / 0.3); }
-  .home .tool-card:active { transform: translateY(0) scale(0.99); }
-  @media (max-width: 600px) {
-    .home .tool-card { grid-template-columns: auto 1fr auto; grid-template-areas: 'tile title mode' 'tile text text'; align-items: start; gap: 0.2rem 0.75rem; padding: 0.85rem 0.9rem; }
-    .home .tool-card h3 { margin: 0; font-size: 0.98rem; }
-  }
-
-  /* All-tools dialog */
-  dialog.picker {
-    width: min(94vw, 40rem); max-width: none; max-height: min(86dvh, 46rem); padding: 0; overflow: hidden;
-  }
+  /* Dialogs: all tools and keyboard shortcuts */
+  dialog.picker { width: min(94vw, 40rem); max-width: none; max-height: min(86dvh, 46rem); padding: 0; overflow: hidden; }
   dialog.picker[open] { display: flex; flex-direction: column; animation: picker-in 0.16s ease-out; }
   @keyframes picker-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
   .picker-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1rem 0 1.25rem; }
   .picker-head h2 { margin: 0; }
   .picker-search { position: relative; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
   .picker-search-icon { position: absolute; left: 1.85rem; top: 50%; translate: 0 -50%; color: var(--muted); pointer-events: none; }
-  .home .picker-search-icon svg { width: 18px; height: 18px; }
+  .picker-search-icon svg { width: 18px; height: 18px; }
   .home .search { width: 100%; margin: 0; border-radius: 999px; padding: 0.6rem 1rem 0.6rem 2.6rem; font-size: 1rem; background: var(--surface); }
   .picker-list { overflow-y: auto; overscroll-behavior: contain; padding: 0.25rem 0.6rem 1rem; }
   .picker-list h3 {
     display: flex; align-items: center; gap: 0.45rem; margin: 0.9rem 0.6rem 0.35rem;
     font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
   }
-  .home .picker-list h3 .icon svg { width: 16px; height: 16px; }
+  .picker-list h3 .icon svg { width: 16px; height: 16px; }
   .picker-list ul { list-style: none; margin: 0; padding: 0; }
   .picker-list a {
     display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.6rem; border-radius: 12px;
@@ -329,42 +349,43 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
   /* Arrow-key focus moves through rows; their mode tooltips would cover the next row. */
   .picker :focus-visible .mode::after { opacity: 0; transform: translateY(-3px); }
   .picker .mode:hover::after { opacity: 1; transform: none; }
-  .picker-legend { display: grid; gap: 0.4rem; margin: 0; padding: 0.75rem 1.25rem 0.9rem; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); }
+  .picker-legend, .keys-note { margin: 0; padding: 0.75rem 1.25rem 0.9rem; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); }
+  .picker-legend { display: grid; gap: 0.4rem; }
   .picker-legend div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0.5rem; }
   .picker-legend dt { display: flex; align-items: center; gap: 0.35rem; font-weight: 600; color: var(--fg); }
-  .home .picker-legend .icon svg { width: 16px; height: 16px; color: var(--muted); }
+  .picker-legend .icon svg { width: 16px; height: 16px; color: var(--muted); }
   .picker-legend dd { margin: 0; }
-  @media (max-width: 520px) { .picker-legend div { grid-template-columns: 1fr; gap: 0.1rem; } }
+  @media (max-width: 520px) { .picker-legend div, .keys div { grid-template-columns: 1fr; gap: 0.2rem; } }
+  .keys { display: grid; gap: 0.15rem; margin: 0; padding: 0.75rem 1.25rem 1rem; overflow-y: auto; }
+  .keys div { display: grid; grid-template-columns: 18rem 1fr; gap: 1rem; align-items: center; padding: 0.45rem 0; }
+  .keys div + div { border-top: 1px solid var(--border); }
+  .keys dt { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; color: var(--muted); font-size: 0.85rem; }
+  .keys dd { margin: 0; }
+  kbd {
+    display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.4rem;
+    border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; background: var(--surface-2);
+    color: var(--fg); font: 600 0.8rem/1 var(--mono);
+  }
 
-  /* Shown while dragging files over a category panel (the start screen has its own drop zone). */
+  /* Shown while dragging files over a category screen (the start screen has its own drop zone). */
   .hub-veil {
-    position: absolute; inset: 0.75rem; height: calc(100dvh - 1.5rem); z-index: 4; pointer-events: none;
+    position: absolute; inset: 0.75rem; z-index: 4; pointer-events: none;
     display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 24px;
     background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(4px);
     font-size: 1.4rem; font-weight: 650; opacity: 0; transition: opacity 0.12s;
   }
   .home[data-dragging]:not([data-at='centre']) .hub-veil { opacity: 1; }
-  .home:has(> .hub[hidden]) .hub-veil { display: none; }
-
-  /* Handoff stage (chooser, embedded tool) and the image editor. */
-  .home-work { padding: 2rem 0 4rem; max-width: 1280px; }
-  .home-work:not(:has(> [data-stage]:not([hidden]), > [data-image-editor]:not([hidden]))) { display: none; }
-  .stage-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
-  .stage-bar [data-restart] { margin-left: auto; }
-  .stage-bar:not(:has(button:not([hidden]))) { display: none; }
-  .choice-card { width: 100%; font: inherit; text-align: left; cursor: pointer; }
-  .stage h2[tabindex]:focus { outline: none; }
-  .cloud-alt { display: flex; gap: 0.5rem 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; color: var(--muted); font-size: 0.93rem; }
-  .tool-frame { display: block; width: 100%; height: 70vh; border: 0; }
 </style>
 
 <script>
-  import { el, sniff, UserError } from '../lib/tool';
+  import { el, sniff } from '../lib/tool';
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
-  // All-tools dialog: live filter, ↑/↓ moves through results, Enter opens, Escape closes (native).
+  // ---------- Dialogs ----------
   const picker = $<HTMLDialogElement>('[data-picker]');
+  const help = $<HTMLDialogElement>('[data-help]');
   const pickSearch = $<HTMLInputElement>('[data-picker-search]');
   const pickRows = [...picker.querySelectorAll<HTMLElement>('li[data-keywords]')];
   const pickGroups = [...picker.querySelectorAll<HTMLElement>('[data-picker-group]')];
@@ -377,17 +398,24 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     for (const g of pickGroups) g.hidden = !g.querySelector('li:not([hidden])');
     pickEmpty.hidden = pickRows.some((li) => !li.hidden);
   }
-  pickSearch.addEventListener('input', filterPicks);
-  $('[data-all-tools]').addEventListener('click', () => {
+  function openPicker() {
+    help.close();
     pickSearch.value = '';
     filterPicks();
-    picker.showModal();
-  });
-  $('[data-picker-close]').addEventListener('click', () => picker.close());
-  // The dialog has no padding, so a click on the element itself is a click on the backdrop.
-  picker.addEventListener('click', (e) => {
-    if (e.target === picker) picker.close();
-  });
+    if (!picker.open) picker.showModal();
+  }
+  function openHelp() {
+    picker.close();
+    if (!help.open) help.showModal();
+  }
+  pickSearch.addEventListener('input', filterPicks);
+  $('[data-all-tools]').addEventListener('click', openPicker);
+  $('[data-help-open]').addEventListener('click', openHelp);
+  for (const d of [picker, help]) {
+    d.querySelector('[data-dialog-close]')!.addEventListener('click', () => d.close());
+    // The dialogs have no padding, so a click on the element itself is a click on the backdrop.
+    d.addEventListener('click', (e) => e.target === d && d.close());
+  }
   picker.addEventListener('keydown', (e) => {
     const links = visiblePicks();
     const i = links.indexOf(document.activeElement as HTMLAnchorElement);
@@ -400,27 +428,57 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
       (next < 0 ? pickSearch : links[next])?.focus();
     }
   });
+  // Picking a tool opens it in the hub; modified clicks still open the standalone page.
+  picker.addEventListener('click', (e) => {
+    const a = (e.target as Element).closest<HTMLAnchorElement>('a[data-open-slug]');
+    if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    picker.close();
+    openTool(a.dataset.openScreen!, a.dataset.openSlug!);
+  });
 
-  // Hub: one full-size stage; screens slide in from the edge in the direction of travel.
+  // ---------- Hub: screens, tabs and frames ----------
   type Dir = 'n' | 'e' | 's' | 'w';
+  type Frame = { slug: string; el: HTMLIFrameElement; loaded: boolean };
   const home = $('.home');
   const hub = $('[data-hub]');
   const screens = new Map([...hub.querySelectorAll<HTMLElement>('[data-screen]')].map((s) => [s.dataset.screen!, s]));
+  const centreScroll = $('.screen-centre .cell-scroll');
   const DIRS: Dir[] = ['n', 'e', 's', 'w'];
-  const KEY_DIR: Record<string, Dir> = { ArrowUp: 'n', ArrowDown: 's', ArrowLeft: 'w', ArrowRight: 'e' };
   const VEC: Record<Dir, [number, number]> = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
   const EASE = 'cubic-bezier(0.33, 1, 0.68, 1)';
-  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
   let active = 'centre';
   let running: Animation[] = [];
   let leaving: HTMLElement | undefined;
   let peeking: HTMLElement | undefined;
+  const frames = new Map<string, Frame>();
+  const selected = new Map<string, string>();
+  // Files from the last drop, in memory only, and the category they were routed to.
+  let held: { screen: string; files: File[] } | undefined;
 
   const neighbour = (from: string, dir: Dir) => screens.get(from)?.dataset[dir];
   const dirTo = (from: string, to: string) => DIRS.find((d) => neighbour(from, d) === to);
-  const screenFromHash = () => (screens.has(location.hash.slice(1)) ? location.hash.slice(1) : 'centre');
-  const scrollerOf = (id: string) => screens.get(id)!.querySelector<HTMLElement>('.cell-scroll')!;
+  const toolsOf = (id: string) => [...screens.get(id)!.querySelectorAll<HTMLElement>('[data-slug]')];
+  const toolEl = (id: string, slug: string) => toolsOf(id).find((t) => t.dataset.slug === slug);
+  const slugOf = (id: string) => selected.get(id) ?? toolsOf(id)[0].dataset.slug!;
   const tf = (xPct: number, yPct: number, x = 0, y = 0) => `translate(calc(${xPct}% + ${x}px), calc(${yPct}% + ${y}px))`;
+
+  /** `#pdf` or `#pdf/split` → screen and tool slug. */
+  function fromHash(): { screen: string; slug?: string } {
+    const [screen, tab] = location.hash.slice(1).split('/');
+    if (!screen || !screens.has(screen) || screen === 'centre') return { screen: 'centre' };
+    return { screen, slug: toolsOf(screen).find((t) => t.dataset.tab === tab)?.dataset.slug };
+  }
+  function hashFor(id: string) {
+    if (id === 'centre') return '';
+    const slug = slugOf(id);
+    return slug === toolsOf(id)[0].dataset.slug ? `#${id}` : `#${id}/${toolEl(id, slug)!.dataset.tab}`;
+  }
+  /** Keep the URL shareable without adding history entries for moves and tab changes. */
+  function syncUrl() {
+    const want = hashFor(active);
+    if (location.hash !== want) history.replaceState(history.state, '', want || location.pathname + location.search);
+  }
 
   function setActive(id: string) {
     active = id;
@@ -429,8 +487,8 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
       s.inert = key !== id;
       s.toggleAttribute('data-active', key === id);
     }
-    // Keep the URL shareable without adding a history entry per move.
-    if (current === 'home' && screenFromHash() !== id) history.replaceState(history.state, '', id === 'centre' ? location.pathname + location.search : `#${id}`);
+    ensureFrame(id);
+    syncUrl();
   }
 
   /** Jump every running transition to its end state. */
@@ -443,7 +501,7 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     for (const s of screens.values()) s.style.transform = '';
   }
 
-  /** Show `to`, sliding it in from the `dir` edge; screens that aren't neighbours cross-fade. (x, y): drag offset in px. */
+  /** Show `to`, sliding it in from the `dir` edge; screens that aren't neighbours cross-fade. (x, y): current drag offset in px. */
   function navigate(to: string, dir = dirTo(active, to), x = 0, y = 0) {
     if (to === active) return;
     const from = screens.get(active)!;
@@ -469,186 +527,379 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     running[0].onfinish = () => leaving === from && settle();
   }
 
-  /** Navigate and, when focus is inside the hub, carry it along so it isn't lost in an inert screen. */
+  /** Navigate and, when focus is inside the hub (or in a tool frame), carry it along so it isn't lost in an inert screen. */
   function go(to: string, dir?: Dir) {
     const focusInside = hub.contains(document.activeElement) && document.activeElement !== hub;
     navigate(to, dir);
-    if (focusInside) (to === 'centre' ? hub : screens.get(to)!.querySelector<HTMLElement>('h2[tabindex]')!).focus({ preventScroll: true });
+    if (focusInside) focusScreen(to);
   }
+  const focusScreen = (id: string) => (id === 'centre' ? hub : screens.get(id)!.querySelector<HTMLElement>('h2[tabindex]')!).focus({ preventScroll: true });
+  const move = (dir: Dir) => {
+    const next = neighbour(active, dir);
+    if (next) go(next, dir);
+  };
 
-  /** True when the active screen's content can still scroll toward `dir` (only vertical content scrolls). */
-  function canScroll(dir: Dir) {
-    const sc = scrollerOf(active);
-    if (dir === 's') return sc.scrollTop + sc.clientHeight < sc.scrollHeight - 1;
-    if (dir === 'n') return sc.scrollTop > 0;
-    return false;
-  }
-
-  // Which screens have content taller than the stage (they get native vertical touch scrolling).
-  const ro = new ResizeObserver(() => {
-    for (const s of screens.values()) {
-      const sc = s.querySelector<HTMLElement>('.cell-scroll')!;
-      s.classList.toggle('scrolls', sc.scrollHeight > sc.clientHeight + 1);
+  function markTab(id: string, slug: string) {
+    selected.set(id, slug);
+    const panel = screens.get(id)!.querySelector<HTMLElement>('[data-panel]')!;
+    for (const t of screens.get(id)!.querySelectorAll<HTMLElement>('[role="tab"]')) {
+      const on = t.dataset.slug === slug;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      if (on) panel.setAttribute('aria-labelledby', t.id);
     }
-  });
-  for (const s of screens.values()) {
-    ro.observe(s.querySelector('.cell-scroll')!);
-    ro.observe(s.querySelector('.cell-inner')!);
   }
 
-  hub.addEventListener('keydown', (e) => {
-    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    if ((e.target as Element).closest('input, textarea, select, [contenteditable]')) return;
-    if (e.key === 'Escape' || e.key === 'Home') {
+  /** Create the selected tool's frame for a screen if it isn't there yet (one frame per screen). */
+  function ensureFrame(id: string) {
+    if (id === 'centre') return;
+    const slug = slugOf(id);
+    if (frames.get(id)?.slug === slug) return;
+    const t = toolEl(id, slug)!;
+    frames.get(id)?.el.remove();
+    const rec: Frame = { slug, loaded: false, el: el('iframe', { src: `${t.dataset.url}?embed`, title: t.dataset.title!, className: 'tool-frame' }) };
+    frames.set(id, rec);
+    rec.el.addEventListener('load', () => {
+      rec.loaded = true;
+      onFrameLoad(id, rec);
+    });
+    screens.get(id)!.querySelector('[data-panel]')!.append(rec.el);
+  }
+
+  /** Select a screen's tool (loading its frame), handing over dropped files that fit it. */
+  function openTool(id: string, slug: string, push = false) {
+    markTab(id, slug);
+    const rec = frames.get(id);
+    if (rec?.slug === slug) {
+      if (rec.loaded) inject(id, rec);
+    } else if (id === active || push || rec) ensureFrame(id);
+    if (push) history.pushState({ drop: true }, '', hashFor(id) || location.pathname + location.search);
+    if (active !== id) go(id);
+    else syncUrl();
+  }
+
+  // ---------- Tool frames ----------
+  const accepts = (accept: string, f: File) =>
+    !accept ||
+    accept.split(',').some((a) => {
+      const t = a.trim().toLowerCase();
+      return t.startsWith('.') ? f.name.toLowerCase().endsWith(t) : t.endsWith('/*') ? f.type.startsWith(t.slice(0, -1)) : f.type === t;
+    });
+
+  /** Put the held files into the tool's file input, if they belong to this screen and the tool takes them. */
+  function inject(id: string, rec: Frame) {
+    const win = rec.el.contentWindow as (Window & typeof globalThis) | null;
+    const doc = rec.el.contentDocument;
+    if (!held || held.screen !== id || !win || !doc) return;
+    // ToolShell pages and the image editor take files through [data-input]; text tools through [data-file].
+    const target = doc.querySelector<HTMLInputElement>('[data-input], [data-file]');
+    if (!target) return;
+    const list = held.files.filter((f) => accepts(target.accept, f));
+    if (!list.length) return;
+    const dt = new win.DataTransfer();
+    // Rebuild each File in the frame's realm so arrayBuffer() returns that realm's ArrayBuffer;
+    // libraries' `instanceof ArrayBuffer` checks fail otherwise (e.g. pdf-lib).
+    (target.multiple ? list : list.slice(0, 1)).forEach((f) => dt.items.add(new win.File([f], f.name, { type: f.type, lastModified: f.lastModified })));
+    target.files = dt.files;
+    target.dispatchEvent(new win.Event('change'));
+  }
+
+  const syncTheme = (doc: Document) => {
+    const theme = document.documentElement.dataset.theme;
+    if (theme) doc.documentElement.dataset.theme = theme;
+    else delete doc.documentElement.dataset.theme;
+  };
+  new MutationObserver(() => frames.forEach((r) => r.loaded && r.el.contentDocument && syncTheme(r.el.contentDocument))).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  });
+
+  function onFrameLoad(id: string, rec: Frame) {
+    const doc = rec.el.contentDocument;
+    if (!doc) return;
+    syncTheme(doc);
+    inject(id, rec);
+    doc.addEventListener('keydown', (e) => onShortcut(e, doc));
+    // Site links (privacy, settings, standalone pages) leave the hub instead of navigating inside the frame.
+    doc.addEventListener('click', (e) => {
+      const a = (e.target as Element).closest?.<HTMLAnchorElement>('a[href]');
+      if (!a || e.defaultPrevented || a.download || a.getAttribute('href')!.startsWith('#') || a.protocol === 'blob:' || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      location.href = a.href;
+    });
+    // Files dropped outside the tool's own drop zone are routed like drops on the hub (and never open in the frame).
+    doc.addEventListener('dragover', (e) => hasFiles(e) && e.preventDefault());
+    doc.addEventListener('drop', (e) => {
+      if (!hasFiles(e) || e.defaultPrevented) return;
+      e.preventDefault();
+      void handle([...e.dataTransfer!.files]);
+    });
+  }
+
+  // Prefetch a screen's tool when the pointer or focus reaches the button that leads there.
+  for (const type of ['pointerover', 'focusin'] as const) {
+    hub.addEventListener(type, (e) => {
+      const a = (e.target as Element).closest?.<HTMLElement>('.edge, .jump-chip');
+      if (a?.dataset.go) ensureFrame(a.dataset.go);
+    });
+  }
+
+  // Tabs: roving tabindex; arrow keys move focus, Enter/Space or click selects (frames are too heavy to load per arrow press).
+  for (const list of hub.querySelectorAll<HTMLElement>('[role="tablist"]')) {
+    const id = list.closest<HTMLElement>('[data-screen]')!.dataset.screen!;
+    const tabs = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
+    list.addEventListener('click', (e) => {
+      const t = (e.target as Element).closest<HTMLElement>('[role="tab"]');
+      if (t) openTool(id, t.dataset.slug!);
+    });
+    list.addEventListener('keydown', (e) => {
+      const i = tabs.indexOf(document.activeElement as HTMLElement);
+      const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (next === undefined || e.altKey) return;
+      e.preventDefault();
+      const t = tabs[(next + tabs.length) % tabs.length];
+      tabs.forEach((x) => (x.tabIndex = x === t ? 0 : -1));
+      t.focus();
+    });
+  }
+
+  // ---------- Keyboard shortcuts (hub document and every tool frame) ----------
+  const KEY_DIR: Record<string, Dir> = { ArrowUp: 'n', KeyK: 'n', ArrowDown: 's', KeyJ: 's', ArrowLeft: 'w', KeyH: 'w', ArrowRight: 'e', KeyL: 'e' };
+  // Controls that use these keys themselves: fields, sliders, radio groups, tabs, the image-editor stage and the waveform.
+  const BUSY = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="radiogroup"], [role="application"], canvas[tabindex]';
+
+  function onShortcut(e: KeyboardEvent, doc: Document = document) {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.isComposing) return;
+    if (picker.open || help.open || doc.querySelector('dialog[open]')) return;
+    const dir = KEY_DIR[e.code];
+    if (e.altKey) {
+      if (dir && !e.shiftKey) {
+        e.preventDefault();
+        move(dir);
+      }
+      return;
+    }
+    const target = e.target as Element;
+    if (target.closest?.(BUSY) || (dir && e.code.startsWith('Arrow') && target.closest?.('[role="tab"]'))) return;
+    if (dir && !e.shiftKey) {
+      e.preventDefault();
+      // A tall start screen (small viewports) scrolls before moving on.
+      if (active === 'centre' && (dir === 'n' || dir === 's') && canScroll(dir)) {
+        return centreScroll.scrollBy({ top: (dir === 's' ? 1 : -1) * centreScroll.clientHeight * 0.8, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+      }
+      return move(dir);
+    }
+    if (e.key === 'Escape' || e.key === '0') {
+      if (active === 'centre') return;
       e.preventDefault();
       return go('centre');
     }
-    const dir = KEY_DIR[e.key];
-    if (!dir) return;
-    e.preventDefault();
-    // Tall screens (small viewports) scroll their own content before moving on.
-    if (canScroll(dir)) {
-      const sc = scrollerOf(active);
-      return sc.scrollBy({ top: (dir === 's' ? 1 : -1) * sc.clientHeight * 0.8, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
-    }
-    const next = neighbour(active, dir);
-    if (next) go(next, dir);
-  });
-
-  // Wheel: a mouse notch or ~60 px of trackpad travel moves one screen, then input is ignored until the
-  // wheel has been idle for 180 ms, so trackpad inertia can't trigger a second move.
-  let wheelSum = 0;
-  let wheelDir: Dir | undefined;
-  let wheelLocked = false;
-  let wheelScrolled = false;
-  let wheelIdle = 0;
-  hub.addEventListener(
-    'wheel',
-    (e) => {
-      if (e.ctrlKey) return; // pinch zoom
-      clearTimeout(wheelIdle);
-      wheelIdle = window.setTimeout(() => {
-        wheelLocked = wheelScrolled = false;
-        wheelSum = 0;
-      }, 180);
-      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? hub.clientHeight : 1;
-      const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY);
-      const delta = (horizontal ? e.deltaX : e.deltaY) * unit;
-      if (!delta) return;
-      const dir: Dir = horizontal ? (delta > 0 ? 'e' : 'w') : delta > 0 ? 's' : 'n';
-      if (wheelLocked) return e.preventDefault();
-      if (canScroll(dir)) {
-        wheelScrolled = true;
-        return;
-      }
-      // Content that just scrolled to its edge needs a fresh gesture to navigate.
-      if (wheelScrolled) return e.preventDefault();
-      const next = neighbour(active, dir);
+    if (e.key === '/') {
       e.preventDefault();
-      if (!next) return;
-      if (dir !== wheelDir) {
-        wheelDir = dir;
-        wheelSum = 0;
-      }
-      wheelSum += Math.abs(delta);
-      if (wheelSum < 60) return;
-      wheelLocked = true;
-      wheelSum = 0;
-      go(next, dir);
-    },
-    { passive: false },
-  );
-
-  // Touch/pen swipes: the screen follows the finger (rubber-banded where there is nothing to go to).
-  type Drag = { id: number; x0: number; y0: number; axis?: 'x' | 'y'; d: number; v: number; t: number; dir?: Dir; next?: string };
-  let drag: Drag | undefined;
-  let dragFrame = 0;
-  let suppressClick = false;
-  let swiped = false;
-
-  function paintDrag() {
-    dragFrame = 0;
-    if (!drag?.axis) return;
-    const cur = screens.get(active)!;
-    const along = drag.next ? drag.d : drag.d * 0.3;
-    const [x, y] = drag.axis === 'x' ? [along, 0] : [0, along];
-    cur.style.transform = tf(0, 0, x, y);
-    const peek = drag.next ? screens.get(drag.next) : undefined;
-    if (peeking && peeking !== peek) {
-      peeking.classList.remove('peek');
-      peeking.style.transform = '';
+      return openPicker();
     }
-    peeking = peek;
-    if (peek && drag.dir) {
-      const [vx, vy] = VEC[drag.dir];
-      peek.classList.add('peek');
-      peek.style.transform = tf(vx * 100, vy * 100, x, y);
+    if (e.key === '?') {
+      e.preventDefault();
+      return openHelp();
+    }
+    if (/^[1-9]$/.test(e.key) && active !== 'centre') {
+      const t = toolsOf(active)[Number(e.key) - 1];
+      if (!t) return;
+      e.preventDefault();
+      openTool(active, t.dataset.slug!);
+      // The old frame (which may have held focus) is gone; continue from the selected tab.
+      if (t.getAttribute('role') === 'tab') t.focus();
     }
   }
+  document.addEventListener('keydown', (e) => onShortcut(e));
 
-  function snapBack() {
+  // ---------- Start screen: wheel, trackpad and touch move between screens ----------
+  let hubW = innerWidth;
+  let hubH = innerHeight;
+  new ResizeObserver(([entry]) => {
+    hubW = entry.contentRect.width;
+    hubH = entry.contentRect.height;
+    hub.querySelector('.screen-centre')!.classList.toggle('scrolls', centreScroll.scrollHeight > centreScroll.clientHeight + 1);
+  }).observe(hub);
+  new ResizeObserver(() => hub.querySelector('.screen-centre')!.classList.toggle('scrolls', centreScroll.scrollHeight > centreScroll.clientHeight + 1)).observe(
+    centreScroll.firstElementChild!,
+  );
+
+  /** True when the start screen's content can still scroll toward `dir` (only vertical content scrolls). */
+  function canScroll(dir: Dir) {
+    if (dir === 's') return centreScroll.scrollTop + centreScroll.clientHeight < centreScroll.scrollHeight - 1;
+    if (dir === 'n') return centreScroll.scrollTop > 0;
+    return false;
+  }
+
+  /** A gesture in progress: `d` is the on-screen offset along `axis`; `dir` the direction of travel it points to. */
+  type Pull = { axis: 'x' | 'y'; d: number; dir?: Dir; next?: string };
+  let paintFrame = 0;
+  let pending: Pull | undefined;
+
+  function paint(p: Pull) {
+    pending = p;
+    paintFrame ||= requestAnimationFrame(() => {
+      paintFrame = 0;
+      const g = pending!;
+      const cur = screens.get(active)!;
+      const [x, y] = g.axis === 'x' ? [g.d, 0] : [0, g.d];
+      cur.style.transform = tf(0, 0, x, y);
+      const peek = g.next ? screens.get(g.next) : undefined;
+      if (peeking && peeking !== peek) {
+        peeking.classList.remove('peek');
+        peeking.style.transform = '';
+      }
+      peeking = peek;
+      if (peek && g.dir) {
+        const [vx, vy] = VEC[g.dir];
+        peek.classList.add('peek');
+        peek.style.transform = tf(vx * 100, vy * 100, x, y);
+      }
+    });
+  }
+
+  /** Finish a pull: commit to the neighbour from the current offset, or spring back. */
+  function release(p: Pull, commit: boolean) {
+    cancelAnimationFrame(paintFrame);
+    paintFrame = 0;
+    const [x, y] = p.axis === 'x' ? [p.d, 0] : [0, p.d];
+    if (commit && p.next) return navigate(p.next, p.dir, x, y);
     const cur = screens.get(active)!;
-    const from = cur.style.transform;
-    const peek = peeking;
-    const peekFrom = peek?.style.transform;
+    const peek = p.next ? screens.get(p.next) : undefined;
     settle();
-    if (reduceMotion.matches || !from) return;
-    const opts: KeyframeAnimationOptions = { duration: 200, easing: EASE };
-    running = [cur.animate([{ transform: from }, { transform: 'none' }], opts)];
-    if (peek && peekFrom && drag?.dir) {
-      const [vx, vy] = VEC[drag.dir];
+    if (reduceMotion.matches || !p.d) return;
+    const opts: KeyframeAnimationOptions = { duration: 220, easing: EASE };
+    running = [cur.animate([{ transform: tf(0, 0, x, y) }, { transform: 'none' }], opts)];
+    if (peek && p.dir) {
+      const [vx, vy] = VEC[p.dir];
       peeking = peek;
       peek.classList.add('peek');
-      running.push(peek.animate([{ transform: peekFrom }, { transform: tf(vx * 100, vy * 100) }], { ...opts, fill: 'forwards' }));
+      running.push(peek.animate([{ transform: tf(vx * 100, vy * 100, x, y) }, { transform: tf(vx * 100, vy * 100) }], { ...opts, fill: 'forwards' }));
       running[1].onfinish = () => peeking === peek && settle();
     }
   }
 
+  const travel = (axis: 'x' | 'y', offset: number): Dir => (axis === 'x' ? (offset < 0 ? 'e' : 'w') : offset < 0 ? 's' : 'n');
+  const rubber = (d: number) => d * 0.3;
+
+  // Wheel. A mouse notch moves one screen at once. A trackpad drags the screens along with the fingers and snaps when
+  // the gesture ends (idle or momentum decaying); after that, input is ignored until the wheel has been idle for 180 ms.
+  // vmax: the fastest the fingers moved toward the current offset; a flick releases at that speed into momentum.
+  type Wheel = Pull & { offset: number; v: number; vmax: number; t: number; peak: number; last: number; falling: number };
+  let wheel: Wheel | undefined;
+  let wheelLocked = false;
+  let wheelScrolled = false;
+  let wheelIdle = 0;
+  let wheelEnd = 0;
+  const isNotch = (e: WheelEvent) =>
+    e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || [e.deltaX, e.deltaY].some((d) => Math.abs(d) >= 50 && Number.isInteger(d)) && (e.deltaX === 0 || e.deltaY === 0);
+
+  function endWheel() {
+    clearTimeout(wheelEnd);
+    const g = wheel;
+    if (!g) return;
+    wheel = undefined;
+    wheelLocked = true;
+    const size = g.axis === 'x' ? hubW : hubH;
+    release(g, Math.abs(g.offset) > size * 0.25 || (g.vmax > 1 && Math.abs(g.offset) > 30));
+  }
+
+  hub.addEventListener(
+    'wheel',
+    (e) => {
+      if (active !== 'centre' || e.ctrlKey) return; // tool frames get their own wheel; ctrl = pinch zoom
+      clearTimeout(wheelIdle);
+      wheelIdle = window.setTimeout(() => (wheelLocked = wheelScrolled = false), 180);
+      if (wheelLocked) return e.preventDefault();
+      const axis = wheel?.axis ?? (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? 'x' : 'y');
+      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? hubH : 1;
+      const delta = (axis === 'x' ? e.deltaX : e.deltaY) * unit;
+      if (!delta) return;
+      if (!wheel && axis === 'y' && canScroll(delta > 0 ? 's' : 'n')) {
+        wheelScrolled = true;
+        return;
+      }
+      e.preventDefault();
+      // Content that just scrolled to its edge needs a fresh gesture to move on.
+      if (wheelScrolled) return;
+      if (!wheel && isNotch(e)) {
+        wheelLocked = true;
+        return move(travel(axis, -delta));
+      }
+      if (!wheel) {
+        settle();
+        wheel = { axis, d: 0, offset: 0, v: 0, vmax: 0, t: e.timeStamp, peak: 0, last: 0, falling: 0 };
+      }
+      const g = wheel;
+      const dt = e.timeStamp - g.t;
+      const mag = Math.abs(delta);
+      g.t = e.timeStamp;
+      g.offset -= delta;
+      // The first event has no interval to measure speed against.
+      if (dt > 0) {
+        g.v = 0.7 * (-delta / dt) + 0.3 * g.v;
+        if (Math.sign(g.v) === Math.sign(g.offset)) g.vmax = Math.max(g.vmax, Math.abs(g.v));
+      }
+      // Momentum (fingers lifted) shows up as deltas that keep shrinking after the peak.
+      if (mag > g.peak) g.peak = mag;
+      g.falling = mag < g.last && mag < g.peak * 0.6 ? g.falling + 1 : 0;
+      g.last = mag;
+      g.dir = travel(axis, g.offset);
+      g.next = neighbour(active, g.dir);
+      g.d = g.next ? g.offset * 0.85 : rubber(g.offset);
+      paint(g);
+      clearTimeout(wheelEnd);
+      if (g.falling >= 3) return endWheel();
+      wheelEnd = window.setTimeout(endWheel, 100);
+    },
+    { passive: false },
+  );
+
+  // Touch/pen swipes on the start screen: the screen follows the finger (rubber-banded where there is nothing to go to).
+  type Drag = Pull & { id: number; x0: number; y0: number; v: number; t: number; raw: number };
+  let drag: Drag | undefined;
+  let suppressClick = false;
+  let swiped = false;
+
   hub.addEventListener('pointerdown', (e) => {
     suppressClick = swiped = false;
-    if (e.pointerType === 'mouse' || !e.isPrimary || current !== 'home') return;
+    if (active !== 'centre' || e.pointerType === 'mouse' || !e.isPrimary) return;
     settle();
-    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, d: 0, v: 0, t: e.timeStamp };
+    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: 'x', d: 0, raw: 0, v: 0, t: e.timeStamp };
   });
+  let dragAxis: 'x' | 'y' | undefined;
   hub.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     const dx = e.clientX - drag.x0;
     const dy = e.clientY - drag.y0;
-    if (!drag.axis) {
+    if (!dragAxis) {
       if (Math.hypot(dx, dy) < 10) return;
-      drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      dragAxis = drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
       hub.setPointerCapture(e.pointerId);
       hub.classList.add('dragging');
     }
-    const d = drag.axis === 'x' ? dx : dy;
+    const raw = drag.axis === 'x' ? dx : dy;
     const dt = e.timeStamp - drag.t;
-    if (dt > 0) drag.v = 0.8 * ((d - drag.d) / dt) + 0.2 * drag.v;
+    if (dt > 0) drag.v = 0.8 * ((raw - drag.raw) / dt) + 0.2 * drag.v;
     drag.t = e.timeStamp;
-    drag.d = d;
-    // The finger moves opposite to the direction of travel.
-    drag.dir = drag.axis === 'x' ? (d < 0 ? 'e' : 'w') : d < 0 ? 's' : 'n';
+    drag.raw = raw;
+    drag.dir = travel(drag.axis, raw);
     drag.next = neighbour(active, drag.dir);
-    dragFrame ||= requestAnimationFrame(paintDrag);
+    drag.d = drag.next ? raw : rubber(raw);
+    paint(drag);
   });
   function endDrag(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
     const done = drag;
-    cancelAnimationFrame(dragFrame);
-    dragFrame = 0;
+    const locked = dragAxis;
+    drag = dragAxis = undefined;
     hub.classList.remove('dragging');
-    if (!done.axis) return void (drag = undefined);
+    if (!locked) return;
     suppressClick = true;
     // Cancelled: the browser took the gesture for native scrolling; touchend decides edge swipes.
     swiped = e.type === 'pointerup';
-    const commit = e.type === 'pointerup' && done.next && (Math.abs(done.d) > 50 || (Math.abs(done.v) > 0.4 && Math.abs(done.d) > 15));
-    if (commit) {
-      const along = done.d;
-      navigate(done.next!, done.dir, done.axis === 'x' ? along : 0, done.axis === 'y' ? along : 0);
-    } else {
-      paintDrag();
-      snapBack();
-    }
-    drag = undefined;
+    release(done, e.type === 'pointerup' && (Math.abs(done.raw) > 50 || (Math.abs(done.v) > 0.4 && Math.abs(done.raw) > 15)));
   }
   hub.addEventListener('pointerup', endDrag);
   hub.addEventListener('pointercancel', endDrag);
@@ -663,13 +914,13 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     },
     true,
   );
-  // Tall screens pan vertically natively (the pointer is cancelled), so decide edge swipes on touchend.
+  // A tall start screen pans vertically natively (the pointer is cancelled), so decide edge swipes on touchend.
   let touch: { y: number; top: boolean; bottom: boolean } | undefined;
   hub.addEventListener(
     'touchstart',
     (e) => {
       touch = undefined;
-      if (!screens.get(active)!.classList.contains('scrolls') || e.touches.length > 1) return;
+      if (active !== 'centre' || !screens.get('centre')!.classList.contains('scrolls') || e.touches.length > 1) return;
       touch = { y: e.touches[0].clientY, top: !canScroll('n'), bottom: !canScroll('s') };
     },
     { passive: true },
@@ -677,20 +928,18 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
   hub.addEventListener(
     'touchend',
     (e) => {
-      if (!touch || swiped || current !== 'home') return;
+      if (!touch || swiped) return;
       const dy = e.changedTouches[0].clientY - touch.y;
       const dir: Dir | undefined = dy > 60 && touch.top && !canScroll('n') ? 'n' : dy < -60 && touch.bottom && !canScroll('s') ? 's' : undefined;
       touch = undefined;
-      if (!dir) return;
-      const next = neighbour(active, dir);
-      if (next) go(next, dir);
+      if (dir) move(dir);
     },
     { passive: true },
   );
 
-  // Edge arrows, header category links and the brand link move the hub instead of navigating.
+  // Edge buttons, category chips and the title link move the hub instead of navigating.
   document.addEventListener('click', (e) => {
-    if (current !== 'home' || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = (e.target as Element).closest<HTMLAnchorElement>('a[href]');
     if (!a || picker.contains(a)) return;
     const id = a.dataset.go ?? (a.pathname === location.pathname && a.search === location.search ? a.hash.slice(1) || 'centre' : undefined);
@@ -699,33 +948,12 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     go(id, a.dataset.dir as Dir | undefined);
   });
 
-  // Universal drop zone → chooser, embedded tool or image editor.
+  // ---------- Drops: route files to the matching screen and tool ----------
   // Files are handed over in memory only: nothing is persisted or uploaded.
-  type View = 'home' | 'choose' | 'tool' | 'editor';
   type Kind = 'image' | 'pdf' | 'audio' | 'json' | 'js' | 'gzip' | 'other';
-
-  const homeParts = document.querySelectorAll<HTMLElement>('[data-home]');
   const drop = $('[data-hero-drop]');
   const input = $<HTMLInputElement>('[data-hero-input]');
   const status = $('[data-drop-status]');
-  const stage = $('[data-stage]');
-  const back = $<HTMLButtonElement>('[data-back]');
-  const restart = $<HTMLButtonElement>('[data-restart]');
-  const chooser = $('[data-chooser]');
-  const cloudAlt = $('[data-cloud-alt]');
-  const editor = $('[data-image-editor]');
-
-  let files: File[] = [];
-  let current: View = 'home';
-  let frame: HTMLIFrameElement | undefined;
-  let editorOpen = false;
-
-  // Each view below home is a history entry, so the browser back/forward buttons step through them.
-  // Files live only in memory: entries restored without them (e.g. after reload) fall back to home.
-  type Entry = { view: Exclude<View, 'home'>; slug?: string; depth: number };
-  const entry = () => history.state as Entry | null;
-  const push = (view: Entry['view'], slug?: string) => history.pushState({ view, slug, depth: (entry()?.depth ?? 0) + 1 } satisfies Entry, '');
-
   const AUDIO_EXT = /\.(m4a|aac|mp3|wav|ogg|oga|opus|flac|weba)$/i;
   // ISO-BMFF brands that carry audio; excludes HEIC/AVIF (also "ftyp").
   const AUDIO_BRAND = /^(M4A |M4B |M4P |mp4[12]|isom|iso[2-6]|dash|3gp)/;
@@ -746,106 +974,11 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     return 'other';
   }
 
-  function show(view: View) {
-    if (view !== 'tool') {
-      frame?.remove();
-      frame = undefined;
-    }
-    current = view;
-    homeParts.forEach((p) => (p.hidden = view !== 'home'));
-    chooser.hidden = view !== 'choose';
-    cloudAlt.hidden = !(view === 'editor' && files.length === 1);
-    editor.hidden = view !== 'editor';
-    // The editor has its own close control.
-    back.hidden = view === 'editor';
-    restart.hidden = !(view === 'tool' && (entry()?.depth ?? 0) > 1);
-    stage.hidden = view === 'home' || (view === 'editor' && cloudAlt.hidden);
-  }
-
-  /** Leave to home by unwinding our history entries, so Back doesn't return into a cleared view. */
-  function goHome() {
-    files = [];
-    const depth = entry()?.depth ?? 0;
-    if (depth > 0) history.go(-depth);
-    else showHome();
-  }
-
-  /** Back on the hub at the screen the files were dropped on (kept in the URL hash). */
-  function showHome() {
-    show('home');
-    settle();
-    setActive(screenFromHash());
-    (active === 'centre' ? input : hub).focus({ preventScroll: true });
-  }
-
-  function choose(slugs: string[]) {
-    if (slugs.length === 1) return openTool(slugs[0]);
-    for (const li of document.querySelectorAll<HTMLElement>('[data-choice]')) li.hidden = !slugs.includes(li.dataset.choice!);
-    const list = $('[data-choices]');
-    slugs.forEach((s) => list.append(list.querySelector(`[data-choice="${s}"]`)!));
-    $('[data-file-summary]').textContent = files.length === 1 ? files[0].name : `${files.length} files`;
-    push('choose');
-    showChooser();
-  }
-
-  function showChooser() {
-    show('choose');
-    $('[data-chooser-title]').focus();
-  }
-
-  function openTool(slug: string, record = true) {
-    const pick = $(`[data-pick="${slug}"][data-url]`);
-    if (record) push('tool', slug);
-    frame?.remove();
-    frame = el('iframe', { src: `${pick.dataset.url}?embed`, title: pick.dataset.title!, className: 'tool-frame' });
-    const f = frame;
-    f.addEventListener('load', () => onFrameLoad(f));
-    show('tool');
-    stage.append(f);
-    stage.scrollIntoView({ block: 'start' });
-    back.focus();
-  }
-
-  function onFrameLoad(f: HTMLIFrameElement) {
-    const win = f.contentWindow as (Window & typeof globalThis) | null;
-    const doc = f.contentDocument;
-    if (!win || !doc?.querySelector('[data-tool]')) return;
-    // ToolShell pages take files through [data-input]; text tools through [data-file].
-    const target = doc.querySelector<HTMLInputElement>('[data-input], [data-file]');
-    if (target) {
-      const dt = new win.DataTransfer();
-      // Rebuild each File in the frame's realm so arrayBuffer() returns that realm's ArrayBuffer;
-      // libraries' `instanceof ArrayBuffer` checks fail otherwise (e.g. pdf-lib).
-      (target.multiple ? files : files.slice(0, 1)).forEach((file) => dt.items.add(new win.File([file], file.name, { type: file.type, lastModified: file.lastModified })));
-      target.files = dt.files;
-      target.dispatchEvent(new win.Event('change'));
-    }
-    new win.ResizeObserver(() => (f.style.height = `${Math.ceil(doc.documentElement.getBoundingClientRect().height)}px`)).observe(doc.documentElement);
-    // Site links (privacy, settings) leave the embed instead of navigating inside it.
-    doc.addEventListener('click', (e) => {
-      const a = (e.target as Element).closest?.<HTMLAnchorElement>('a[href]');
-      if (!a || a.download || a.getAttribute('href')!.startsWith('#') || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      e.preventDefault();
-      location.href = a.href;
-    });
-  }
-
-  async function openEditor() {
-    push('editor');
-    show('editor');
-    try {
-      await (await import('../lib/editor')).openImageEditor(files);
-      editorOpen = true;
-    } catch (err) {
-      console.error(err);
-      goHome();
-      status.textContent = err instanceof UserError ? err.message : 'The image editor could not be loaded. Please reload the page.';
-    }
-  }
-
+  /** Drop → screen + tool, as one history entry (Back returns to where the files were dropped). */
   async function handle(list: File[]) {
     if (!list.length) return;
-    if (picker.open) picker.close();
+    picker.close();
+    help.close();
     status.textContent = '';
     let kinds: Kind[];
     try {
@@ -854,23 +987,25 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
       status.textContent = 'Could not read that file.';
       return;
     }
-    files = list;
     const kind = kinds.every((k) => k === kinds[0]) ? kinds[0] : 'other';
     const single = list.length === 1;
-    if (kind === 'image') return openEditor();
-    if (kind === 'audio') return openTool('audio/convert');
-    if (kind === 'pdf') return choose(single ? ['pdf/split', 'pdf/organize', 'pdf/compress'] : ['pdf/merge', 'files/zip']);
-    if (single && kind === 'json') return openTool('text/json');
-    if (single && kind === 'js') return openTool('text/js-minify');
-    if (single && kind === 'gzip') return openTool('files/gzip');
-    choose(single ? ['files/zip', 'files/gzip'] : ['files/zip']);
+    const [screen, slug] =
+      kind === 'image' ? ['images', 'images/editor']
+      : kind === 'pdf' ? ['pdf', single ? 'pdf/organize' : 'pdf/merge']
+      : kind === 'audio' ? ['audio', 'audio/convert']
+      : single && kind === 'json' ? ['files', 'text/json']
+      : single && kind === 'js' ? ['files', 'text/js-minify']
+      : single && kind === 'gzip' ? ['files', 'files/gzip']
+      : ['files', 'files/zip'];
+    held = { screen, files: list };
+    openTool(screen, slug, true);
   }
 
   input.addEventListener('change', () => {
-    handle([...(input.files ?? [])]);
+    void handle([...(input.files ?? [])]);
     input.value = '';
   });
-  // Accept drops anywhere on the home view so a near miss doesn't open the file in the browser.
+  // Accept drops anywhere on the hub so a near miss doesn't open the file in the browser.
   const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
   const setDragging = (on: boolean) => {
     drop.classList.toggle('over', on);
@@ -879,8 +1014,7 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
   document.addEventListener('dragover', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    if (current === 'home') setDragging(true);
-    else e.dataTransfer!.dropEffect = 'none';
+    setDragging(true);
   });
   document.addEventListener('dragleave', (e) => {
     if (!e.relatedTarget) setDragging(false);
@@ -889,39 +1023,29 @@ const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left
     if (!hasFiles(e)) return;
     e.preventDefault();
     setDragging(false);
-    if (current === 'home') handle([...e.dataTransfer!.files]);
+    void handle([...e.dataTransfer!.files]);
   });
   document.addEventListener('paste', (e) => {
     const pasted = [...(e.clipboardData?.files ?? [])];
-    if (current === 'home' && pasted.length) {
-      e.preventDefault();
-      handle(pasted);
-    }
+    if (!pasted.length) return;
+    e.preventDefault();
+    void handle(pasted);
   });
 
-  stage.addEventListener('click', (e) => {
-    const pick = (e.target as Element).closest<HTMLElement>('[data-pick]');
-    if (pick) openTool(pick.dataset.pick!);
-  });
-  back.addEventListener('click', () => history.back());
-  restart.addEventListener('click', goHome);
-  editor.addEventListener('editor:close', () => {
-    editorOpen = false;
-    goHome();
-  });
-  addEventListener('popstate', () => {
-    const e = entry();
-    // Home (possibly with a #category from a header link or Back).
-    if (!e) return showHome();
-    if (!files.length || (e.view === 'editor' && !editorOpen)) {
-      history.replaceState(null, '');
-      return showHome();
-    }
-    if (e.view === 'choose') showChooser();
-    else if (e.view === 'tool') openTool(e.slug!, false);
-    else show('editor');
-  });
+  // ---------- History ----------
+  // Back/forward (and #links typed into the address bar) move the hub; drops are the only pushed entries.
+  function applyHash() {
+    const { screen, slug } = fromHash();
+    if (slug && screen !== 'centre') markTab(screen, slug);
+    if (screen !== active) navigate(screen);
+    else ensureFrame(screen);
+  }
+  addEventListener('popstate', applyHash);
   // A reload keeps history.state but not the in-memory files.
-  if (entry()) history.replaceState(null, '');
-  setActive(screenFromHash());
+  if (history.state) history.replaceState(null, '');
+  {
+    const { screen, slug } = fromHash();
+    if (slug) markTab(screen, slug);
+    setActive(screen);
+  }
 </script>
