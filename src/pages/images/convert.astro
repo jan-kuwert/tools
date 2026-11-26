@@ -10,45 +10,71 @@ import ToolShell from '../../components/ToolShell.astro';
       <label><input type="radio" name="format" value="image/webp" checked /><span>WebP</span></label>
     </div>
   </fieldset>
-  <label class="field">
-    <span>Quality <output data-quality-value for="quality">82</output></span>
-    <input type="range" id="quality" name="quality" min="1" max="100" value="82" />
-    <small data-quality-hint>Lower means smaller files. 75–85 is a good balance.</small>
-  </label>
+  <div class="field">
+    <span id="quality-label">Quality</span>
+    <div class="quality">
+      <input type="range" name="quality" min="1" max="100" value="82" aria-labelledby="quality-label" aria-describedby="quality-hint" />
+      <input type="number" min="1" max="100" step="1" inputmode="numeric" aria-labelledby="quality-label" data-quality-num />
+    </div>
+    <small id="quality-hint" data-quality-hint>Lower means smaller files. 75–85 is a good balance.</small>
+  </div>
   <p class="warn-box" data-jpeg-warn hidden>JPEG has no transparency: transparent areas become white.</p>
-  <p class="muted">Metadata such as camera details and GPS location is removed.</p>
+  <label class="check"><input type="checkbox" role="switch" name="strip" checked /> Remove metadata (EXIF, GPS location)</label>
+  <p class="muted" data-gps-hint hidden>Location data will be kept.</p>
 </ToolShell>
+
+<style>
+  .quality { display: flex; gap: 0.75rem; align-items: center; }
+  .quality [type='range'] { flex: 1; }
+  .quality [type='number'] { width: 5rem; }
+  .check { display: flex; gap: 0.5rem; align-items: center; }
+  .check input { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; }
+</style>
 
 <script>
   import { createTool, replaceExt, throwIfAborted, type Result } from '../../lib/tool';
   import { loadPrefs } from '../../lib/prefs';
-  import { decodeImage, drawImage, encodeCanvas, EXT, uniqueName, withZip, type ImageType } from '../../lib/image';
+  import { decodeImage, drawImage, encodeCanvas, EXT, inspectImage, keepMetadata, linkQuality, uniqueName, withZip, type ImageInfo, type ImageType } from '../../lib/image';
 
   const form = document.querySelector<HTMLFormElement>('[data-options]')!;
   const quality = form.querySelector<HTMLInputElement>('[name=quality]')!;
-  const qualityValue = form.querySelector<HTMLOutputElement>('[data-quality-value]')!;
+  const qualityNum = form.querySelector<HTMLInputElement>('[data-quality-num]')!;
   const qualityHint = form.querySelector<HTMLElement>('[data-quality-hint]')!;
   const jpegWarn = form.querySelector<HTMLElement>('[data-jpeg-warn]')!;
+  const strip = form.querySelector<HTMLInputElement>('[name=strip]')!;
+  const gpsHint = form.querySelector<HTMLElement>('[data-gps-hint]')!;
 
   const prefs = loadPrefs();
   if (prefs.imageFormat) form.querySelector<HTMLInputElement>(`[name=format][value="${prefs.imageFormat}"]`)!.checked = true;
   if (prefs.imageQuality) quality.value = String(prefs.imageQuality);
+  linkQuality(quality, qualityNum);
 
+  let infos: ImageInfo[] = [];
+  let infoGen = 0;
   const format = () => new FormData(form).get('format') as ImageType;
   const sync = () => {
     const png = format() === 'image/png';
-    quality.disabled = png;
+    quality.disabled = qualityNum.disabled = png;
     qualityHint.textContent = png ? 'PNG is lossless, so quality does not apply.' : 'Lower means smaller files. 75–85 is a good balance.';
-    qualityValue.value = png ? '–' : quality.value;
-    jpegWarn.hidden = format() !== 'image/jpeg';
+    jpegWarn.hidden = format() !== 'image/jpeg' || !infos.some((i) => i.alpha);
+    gpsHint.hidden = strip.checked || !infos.some((i) => i.gps);
   };
   form.addEventListener('input', sync);
   sync();
 
   createTool({
+    onFilesChange(files) {
+      const gen = ++infoGen;
+      void Promise.all(files.map((f) => inspectImage(f))).then((r) => {
+        if (gen !== infoGen) return;
+        infos = r;
+        sync();
+      });
+    },
     async run(files, { signal, progress }) {
       const type = format();
       const q = Number(quality.value) / 100;
+      const keep = !strip.checked;
       const taken = new Set<string>();
       const results: Result[] = [];
       for (const [i, file] of files.entries()) {
@@ -61,8 +87,9 @@ import ToolShell from '../../components/ToolShell.astro';
         } finally {
           bitmap.close();
         }
-        const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : q);
-        results.push({ name: uniqueName(replaceExt(file.name, EXT[type]), taken), blob, inputSize: file.size, preview: true });
+        const encoded = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : q);
+        const { blob, note } = keep ? await keepMetadata(file, encoded) : { blob: encoded, note: undefined };
+        results.push({ name: uniqueName(replaceExt(file.name, EXT[type]), taken), blob, inputSize: file.size, preview: true, note });
       }
       progress('Packing ZIP…');
       return withZip(results, 'images.zip');

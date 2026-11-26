@@ -95,10 +95,10 @@ export const tools: Tool[] = [
   {
     slug: 'audio/convert',
     category: 'audio',
-    title: 'Convert audio',
-    summary: 'M4A, MP3, WAV, OGG and more to MP3, WAV or OGG.',
+    title: 'Convert & trim audio',
+    summary: 'Trim, cut and fade, then convert M4A, MP3, WAV, OGG and more to MP3, WAV or OGG. Optional cloud export to M4A, FLAC or Opus with tags kept.',
     mode: 'local',
-    limits: 'Formats your browser can decode (M4A/AAC, MP3, WAV, OGG, FLAC) · up to 200 MB each',
+    limits: 'Formats your browser can decode (M4A/AAC, MP3, WAV, OGG, FLAC) · up to 200 MB each · cloud export up to 30 MB',
   },
   {
     slug: 'files/zip',

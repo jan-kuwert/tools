@@ -53,6 +53,17 @@ export const downloadBlob = (blob: Blob, name: string): void => {
 /** Yield to the event loop so progress UI can paint during long loops. */
 export const tick = (): Promise<void> => new Promise((r) => setTimeout(r));
 
+/** Update a ProgressDial: a fraction in [0,1], or undefined for indeterminate. */
+export function setDial(dial: HTMLElement, fraction?: number): void {
+  const known = fraction !== undefined;
+  const pct = known ? Math.round(Math.min(1, Math.max(0, fraction)) * 100) : 0;
+  dial.classList.toggle('indeterminate', !known);
+  dial.style.setProperty('--p', String(pct));
+  dial.querySelector('.dial-value')!.textContent = known ? `${pct}%` : '';
+  if (known) dial.ariaValueNow = String(pct);
+  else dial.removeAttribute('aria-valuenow');
+}
+
 export const throwIfAborted = (signal: AbortSignal): void => {
   if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
 };
@@ -70,7 +81,7 @@ export const el = <K extends keyof HTMLElementTagNameMap>(
 };
 
 /** Wire up the ToolShell markup. Call once per page. */
-export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(files: File[]): void } {
+export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(files: File[]): void; showResults(items: Result[]): void; clearResults(): void } {
   const root = document.querySelector<HTMLElement>('[data-tool]')!;
   const input = root.querySelector<HTMLInputElement>('[data-input]')!;
   const drop = root.querySelector<HTMLElement>('[data-drop]')!;
@@ -80,10 +91,9 @@ export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(f
   const cancelBtn = root.querySelector<HTMLButtonElement>('[data-cancel]')!;
   const clearBtn = root.querySelector<HTMLButtonElement>('[data-clear]')!;
   const status = root.querySelector<HTMLElement>('[data-status]')!;
-  const bar = root.querySelector<HTMLProgressElement>('[data-progress]')!;
-  // Results panel and consent dialog are siblings of the tool panel.
+  const dial = root.querySelector<HTMLElement>('[data-progress]')!;
+  // Results panel is a sibling of the tool panel.
   const results = document.querySelector<HTMLElement>('[data-results]')!;
-  const consent = document.querySelector<HTMLDialogElement>('[data-consent]');
   const multiple = input.multiple;
 
   let files: File[] = [];
@@ -93,9 +103,8 @@ export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(f
   const setStatus = (kind: 'idle' | 'working' | 'done' | 'error', text = '', fraction?: number) => {
     status.dataset.kind = kind;
     status.textContent = text;
-    bar.hidden = kind !== 'working';
-    if (fraction === undefined) bar.removeAttribute('value');
-    else bar.value = fraction;
+    dial.hidden = kind !== 'working';
+    setDial(dial, fraction);
   };
 
   const clearResults = () => {
@@ -206,16 +215,6 @@ export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(f
     results.querySelector<HTMLElement>('a.btn')?.focus();
   };
 
-  const confirmUpload = (): Promise<boolean> => {
-    // Fail closed: never upload without an explicit confirmation.
-    if (!consent) return Promise.resolve(false);
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    consent.returnValue = '';
-    consent.showModal();
-    consent.addEventListener('close', () => resolve(consent.returnValue === 'upload'), { once: true });
-    return promise;
-  };
-
   runBtn.onclick = async () => {
     if (!files.length) return;
     if (opts.cloud && !(await confirmUpload())) return;
@@ -246,7 +245,18 @@ export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(f
   };
 
   renderFiles();
-  return { files: () => files, setFiles };
+  return { files: () => files, setFiles, showResults: renderResults, clearResults };
+}
+
+/** Ask before every upload via ToolShell's consent dialog; never remembered. Fails closed without the dialog. */
+export function confirmUpload(): Promise<boolean> {
+  const consent = document.querySelector<HTMLDialogElement>('[data-consent]');
+  if (!consent) return Promise.resolve(false);
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  consent.returnValue = '';
+  consent.showModal();
+  consent.addEventListener('close', () => resolve(consent.returnValue === 'upload'), { once: true });
+  return promise;
 }
 
 /** Basic magic-byte sniffing; never trust extension or MIME type alone. */

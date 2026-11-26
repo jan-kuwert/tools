@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from starlette.requests import ClientDisconnect
 
+from . import audio
 from .worker import BAD_IMAGE, OK, Worker
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -58,15 +59,15 @@ def sniff(data: bytes | bytearray) -> str | None:
     return None
 
 
-async def read_body(request: Request) -> bytearray:
+async def read_body(request: Request, limit: int, too_large: str) -> bytearray:
     declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > MAX_BYTES:
-        raise HTTPException(413, "Image larger than 20 MiB.")
+    if declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, too_large)
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_BYTES:
-            raise HTTPException(413, "Image larger than 20 MiB.")
+        if len(body) > limit:
+            raise HTTPException(413, too_large)
     return body
 
 
@@ -91,24 +92,28 @@ async def wait_disconnect(request: Request) -> None:
         pass
 
 
-async def process(request: Request) -> Response:
-    if request.headers.get("content-type", "").split(";")[0].strip().lower() not in ALLOWED_TYPES:
-        raise HTTPException(415, "Send the image as the raw body with an image/jpeg, image/png or image/webp Content-Type.")
-    body = await read_body(request)
-    check_image(body)
-
-    job = asyncio.create_task(worker.run(body, DEADLINE_S))
+async def unless_disconnected(request: Request, coro):
+    """Awaits coro; cancels it and raises ClientDisconnect if the client goes away first."""
+    job = asyncio.create_task(coro)
     gone = asyncio.create_task(wait_disconnect(request))
     await asyncio.wait({job, gone}, return_when=asyncio.FIRST_COMPLETED)
     if not job.done():
-        job.cancel()  # kills and respawns the worker
+        job.cancel()
         with suppress(asyncio.CancelledError):
             await job
-        return Response(status_code=499)  # client closed request; never delivered
+        raise ClientDisconnect
     gone.cancel()
+    return job.result()
+
+
+async def process(request: Request) -> Response:
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() not in ALLOWED_TYPES:
+        raise HTTPException(415, "Send the image as the raw body with an image/jpeg, image/png or image/webp Content-Type.")
+    body = await read_body(request, MAX_BYTES, "Image larger than 20 MiB.")
+    check_image(body)
 
     try:
-        reply = job.result()
+        reply = await unless_disconnected(request, worker.run(body, DEADLINE_S))  # cancel kills and respawns the worker
     except TimeoutError:
         raise HTTPException(504, "Processing took too long.") from None
     except (EOFError, OSError):
@@ -121,15 +126,25 @@ async def process(request: Request) -> Response:
     return Response(reply[1:], media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
-@app.post("/v1/remove-background")
-async def remove_background(request: Request) -> Response:
+async def convert_audio(request: Request) -> Response:
+    params = audio.parse(request.query_params)
+    body = await read_body(request, audio.MAX_BYTES, "Audio larger than 30 MiB.")
+    try:
+        data, media_type = await unless_disconnected(request, asyncio.wait_for(audio.convert(body, params), DEADLINE_S))
+    except TimeoutError:
+        raise HTTPException(504, "Processing took too long.") from None
+    return Response(data, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
+async def one_at_a_time(request: Request, handler) -> Response:
+    """Runs one job per instance (Cloud Run concurrency 1 is the backstop) and logs its outcome."""
     if lock.locked():
         raise HTTPException(429, "Busy.", headers={"Retry-After": str(RETRY_AFTER_S)})
     async with lock:
         start = time.monotonic()
         status = 500
         try:
-            response = await process(request)
+            response = await handler(request)
             status = response.status_code
             return response
         except HTTPException as e:
@@ -137,11 +152,21 @@ async def remove_background(request: Request) -> Response:
             raise
         except ClientDisconnect:
             status = 499
-            return Response(status_code=499)
+            return Response(status_code=499)  # client closed request; never delivered
         finally:
             # Never log bodies, filenames or client details.
-            log.info("status=%d bytes=%s ms=%d", status, request.headers.get("content-length", "-"),
-                     (time.monotonic() - start) * 1000)
+            log.info("path=%s status=%d bytes=%s ms=%d", request.url.path, status,
+                     request.headers.get("content-length", "-"), (time.monotonic() - start) * 1000)
+
+
+@app.post("/v1/remove-background")
+async def remove_background(request: Request) -> Response:
+    return await one_at_a_time(request, process)
+
+
+@app.post("/v1/audio/convert")
+async def audio_convert(request: Request) -> Response:
+    return await one_at_a_time(request, convert_audio)
 
 
 @app.get("/healthz")

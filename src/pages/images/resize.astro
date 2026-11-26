@@ -1,5 +1,6 @@
 ---
 import ToolShell from '../../components/ToolShell.astro';
+import { SIZES } from '../../lib/editor';
 ---
 <ToolShell slug="images/resize" multiple accept="image/jpeg,image/png,image/webp" action="Resize">
   <fieldset>
@@ -7,6 +8,7 @@ import ToolShell from '../../components/ToolShell.astro';
     <div class="segmented">
       <label><input type="radio" name="mode" value="width" checked /><span>Width</span></label>
       <label><input type="radio" name="mode" value="height" /><span>Height</span></label>
+      <label><input type="radio" name="mode" value="long" /><span>Long side</span></label>
       <label><input type="radio" name="mode" value="percent" /><span>Percentage</span></label>
     </div>
   </fieldset>
@@ -20,21 +22,30 @@ import ToolShell from '../../components/ToolShell.astro';
       <span>Allow upscaling</span>
     </label>
   </div>
-  <p class="muted">Proportions are kept. Output stays in the original format; metadata such as camera details and GPS location is removed.</p>
+  <div class="chips" role="group" aria-label="Long side presets">
+    {SIZES.filter((s) => Number(s)).map((s) => <button class="chip" type="button" data-long={s} aria-label={`Long side ${s} px`}>{s}</button>)}
+  </div>
+  <p class="muted">Proportions are kept. Output stays in the original format.</p>
+  <label class="check"><input type="checkbox" role="switch" name="strip" checked /> Remove metadata (EXIF, GPS location)</label>
+  <p class="muted" data-gps-hint hidden>Location data will be kept.</p>
 </ToolShell>
 
 <style>
   .check { display: flex; gap: 0.5rem; align-items: center; min-height: 2.6rem; }
+  .check input { accent-color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .chip { padding: 0.25rem 0.65rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: inherit; font: inherit; font-size: 0.85rem; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); }
 </style>
 
 <script>
   import { createTool, throwIfAborted, UserError, type Result } from '../../lib/tool';
-  import { decodeImage, drawImage, encodeCanvas, uniqueName, withZip } from '../../lib/image';
+  import { decodeImage, drawImage, encodeCanvas, inspectImage, keepMetadata, uniqueName, withZip } from '../../lib/image';
 
   const form = document.querySelector<HTMLFormElement>('[data-options]')!;
   const size = form.querySelector<HTMLInputElement>('[name=size]')!;
   const sizeLabel = form.querySelector<HTMLElement>('[data-size-label]')!;
-  const labels = { width: 'Width in pixels', height: 'Height in pixels', percent: 'Percentage of original' };
+  const labels = { width: 'Width in pixels', height: 'Height in pixels', long: 'Long side in pixels', percent: 'Percentage of original' };
   type Mode = keyof typeof labels;
 
   // Browsers may restore form state on back/forward navigation.
@@ -50,14 +61,36 @@ import ToolShell from '../../components/ToolShell.astro';
   form.addEventListener('change', (e) => {
     if ((e.target as HTMLInputElement).name === 'mode') sync();
   });
+  form.querySelectorAll<HTMLButtonElement>('[data-long]').forEach((b) =>
+    b.addEventListener('click', () => {
+      form.querySelector<HTMLInputElement>('[name=mode][value=long]')!.checked = true;
+      sync();
+      size.value = b.dataset.long!;
+    }),
+  );
+  const strip = form.querySelector<HTMLInputElement>('[name=strip]')!;
+  const gpsHint = form.querySelector<HTMLElement>('[data-gps-hint]')!;
+  let gps = false;
+  let infoGen = 0;
+  const syncGps = () => (gpsHint.hidden = strip.checked || !gps);
+  strip.addEventListener('change', syncGps);
 
   createTool({
+    onFilesChange(files) {
+      const gen = ++infoGen;
+      void Promise.all(files.map((f) => inspectImage(f))).then((r) => {
+        if (gen !== infoGen) return;
+        gps = r.some((i) => i.gps);
+        syncGps();
+      });
+    },
     async run(files, { signal, progress }) {
       const data = new FormData(form);
       const value = Number(data.get('size'));
       const mode = data.get('mode') as Mode;
       if (!Number.isFinite(value) || value <= 0) throw new UserError(`Enter a ${mode === 'percent' ? 'percentage' : 'size'} greater than 0.`);
       const upscale = data.has('upscale');
+      const keep = !data.has('strip');
       const taken = new Set<string>();
       const results: Result[] = [];
       for (const [i, file] of files.entries()) {
@@ -66,7 +99,7 @@ import ToolShell from '../../components/ToolShell.astro';
         const { bitmap, type } = await decodeImage(file);
         const sw = bitmap.width;
         const sh = bitmap.height;
-        const scale = mode === 'width' ? value / sw : mode === 'height' ? value / sh : value / 100;
+        const scale = { width: value / sw, height: value / sh, long: value / Math.max(sw, sh), percent: value / 100 }[mode];
         let w = Math.max(1, Math.round(sw * scale));
         let h = Math.max(1, Math.round(sh * scale));
         let note = `${sw} × ${sh} → ${w} × ${h} px`;
@@ -80,8 +113,10 @@ import ToolShell from '../../components/ToolShell.astro';
         } finally {
           bitmap.close();
         }
-        const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : 0.9);
-        results.push({ name: uniqueName(file.name, taken), blob, inputSize: file.size, preview: true, note });
+        const encoded = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : 0.9);
+        const kept = keep ? await keepMetadata(file, encoded) : { blob: encoded, note: undefined };
+        if (kept.note) note += ` · ${kept.note}`;
+        results.push({ name: uniqueName(file.name, taken), blob: kept.blob, inputSize: file.size, preview: true, note });
       }
       progress('Packing ZIP…');
       return withZip(results, 'resized-images.zip');

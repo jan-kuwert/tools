@@ -1,6 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
-import { FRAMES } from '../lib/editor';
+import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
 ---
 <Base title="Settings · Tools">
   <h1>Settings</h1>
@@ -22,16 +22,27 @@ import { FRAMES } from '../lib/editor';
         <label><input type="radio" name="imageFormat" value="image/png" /><span>PNG</span></label>
       </div>
     </fieldset>
-    <label class="field">
-      <span>Default image quality: <output name="qualityOut">82</output></span>
-      <input type="range" name="imageQuality" min="1" max="100" value="82" />
-    </label>
-    <label class="field">
-      <span>Default image editor output size</span>
-      <select name="editorFrame">
-        {Object.entries(FRAMES).filter(([id]) => id !== 'custom').map(([id, f]) => <option value={id}>{f.label}{f.w ? ` · ${f.w} × ${f.h}` : ''}</option>)}
-      </select>
-    </label>
+    <div class="field">
+      <span id="quality-label">Default image quality</span>
+      <div class="quality">
+        <input type="range" name="imageQuality" min="1" max="100" value="82" aria-labelledby="quality-label" />
+        <input type="number" min="1" max="100" step="1" inputmode="numeric" aria-labelledby="quality-label" data-quality-num />
+      </div>
+    </div>
+    <div class="row">
+      <label class="field">
+        <span>Default editor aspect ratio</span>
+        <select name="editorRatio">
+          {RATIOS.filter((id) => id !== 'custom').map((id) => <option value={id}>{choiceLabel(id)}</option>)}
+        </select>
+      </label>
+      <label class="field">
+        <span>Default editor size (long side, px)</span>
+        <select name="editorSize">
+          {SIZES.filter((id) => id !== 'custom').map((id) => <option value={id}>{choiceLabel(id)}</option>)}
+        </select>
+      </label>
+    </div>
     <div class="actions">
       <button class="btn" type="button" data-reset>Reset preferences</button>
       <span class="muted" data-saved role="status" aria-live="polite"></span>
@@ -39,22 +50,34 @@ import { FRAMES } from '../lib/editor';
   </form>
 </Base>
 
+<style>
+  .quality { display: flex; gap: 0.75rem; align-items: center; }
+  .quality [type='range'] { flex: 1; }
+  .quality [type='number'] { width: 5rem; }
+</style>
+
 <script>
+  import { linkQuality } from '../lib/image';
   import { applyTheme, loadPrefs, resetPrefs, savePrefs, type Prefs } from '../lib/prefs';
 
   const form = document.querySelector<HTMLFormElement>('[data-settings]')!;
   const saved = document.querySelector<HTMLElement>('[data-saved]')!;
   const quality = form.elements.namedItem('imageQuality') as HTMLInputElement;
-  const qualityOut = form.elements.namedItem('qualityOut') as HTMLOutputElement;
-  const editorFrame = form.elements.namedItem('editorFrame') as HTMLSelectElement;
+  const qualityNum = form.querySelector<HTMLInputElement>('[data-quality-num]')!;
+  const selects = ['editorRatio', 'editorSize'].map((n) => form.elements.namedItem(n) as HTMLSelectElement);
+  linkQuality(quality, qualityNum);
 
   const fill = () => {
     const p = loadPrefs();
     form.querySelector<HTMLInputElement>(`[name=theme][value="${p.theme ?? 'system'}"]`)!.checked = true;
     form.querySelector<HTMLInputElement>(`[name=imageFormat][value="${p.imageFormat ?? 'image/webp'}"]`)!.checked = true;
     quality.value = String(p.imageQuality ?? 82);
-    qualityOut.value = quality.value;
-    editorFrame.value = p.editorFrame ?? 'original';
+    qualityNum.value = quality.value;
+    // Unknown (e.g. outdated) values select nothing; fall back to Original.
+    for (const s of selects) {
+      s.value = p[s.name as 'editorRatio' | 'editorSize'] ?? '';
+      if (!s.value) s.value = 'original';
+    }
   };
 
   form.addEventListener('input', () => {
@@ -63,11 +86,11 @@ import { FRAMES } from '../lib/editor';
       theme: data.get('theme') as Prefs['theme'],
       imageFormat: data.get('imageFormat') as Prefs['imageFormat'],
       imageQuality: Number(data.get('imageQuality')),
-      editorFrame: data.get('editorFrame') as Prefs['editorFrame'],
+      editorRatio: data.get('editorRatio') as Prefs['editorRatio'],
+      editorSize: data.get('editorSize') as Prefs['editorSize'],
     };
     savePrefs(prefs);
     applyTheme(prefs.theme);
-    qualityOut.value = quality.value;
     saved.textContent = 'Saved.';
   });
   form.querySelector('[data-reset]')!.addEventListener('click', () => {

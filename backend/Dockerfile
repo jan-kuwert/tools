@@ -22,6 +22,9 @@ RUN uv sync --locked --no-dev && rm /usr/local/bin/uv
 RUN python -c "from rembg import new_session; new_session('isnet-general-use')" \
     && chmod -R a+rX /models && rm -rf /tmp/numba
 
+# Static ffmpeg/ffprobe: +215 MB unpacked, vs +420 MB for Debian's ffmpeg package and its shared libraries.
+COPY --from=mwader/static-ffmpeg:8.0@sha256:415a41fa3167b890b9703d20bd0f00bf1e9dab8a4b6c27fef1445b2bf5f1ab4a /ffmpeg /ffprobe /usr/local/bin/
+
 COPY app ./app
 
 RUN useradd --system --no-create-home app

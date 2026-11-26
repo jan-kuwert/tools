@@ -1,0 +1,12 @@
+---
+// Round progress dial. Drive it with setDial() from src/lib/tool.ts; toggle `hidden` to show/hide.
+// Starts indeterminate (spinning arc) until a fraction is set.
+interface Props { [hook: `data-${string}`]: boolean | string }
+---
+<div class="dial indeterminate" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" hidden {...Astro.props}>
+  <svg viewBox="0 0 48 48" aria-hidden="true">
+    <circle class="dial-track" cx="24" cy="24" r="20" pathLength="100" />
+    <circle class="dial-arc" cx="24" cy="24" r="20" pathLength="100" />
+  </svg>
+  <span class="dial-value"></span>
+</div>

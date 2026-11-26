@@ -4,6 +4,7 @@
 import Base from '../layouts/Base.astro';
 import Icon from './Icon.astro';
 import ModeBadge from './ModeBadge.astro';
+import ProgressDial from './ProgressDial.astro';
 import { categories, href, toolBySlug } from '../tools';
 
 interface Props {
@@ -14,8 +15,10 @@ interface Props {
   action: string;
   /** Hide the file picker for text-only tools. */
   noFiles?: boolean;
+  /** Local tool with an optional, separately confirmed cloud action: adapts the privacy note and adds the consent dialog. */
+  optionalCloud?: boolean;
 }
-const { slug, accept, multiple = false, action, noFiles = false } = Astro.props;
+const { slug, accept, multiple = false, action, noFiles = false, optionalCloud = false } = Astro.props;
 const tool = toolBySlug(slug);
 const category = categories.find((c) => c.id === tool.category)!;
 const cloud = tool.mode === 'cloud';
@@ -36,7 +39,9 @@ const cloud = tool.mode === 'cloud';
   ) : (
     <div class="privacy-note privacy-local" role="note">
       <Icon name="lock" />
-      <p><strong>Your files stay on this device.</strong> Processing happens in your browser; nothing is uploaded. <a href={href('privacy')}>How we check</a></p>
+      {optionalCloud
+        ? <p><strong>Your files stay on this device by default.</strong> Converting and editing happen in your browser. Only the optional <strong>Cloud export</strong> (marked in amber) uploads the original file, and only after you confirm each time. <a href={href('privacy')}>How we check</a></p>
+        : <p><strong>Your files stay on this device.</strong> Processing happens in your browser; nothing is uploaded. <a href={href('privacy')}>How we check</a></p>}
     </div>
   )}
 
@@ -64,14 +69,16 @@ const cloud = tool.mode === 'cloud';
       <button class="btn" type="button" data-cancel hidden>Cancel</button>
       <button class="btn btn-ghost" type="button" data-clear hidden>Clear files</button>
     </div>
-    <progress data-progress max="1" hidden></progress>
-    <p class="status" data-status role="status" aria-live="polite"></p>
+    <div class="status-row">
+      <ProgressDial data-progress />
+      <p class="status" data-status role="status" aria-live="polite"></p>
+    </div>
   </section>
 
   <section class="panel results" data-results hidden aria-live="polite"></section>
   <slot name="after" />
 
-  {cloud && (
+  {(cloud || optionalCloud) && (
     <dialog data-consent aria-labelledby="consent-title">
       <h2 id="consent-title"><Icon name="cloud" /> Upload to process?</h2>
       <p>This tool uploads your file for processing in Belgium (EU). Files are not intentionally retained after processing. Operational request metadata (time, size, IP address) may be logged.</p>

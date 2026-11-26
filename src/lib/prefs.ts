@@ -1,4 +1,4 @@
-import type { FrameId } from './editor';
+import type { RatioId, SizeId } from './editor';
 
 // Preferences only. Never store documents, filenames or consent here.
 const KEY = 'tools:prefs';
@@ -7,7 +7,8 @@ export interface Prefs {
   theme?: 'system' | 'light' | 'dark';
   imageFormat?: 'image/jpeg' | 'image/png' | 'image/webp';
   imageQuality?: number;
-  editorFrame?: FrameId;
+  editorRatio?: RatioId;
+  editorSize?: SizeId;
 }
 
 export const loadPrefs = (): Prefs => {

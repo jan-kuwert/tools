@@ -1,5 +1,6 @@
 // Shared canvas pipeline for the local image tools: decode → draw → encode.
 import { zipSync, type Zippable } from 'fflate';
+import { hasGps, readExif, withExif } from './metadata';
 import { sniff, UserError, type Result } from './tool';
 
 export type ImageType = 'image/jpeg' | 'image/png' | 'image/webp';
@@ -101,6 +102,73 @@ export async function encodeCanvas(canvas: HTMLCanvasElement, type: ImageType, q
     throw new UserError(`Your browser cannot save ${name} images${type === 'image/webp' ? ' (Safari does not support it)' : ''}. Choose PNG or JPEG instead, or use Chrome, Edge or Firefox.`);
   }
   return blob;
+}
+
+/** Whether any pixel is not fully opaque. JPEG, and PNG/WebP whose header rules out alpha, skip the pixel scan. */
+async function hasAlpha(file: File, preview?: HTMLCanvasElement): Promise<boolean> {
+  const kind = await sniff(file);
+  const b = new Uint8Array(await file.slice(0, 1 << 16).arrayBuffer());
+  const v = new DataView(b.buffer);
+  const ascii = (at: number) => String.fromCharCode(...b.subarray(at, at + 4));
+  if (kind === 'png') {
+    // Colour types 4 and 6 have an alpha channel; the others are transparent only with a tRNS chunk.
+    if (b[25] !== 4 && b[25] !== 6)
+      for (let i = 8; i + 8 <= b.length && ascii(i + 4) !== 'tRNS'; i += 12 + v.getUint32(i)) if (ascii(i + 4) === 'IDAT') return false;
+  } else if (kind === 'webp') {
+    if (ascii(12) === 'VP8 ' || (ascii(12) === 'VP8X' && !(b[20] & 0x10))) return false;
+  } else return false;
+
+  let canvas = preview;
+  if (!canvas) {
+    const size = await headerSize(file, kind);
+    if (!size || size[0] * size[1] > MAX_PIXELS) return false;
+    const k = Math.min(1, 1024 / Math.max(...size));
+    const [w, h] = size.map((n) => Math.max(1, Math.round(n * k)));
+    const bitmap = await createImageBitmap(file, { resizeWidth: w, resizeHeight: h, resizeQuality: 'medium' });
+    canvas = canvasOf(w, h);
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+    bitmap.close();
+  }
+  const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+  if (!preview) canvas.width = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] < 255) return true;
+  return false;
+}
+
+export interface ImageInfo { alpha: boolean; gps: boolean }
+const infos = new WeakMap<File, Promise<ImageInfo>>();
+
+/** Transparency and GPS data of an image, cached per file; never rejects. `preview`: an already decoded copy to scan. */
+export function inspectImage(file: File, preview?: HTMLCanvasElement): Promise<ImageInfo> {
+  let info = infos.get(file);
+  if (!info) {
+    info = Promise.all([
+      hasAlpha(file, preview).catch(() => false),
+      readExif(file).then((e) => !!e && hasGps(e)).catch(() => false),
+    ]).then(([alpha, gps]) => ({ alpha, gps }));
+    infos.set(file, info);
+  }
+  return info;
+}
+
+/** Copy the EXIF of `from` into `to`. On failure `to` is returned unchanged with a note. */
+export async function keepMetadata(from: File, to: Blob): Promise<{ blob: Blob; note?: string }> {
+  try {
+    const exif = await readExif(from);
+    return { blob: exif ? await withExif(to, exif) : to };
+  } catch {
+    return { blob: to, note: 'Metadata could not be kept.' };
+  }
+}
+
+/** Keep a quality slider and its number box in step; the slider clamps and rounds. Set `num` yourself after changing `range` from code. */
+export function linkQuality(range: HTMLInputElement, num: HTMLInputElement): void {
+  num.value = range.value;
+  range.addEventListener('input', () => (num.value = range.value));
+  num.addEventListener('input', () => {
+    if (num.value) range.value = num.value;
+  });
+  num.addEventListener('change', () => (num.value = range.value));
 }
 
 /** Make names unique so outputs (and ZIP entries) don't overwrite each other. */

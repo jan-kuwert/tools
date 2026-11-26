@@ -1,7 +1,54 @@
 ---
+import Icon from '../../components/Icon.astro';
+import ModeBadge from '../../components/ModeBadge.astro';
+import ProgressDial from '../../components/ProgressDial.astro';
 import ToolShell from '../../components/ToolShell.astro';
+
+const configured = Boolean(import.meta.env.PUBLIC_API_URL);
 ---
-<ToolShell slug="audio/convert" multiple action="Convert" accept="audio/*,.m4a,.aac,.mp3,.wav,.ogg,.oga,.opus,.flac,.webm">
+<ToolShell slug="audio/convert" multiple optionalCloud action="Convert" accept="audio/*,.m4a,.aac,.mp3,.wav,.ogg,.oga,.opus,.flac,.webm">
+  <p class="muted" data-multi-note hidden>Trimming and fades work when a single file is selected. With several files, each file is converted in full.</p>
+  <section class="wave-editor" data-editor hidden aria-labelledby="edit-title">
+    <h2 id="edit-title">Trim and cut</h2>
+    <p class="status" data-wave-status role="status"></p>
+    <div class="wave-ui" data-wave-ui hidden>
+      <div class="wave-scroll" data-scroll>
+        <div class="wave-track" data-track>
+          <canvas role="img" aria-label="Waveform with time ruler. Drag to select a range."></canvas>
+          <div class="wave-dim" data-dim="start"></div>
+          <div class="wave-dim" data-dim="end"></div>
+          <div class="wave-playhead" data-playhead hidden></div>
+          <div class="wave-handle" data-handle="start" role="slider" tabindex="0" aria-label="Selection start" aria-describedby="wave-hint"></div>
+          <div class="wave-handle" data-handle="end" role="slider" tabindex="0" aria-label="Selection end" aria-describedby="wave-hint"></div>
+        </div>
+      </div>
+      <div class="wave-bar">
+        <button class="btn" type="button" data-play>Play selection</button>
+        <button class="btn" type="button" data-pause disabled>Pause</button>
+        <button class="btn" type="button" data-play-all>Play from start</button>
+        <span class="wave-zoom">
+          <button class="icon-btn" type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out" disabled>−</button>
+          <button class="icon-btn" type="button" data-zoom="in" aria-label="Zoom in" title="Zoom in">+</button>
+        </span>
+      </div>
+      <p class="muted wave-hint" id="wave-hint">Drag on the waveform or the handles to select. On a handle, ←/→ move 10 ms, Shift+←/→ 1 s. Space plays or pauses.</p>
+      <div class="row">
+        <label class="field"><span>Start</span><input class="time" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-time="start" aria-describedby="time-format" /></label>
+        <label class="field"><span>End</span><input class="time" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-time="end" aria-describedby="time-format" /></label>
+        <label class="field"><span>Fade in (s)</span><input class="fade" type="number" min="0" max="5" step="0.1" value="0" data-fade="in" /></label>
+        <label class="field"><span>Fade out (s)</span><input class="fade" type="number" min="0" max="5" step="0.1" value="0" data-fade="out" /></label>
+      </div>
+      <p class="muted wave-hint" id="time-format">Times as m:ss.mmm (e.g. 0:01.500) or in seconds.</p>
+      <fieldset>
+        <legend>Edit</legend>
+        <div class="segmented">
+          <label><input type="radio" name="edit" value="keep" checked /><span>Keep selection</span></label>
+          <label><input type="radio" name="edit" value="remove" /><span>Remove selection</span></label>
+        </div>
+      </fieldset>
+      <p class="muted wave-hint" data-length></p>
+    </div>
+  </section>
   <fieldset>
     <legend>Output format</legend>
     <div class="segmented">
@@ -32,6 +79,47 @@ import ToolShell from '../../components/ToolShell.astro';
   <p class="muted" data-for="wav" hidden>Uncompressed 16-bit PCM: large files, no quality loss.</p>
   <p class="muted">Output keeps the source sample rate. Match source picks a bitrate close to the source’s, so lossy files don’t grow; lossless sources get 192 kbps MP3 or high-quality OGG.</p>
   <ul class="audio-info" data-info aria-live="polite" hidden></ul>
+
+  <section slot="after" class="panel cloud-export" data-cloud aria-labelledby="cloud-title">
+    <div class="tool-head">
+      <h2 id="cloud-title">Cloud export</h2>
+      <ModeBadge mode="cloud" />
+    </div>
+    <p class="cloud-intro">Uploads the original file to our server in the EU (Belgium) for M4A, FLAC or Opus output. Tags and cover art are kept, your selection and fades are applied there, and nothing is stored.</p>
+    {!configured && <p class="warn-box" role="note">The cloud service is not configured for this site, so cloud export is unavailable. Nothing will be uploaded.</p>}
+    <form class="options" data-cloud-form>
+      <fieldset disabled={!configured}>
+        <legend>Cloud format</legend>
+        <div class="segmented">
+          <label><input type="radio" name="format" value="m4a" checked /><span>M4A (AAC)</span></label>
+          <label><input type="radio" name="format" value="flac" /><span>FLAC</span></label>
+          <label><input type="radio" name="format" value="opus" /><span>Opus</span></label>
+          <label><input type="radio" name="format" value="mp3" /><span>MP3 (with tags)</span></label>
+        </div>
+      </fieldset>
+      <label class="field" data-cloud-bitrate>
+        <span>Bitrate</span>
+        <select name="bitrate" disabled={!configured}>
+          <option value="64">64 kbps</option>
+          <option value="96">96 kbps</option>
+          <option value="128">128 kbps</option>
+          <option value="160">160 kbps</option>
+          <option value="192" selected>192 kbps</option>
+          <option value="256">256 kbps</option>
+          <option value="320">320 kbps</option>
+        </select>
+      </label>
+    </form>
+    <p class="muted cloud-hint" data-cloud-hint hidden></p>
+    <div class="actions">
+      <button class="btn cloud-btn" type="button" data-cloud-run disabled><Icon name="upload" />Export via cloud</button>
+      <button class="btn" type="button" data-cloud-cancel hidden>Cancel</button>
+    </div>
+    <div class="status-row">
+      <ProgressDial data-cloud-progress />
+      <p class="status" data-cloud-status role="status" aria-live="polite"></p>
+    </div>
+  </section>
 </ToolShell>
 
 <style>
@@ -39,18 +127,55 @@ import ToolShell from '../../components/ToolShell.astro';
   .audio-info :global(li) { padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; }
   .audio-info :global(strong) { display: block; }
   .audio-info :global(span) { color: var(--muted); display: block; }
+
+  .wave-editor, .wave-ui { display: grid; gap: 0.75rem; min-width: 0; }
+  .wave-editor h2, .wave-editor .status, .wave-hint { margin: 0; }
+  .wave-editor .status:empty { display: none; }
+  .wave-hint { font-size: 0.85rem; }
+  .wave-scroll { overflow-x: auto; overflow-y: hidden; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+  .wave-track { position: relative; height: 150px; min-width: 100%; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+  .wave-track canvas { position: sticky; left: 0; display: block; height: 100%; color: var(--accent); }
+  .wave-dim { position: absolute; top: 18px; bottom: 0; left: 0; right: 0; background: color-mix(in srgb, var(--surface) 70%, transparent); pointer-events: none; }
+  .wave-dim[data-dim='start'] { right: auto; }
+  .wave-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--error); pointer-events: none; }
+  .wave-handle { position: absolute; top: 0; bottom: 0; width: 24px; margin-left: -12px; cursor: ew-resize; touch-action: none; }
+  .wave-handle::before { content: ''; position: absolute; top: 18px; bottom: 0; left: 11px; width: 2px; background: var(--fg); }
+  .wave-handle::after { content: ''; position: absolute; top: 2px; left: 6px; width: 12px; height: 16px; border-radius: 4px; background: var(--fg); }
+  .wave-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .wave-zoom { margin-left: auto; display: flex; gap: 0.25rem; }
+  .wave-zoom .icon-btn { width: 40px; height: 40px; font-size: 1.2rem; border-color: var(--border); }
+  .time { width: 8.5em; font-variant-numeric: tabular-nums; }
+  .fade { width: 6em; }
+
+  .cloud-export { border-color: color-mix(in srgb, var(--cloud) 45%, var(--border)); }
+  .cloud-export .tool-head h2 { margin: 0; }
+  .cloud-intro { margin: 0.5rem 0 1rem; font-size: 0.93rem; }
+  .cloud-export .warn-box { margin: 0 0 1rem; }
+  .cloud-hint { margin: 0.75rem 0 0; font-size: 0.9rem; }
+  .cloud-btn { border-color: color-mix(in srgb, var(--cloud) 55%, var(--border)); }
 </style>
 
 <script>
   import mp3Wasm from 'wasm-media-encoders/wasm/mp3?url';
   import oggWasm from 'wasm-media-encoders/wasm/ogg?url';
-  import { decodeAudio, encodeLossy, encodeWav, growthReason, planOutput, probeAudio, sourceKbps, type AudioInfo, type Format, type Plan } from '../../lib/audio';
-  import { createTool, el, formatBytes, replaceExt, throwIfAborted } from '../../lib/tool';
+  import { API_URL, uploadForResult } from '../../lib/api';
+  import { applyEdit, decodeAudio, encodeLossy, encodeWav, growthReason, MAX_SECONDS, planOutput, probeAudio, sourceKbps, TOO_LONG, type AudioInfo, type Edit, type Format, type Plan } from '../../lib/audio';
+  import { confirmUpload, createTool, el, formatBytes, setDial, throwIfAborted, UserError } from '../../lib/tool';
+  import { createWaveform, formatTime } from '../../lib/waveform';
 
   const MAX_FILE = 200 * 1024 * 1024;
+  // Cloud Run caps HTTP/1 request bodies at 32 MiB.
+  const MAX_CLOUD = 30 * 1024 * 1024;
   const form = document.querySelector<HTMLFormElement>('[data-options]')!;
   const infoList = form.querySelector<HTMLUListElement>('[data-info]')!;
   const matchOptions = form.querySelectorAll<HTMLOptionElement>('option[value="match"]');
+  const editor = form.querySelector<HTMLElement>('[data-editor]')!;
+  const multiNote = form.querySelector<HTMLElement>('[data-multi-note]')!;
+  const waveStatus = editor.querySelector<HTMLElement>('[data-wave-status]')!;
+  const waveUi = editor.querySelector<HTMLElement>('[data-wave-ui]')!;
+  const lengthOut = editor.querySelector<HTMLElement>('[data-length]')!;
+  const fadeIn = editor.querySelector<HTMLInputElement>('[data-fade=in]')!;
+  const fadeOut = editor.querySelector<HTMLInputElement>('[data-fade=out]')!;
 
   const probes = new WeakMap<File, Promise<AudioInfo>>();
   const probe = (f: File) => {
@@ -70,8 +195,30 @@ import ToolShell from '../../components/ToolShell.astro';
   const time = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
   const outLabel = (p: Plan) =>
     p.format === 'wav' ? `WAV · ${khz(p.sampleRate)} · 16-bit` : `${p.format.toUpperCase()} · ${khz(p.sampleRate)} · ${p.format === 'ogg' ? '≈' : ''}${p.kbps} kbps`;
+  const outName = (name: string, ext: string, edited: boolean) => name.replace(/\.[^./]*$/, '') + (edited ? '-edit.' : '.') + ext;
 
   let files: File[] = [];
+  // PCM of the single selected file at its source rate, shared by the waveform and local export.
+  let decoded: { file: File; rate: number; channels: Float32Array[] } | undefined;
+  const wave = createWaveform(editor, (committed) => (committed ? refresh() : showLength()));
+
+  /** The edit for the single decoded file, or undefined when it would not change anything. */
+  function currentEdit(): Edit | undefined {
+    if (!decoded) return;
+    const { start, end, duration } = wave.selection;
+    const remove = new FormData(form).get('edit') === 'remove';
+    const fade = (i: HTMLInputElement) => Math.min(5, Math.max(0, Number(i.value) || 0));
+    const edit = { start, end, remove, fadeIn: fade(fadeIn), fadeOut: fade(fadeOut) };
+    return remove || start > 0 || end < duration || edit.fadeIn || edit.fadeOut ? edit : undefined;
+  }
+
+  function showLength() {
+    if (!decoded) return;
+    const { start, end, duration } = wave.selection;
+    const remove = new FormData(form).get('edit') === 'remove';
+    lengthOut.textContent = `Selection ${formatTime(end - start)} · Result ${formatTime(remove ? duration - (end - start) : end - start)}`;
+  }
+
   let renderId = 0;
   async function render() {
     const id = ++renderId;
@@ -80,6 +227,11 @@ import ToolShell from '../../components/ToolShell.astro';
     const infos = await Promise.all(files.map(probe));
     if (id !== renderId) return;
     const plans = infos.map((info) => planOutput(info, format, choice));
+    const edit = currentEdit();
+    if (edit && plans[0].bytes) {
+      const { start, end, duration } = wave.selection;
+      plans[0].bytes *= (edit.remove ? duration - (end - start) : end - start) / duration;
+    }
     // With one effective bitrate across files, show it on the Match option itself.
     const matched = new Set(infos.map((info) => planOutput(info, format, 'match').kbps));
     const only = matched.size === 1 ? [...matched][0] : undefined;
@@ -95,17 +247,134 @@ import ToolShell from '../../components/ToolShell.astro';
     );
     infoList.hidden = files.length === 0;
   }
-  form.addEventListener('change', render);
-  render();
 
-  createTool({
+  let loadId = 0;
+  async function loadEditor() {
+    const id = ++loadId;
+    wave.clear();
+    decoded = undefined;
+    const file = files.length === 1 ? files[0] : undefined;
+    editor.hidden = !file;
+    multiNote.hidden = files.length < 2;
+    waveUi.hidden = true;
+    if (!file) return;
+    fadeIn.value = fadeOut.value = '0';
+    form.querySelector<HTMLInputElement>('[name=edit][value=keep]')!.checked = true;
+    waveStatus.dataset.kind = 'working';
+    waveStatus.textContent = 'Loading waveform…';
+    try {
+      const info = await probe(file);
+      if (info.duration && info.duration > MAX_SECONDS) throw new UserError(TOO_LONG);
+      const channels = await decodeAudio(file, info.sampleRate);
+      if (id !== loadId) return;
+      decoded = { file, rate: info.sampleRate, channels };
+      waveUi.hidden = false;
+      wave.load(channels, info.sampleRate);
+      waveStatus.textContent = '';
+    } catch (err) {
+      if (id !== loadId) return;
+      waveStatus.dataset.kind = 'error';
+      waveStatus.textContent = `${err instanceof UserError ? err.message : "This file can't be shown as a waveform."} Trimming is unavailable${API_URL ? '; cloud export still works.' : '.'}`;
+    }
+    refresh();
+  }
+
+  // Cloud export: optional, confirmed before every upload, sends the original file plus edit parameters.
+  const cloud = document.querySelector<HTMLElement>('[data-cloud]')!;
+  const cloudForm = cloud.querySelector<HTMLFormElement>('[data-cloud-form]')!;
+  const cloudBitrate = cloud.querySelector<HTMLElement>('[data-cloud-bitrate]')!;
+  const cloudHint = cloud.querySelector<HTMLElement>('[data-cloud-hint]')!;
+  const cloudRun = cloud.querySelector<HTMLButtonElement>('[data-cloud-run]')!;
+  const cloudCancel = cloud.querySelector<HTMLButtonElement>('[data-cloud-cancel]')!;
+  const cloudDial = cloud.querySelector<HTMLElement>('[data-cloud-progress]')!;
+  const cloudStatus = cloud.querySelector<HTMLElement>('[data-cloud-status]')!;
+  const CLOUD_LABELS = { m4a: 'M4A (AAC)', flac: 'FLAC', opus: 'Opus', mp3: 'MP3' };
+  const CLOUD_ERRORS = {
+    413: 'The file is larger than 30 MB, the limit for cloud export.',
+    415: 'The server could not decode this file as audio.',
+    422: 'The server rejected these settings. The selection may lie outside the audio, or the audio is longer than 60 minutes.',
+    504: 'Processing took too long. Try a shorter file or selection.',
+  };
+  let cloudController: AbortController | undefined;
+
+  const cloudFormat = () => String(new FormData(cloudForm).get('format')) as keyof typeof CLOUD_LABELS;
+  function cloudBlocker(): string {
+    if (files.length !== 1) return files.length ? 'Cloud export works on one file at a time.' : 'Choose an audio file first.';
+    if (files[0].size > MAX_CLOUD) return `This file is ${formatBytes(files[0].size)}, too large for cloud export (up to 30 MB). Local export above has no such limit.`;
+    const edit = currentEdit();
+    if (edit?.remove) return 'Remove selection is only available for local export. Switch to Keep selection to export via the cloud.';
+    if (edit && edit.fadeIn + edit.fadeOut > edit.end - edit.start) return 'Fade in and fade out together are longer than the selection.';
+    return '';
+  }
+  function syncCloud() {
+    cloudBitrate.hidden = cloudFormat() === 'flac';
+    const why = API_URL ? cloudBlocker() : '';
+    cloudHint.textContent = why;
+    cloudHint.hidden = !why;
+    cloudRun.disabled = !API_URL || !!why || !!cloudController;
+  }
+  const setCloudStatus = (kind: 'idle' | 'working' | 'done' | 'error', text: string, fraction?: number) => {
+    cloudStatus.dataset.kind = kind;
+    cloudStatus.textContent = text;
+    cloudDial.hidden = kind !== 'working';
+    setDial(cloudDial, fraction);
+  };
+  cloudForm.addEventListener('change', syncCloud);
+  cloudForm.addEventListener('submit', (e) => e.preventDefault());
+  cloudCancel.onclick = () => cloudController?.abort();
+
+  cloudRun.onclick = async () => {
+    const file = files[0];
+    if (!file || cloudBlocker() || !(await confirmUpload())) return;
+    wave.stop();
+    const format = cloudFormat();
+    const edit = currentEdit();
+    const sec = (s: number) => String(Math.round(s * 1e6) / 1e6);
+    const query = new URLSearchParams({ format });
+    if (format !== 'flac') query.set('bitrate', String(new FormData(cloudForm).get('bitrate')));
+    if (edit) {
+      if (edit.start > 0) query.set('start', sec(edit.start));
+      // Omit an end at (or within a millisecond of) the decoded end: the server's duration may differ by a few samples.
+      if (edit.end < wave.selection.duration - 0.001) query.set('end', sec(edit.end));
+      if (edit.fadeIn) query.set('fade_in', sec(edit.fadeIn));
+      if (edit.fadeOut) query.set('fade_out', sec(edit.fadeOut));
+    }
+    const controller = (cloudController = new AbortController());
+    tool.clearResults();
+    cloudCancel.hidden = false;
+    syncCloud();
+    setCloudStatus('working', 'Uploading… 0%', 0);
+    try {
+      const blob = await uploadForResult(`/v1/audio/convert?${query}`, file.slice(0, file.size, 'application/octet-stream'), {
+        signal: controller.signal,
+        onUploadProgress: (f) => (f < 1 ? setCloudStatus('working', `Uploading… ${Math.round(f * 100)}%`, f) : setCloudStatus('working', 'Processing on server…')),
+        messages: CLOUD_ERRORS,
+      });
+      setCloudStatus('done', 'Done.');
+      const kept = format === 'opus' ? 'Tags kept; Opus files carry no cover art here.' : 'Tags and cover art kept.';
+      tool.showResults([{ name: outName(file.name, format, !!edit), blob, inputSize: file.size, preview: true, note: `${CLOUD_LABELS[format]} · converted on our EU server. ${kept}` }]);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') setCloudStatus('idle', 'Cancelled.');
+      else setCloudStatus('error', err instanceof UserError ? err.message : `Something went wrong: ${(err as Error).message ?? err}`);
+    } finally {
+      if (cloudController === controller) cloudController = undefined;
+      cloudCancel.hidden = true;
+      syncCloud();
+    }
+  };
+
+  const tool = createTool({
     validate: (f) => (f.size > MAX_FILE ? 'Larger than 200 MB.' : undefined),
     onFilesChange(next) {
       files = next;
-      render();
+      cloudController?.abort();
+      loadEditor();
+      refresh();
     },
     async run(files, { signal, progress }) {
+      wave.stop();
       const { format, choice } = settings();
+      const edit = files.length === 1 ? currentEdit() : undefined;
       const results = [];
       for (const [i, f] of files.entries()) {
         throwIfAborted(signal);
@@ -113,7 +382,9 @@ import ToolShell from '../../components/ToolShell.astro';
         step('Decoding', 0);
         const info = await probe(f);
         const plan = planOutput(info, format, choice);
-        const channels = await decodeAudio(f, plan.sampleRate);
+        let channels = decoded?.file === f && decoded.rate === plan.sampleRate ? decoded.channels : await decodeAudio(f, plan.sampleRate);
+        const fullSeconds = channels[0].length / plan.sampleRate;
+        if (edit) channels = applyEdit(channels, plan.sampleRate, edit);
         throwIfAborted(signal);
         step('Encoding', 0);
         plan.channels = channels.length as 1 | 2;
@@ -124,14 +395,23 @@ import ToolShell from '../../components/ToolShell.astro';
         const seconds = channels[0].length / plan.sampleRate;
         const actual = format === 'ogg' ? `${format.toUpperCase()} · ${khz(plan.sampleRate)} · ≈${Math.round((blob.size * 8) / seconds / 1000)} kbps` : outLabel(plan);
         results.push({
-          name: replaceExt(f.name, format),
+          name: outName(f.name, format, !!edit),
           blob,
           inputSize: f.size,
           preview: true,
-          note: [actual + '.', growthReason({ ...info, duration: info.duration ?? seconds }, plan, blob.size, f.size), 'Tags and cover art are not copied.'].filter(Boolean).join(' '),
+          note: [actual + '.', growthReason({ ...info, duration: info.duration ?? fullSeconds }, plan, blob.size, f.size), 'Tags and cover art are not copied.'].filter(Boolean).join(' '),
         });
       }
       return results;
     },
   });
+  document.querySelector('[data-cancel]')!.addEventListener('click', () => wave.stop());
+
+  function refresh() {
+    showLength();
+    syncCloud();
+    render();
+  }
+  form.addEventListener('change', refresh);
+  refresh();
 </script>

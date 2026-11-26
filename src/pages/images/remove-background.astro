@@ -70,6 +70,12 @@ const configured = Boolean(import.meta.env.PUBLIC_API_URL);
       const blob = await uploadForResult('/v1/remove-background', file.slice(0, file.size, `image/${kind}`), {
         signal,
         onUploadProgress: (f) => (f < 1 ? progress(`Uploading… ${Math.round(f * 100)}%`, f) : progress('Processing on server…')),
+        messages: {
+          413: 'The image is larger than 20 MB.',
+          415: 'This file is not a JPEG, PNG or WebP image.',
+          422: 'The image could not be processed. It may be damaged or larger than 24 megapixels.',
+          504: 'Processing took too long. Try a smaller image.',
+        },
       });
       before.src = URL.createObjectURL(file);
       after.src = URL.createObjectURL(blob);

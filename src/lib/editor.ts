@@ -3,21 +3,16 @@
 // Pan state (cx, cy) and sizes are in full-resolution pixels of the rotated image ("source px");
 // the stage draws a ≤ PREVIEW px copy of it and export re-decodes the file at full resolution.
 import { zipSync, type Zippable } from 'fflate';
-import { canvasOf, decodeImage, drawImage, encodeCanvas, EXT, MAX_PIXELS, uniqueName, type ImageType, type Rect } from './image';
+import { canvasOf, decodeImage, drawImage, encodeCanvas, EXT, inspectImage, keepMetadata, linkQuality, MAX_PIXELS, uniqueName, type ImageType, type Rect } from './image';
 import { loadPrefs } from './prefs';
 import { downloadBlob, el, formatBytes, UserError } from './tool';
 
-export type FrameId = 'original' | 'square' | 'portrait' | 'story' | 'landscape' | '4:3' | '3:2' | 'custom';
-export const FRAMES: Record<FrameId, { label: string; w?: number; h?: number }> = {
-  original: { label: 'Original size' },
-  square: { label: 'Square', w: 1080, h: 1080 },
-  portrait: { label: 'Portrait 4:5', w: 1080, h: 1350 },
-  story: { label: 'Story 9:16', w: 1080, h: 1920 },
-  landscape: { label: 'Landscape 16:9', w: 1920, h: 1080 },
-  '4:3': { label: '4:3', w: 1600, h: 1200 },
-  '3:2': { label: '3:2', w: 1800, h: 1200 },
-  custom: { label: 'Custom' },
-};
+export const RATIOS = ['original', 'free', '1:1', '4:5', '3:4', '2:3', '9:16', '16:9', '4:3', '3:2', '21:9', 'custom'] as const;
+/** Pixel sizes apply to the long side. */
+export const SIZES = ['original', '512', '720', '1080', '1280', '1920', '2048', '2560', '3840', 'custom'] as const;
+export type RatioId = (typeof RATIOS)[number];
+export type SizeId = (typeof SIZES)[number];
+export const choiceLabel = (id: string) => ({ original: 'Original', free: 'Free', custom: 'Custom' })[id] ?? id;
 
 const PREVIEW = 2048;
 const ZOOM = { fill: [1, 8], fit: [0.1, 1] } as const;
@@ -37,8 +32,8 @@ interface Item {
   zoom: number;
   cx: number; // source point shown at the frame centre, relative to the image centre
   cy: number;
-  outW: number; // "Original size" output
-  outH: number;
+  alpha: boolean; // has transparent pixels; detected in the background
+  gps: boolean;
 }
 
 let root: HTMLElement | undefined;
@@ -71,11 +66,14 @@ function bind(root: HTMLElement) {
     crop: q('[data-crop]'),
     zoomCtl: q('[data-zoom-controls]'),
     fitSet: q('[data-fit-set]'),
-    custom: q('[data-custom]'),
-    resize: q('[data-resize]'),
+    customRatio: q('[data-custom-ratio]'),
+    customSize: q('[data-custom-size]'),
+    swap: q<HTMLButtonElement>('[data-swap]'),
     bgSet: q('[data-bg-set]'),
     qualityOut: q('[data-quality-out]'),
+    qualityNum: q<HTMLInputElement>('[data-quality-num]'),
     jpegWarn: q('[data-jpeg-warn]'),
+    gpsHint: q('[data-gps-hint]'),
     problem: q('[data-problem]'),
     upscaleWarn: q('[data-upscale-warn]'),
     dims: q('[data-dims]'),
@@ -89,7 +87,10 @@ function bind(root: HTMLElement) {
 
 const field = (name: string) => ui.form.elements.namedItem(name) as HTMLInputElement;
 const value = (name: string) => (ui.form.elements.namedItem(name) as RadioNodeList | HTMLInputElement).value;
-const frameId = () => value('frame') as FrameId;
+const ratioId = () => value('ratio') as RatioId;
+const free = () => ratioId() === 'free';
+/** Which custom size field the user typed last; the other follows the ratio. */
+let sizeDriver: 'cw' | 'ch' = 'cw';
 const format = () => value('format') as ImageType;
 const quality = () => Number(field('quality').value) / 100;
 /** Colour behind transparent pixels and padding; JPEG has no alpha so it always gets one. */
@@ -97,23 +98,41 @@ const background = () => (format() === 'image/jpeg' || value('bg') === 'colour' 
 
 const dims = (it: Item) => (it.rot % 2 ? [it.h, it.w] : [it.w, it.h]);
 
+/** Width / height of the output; for Free and Original the image's own. NaN if the custom ratio is invalid. */
+function ratio(it: Item): number {
+  const id = ratioId();
+  const [W, H] = dims(it);
+  if (id === 'free' || id === 'original') return W / H;
+  const [a, b] = id === 'custom' ? [Number(field('rw').value), Number(field('rh').value)] : id.split(':').map(Number);
+  return a > 0 && b > 0 ? a / b : NaN;
+}
+
 function outSize(it: Item): [number, number] {
-  const id = frameId();
-  if (id === 'original') return [it.outW, it.outH];
-  if (id === 'custom') return [Math.round(Number(field('cw').value)), Math.round(Number(field('ch').value))];
-  return [FRAMES[id].w!, FRAMES[id].h!];
+  const [W, H] = dims(it);
+  const r = ratio(it);
+  const size = value('size') as SizeId;
+  const round = (n: number) => Math.max(1, Math.round(n));
+  if (size === 'custom') {
+    const v = Number(field(sizeDriver).value);
+    return sizeDriver === 'cw' ? [Math.round(v), round(v / r)] : [round(v * r), Math.round(v)];
+  }
+  // Largest frame of this ratio inside the source, so nothing is enlarged.
+  if (size === 'original') return W / H > r ? [round(H * r), H] : [W, round(W / r)];
+  const n = Number(size);
+  return r >= 1 ? [n, round(n / r)] : [round(n * r), n];
 }
 
 function geometry(it: Item) {
   const [W, H] = dims(it);
   const [FW, FH] = outSize(it);
-  const original = frameId() === 'original';
+  const noCrop = free();
   const fill = value('fit') === 'fill';
   const cover = fill ? Math.max(FW / W, FH / H) : Math.min(FW / W, FH / H);
-  return { W, H, FW, FH, original, fill, s: cover * it.zoom };
+  return { W, H, FW, FH, noCrop, fill, s: noCrop ? cover : cover * it.zoom };
 }
 
 function problem(it: Item): string | undefined {
+  if (Number.isNaN(ratio(it))) return 'Enter an aspect ratio with both sides above 0.';
   const [w, h] = outSize(it);
   if (!(w >= 1 && h >= 1)) return 'Enter an output width and height of at least 1 px.';
   if (w * h > MAX_PIXELS) return `${w} × ${h} px is above the 16.7 megapixel limit that works on every device, including iPhone and iPad.`;
@@ -133,8 +152,8 @@ function clampView(it: Item) {
 
 /** Rects in world units: source px with Fill (image fixed, frame moves), output px otherwise. */
 function layout(it: Item): { box: Rect; img: Rect; frame: Rect } {
-  const { W, H, FW, FH, original, fill, s } = geometry(it);
-  if (original) {
+  const { W, H, FW, FH, noCrop, fill, s } = geometry(it);
+  if (noCrop) {
     const r = { x: 0, y: 0, w: FW, h: FH };
     return { box: r, img: r, frame: r };
   }
@@ -164,7 +183,12 @@ async function load(file: File): Promise<Item> {
     const k = Math.min(1, PREVIEW / Math.max(bitmap.width, bitmap.height));
     const base = drawImage(bitmap, Math.max(1, Math.round(bitmap.width * k)), Math.max(1, Math.round(bitmap.height * k)));
     const { width: w, height: h } = bitmap;
-    return { file, type, url: URL.createObjectURL(file), w, h, base, view: base, rot: 0, flip: false, zoom: 1, cx: 0, cy: 0, outW: w, outH: h };
+    const it: Item = { file, type, url: URL.createObjectURL(file), w, h, base, view: base, rot: 0, flip: false, zoom: 1, cx: 0, cy: 0, alpha: false, gps: false };
+    void inspectImage(file, base).then((info) => {
+      Object.assign(it, info);
+      if (items.includes(it)) syncHints();
+    });
+    return it;
   } finally {
     bitmap.close();
   }
@@ -204,9 +228,9 @@ function fullOf(it: Item): Promise<Source> {
 }
 
 function renderOutput(it: Item, src: Source): HTMLCanvasElement {
-  const { W, H, FW, FH, original, s } = geometry(it);
+  const { W, H, FW, FH, noCrop, s } = geometry(it);
   const bg = background();
-  if (original) return drawImage(src, FW, FH, bg);
+  if (noCrop) return drawImage(src, FW, FH, bg);
   const out = canvasOf(FW, FH);
   const ctx = out.getContext('2d')!;
   if (bg) {
@@ -231,13 +255,14 @@ function renderOutput(it: Item, src: Source): HTMLCanvasElement {
   return out;
 }
 
-async function exportBlob(it: Item): Promise<Blob> {
+async function exportBlob(it: Item): Promise<{ blob: Blob; note?: string }> {
   const p = problem(it);
   if (p) throw new UserError(p);
   clampView(it);
   const canvas = renderOutput(it, await fullOf(it));
   const type = format();
-  return encodeCanvas(canvas, type, type === 'image/png' ? undefined : quality());
+  const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : quality());
+  return field('strip').checked ? { blob } : keepMetadata(it.file, blob);
 }
 
 const outName = (it: Item) => {
@@ -283,13 +308,13 @@ function draw() {
   const d = (r: Rect): Rect => ({ x: ox + r.x * vs, y: oy + r.y * vs, w: r.w * vs, h: r.h * vs });
   const img = d(L.img);
   const frame = d(L.frame);
-  const back = g.fill && !g.original ? img : frame;
+  const back = g.fill && !g.noCrop ? img : frame;
 
   ctx.fillStyle = background() ?? checkerPattern(ctx, dpr);
   ctx.fillRect(back.x, back.y, back.w, back.h);
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(it.view, img.x, img.y, img.w, img.h);
-  if (g.original) return;
+  if (g.noCrop) return;
 
   if (g.fill) {
     ctx.beginPath();
@@ -356,7 +381,7 @@ function readouts() {
   ui.upscaleWarn.hidden = !upscaled;
   if (upscaled) ui.upscaleWarn.textContent = `Enlarged to ${pct} of the original pixels, so the result may look soft or blurry. Use a larger image or a smaller output size for a sharp result.`;
   if (err) ui.crop.textContent = '';
-  else if (g.original) ui.crop.textContent = `${W} × ${H} → ${FW} × ${FH} px`;
+  else if (g.noCrop) ui.crop.textContent = `${W} × ${H} → ${FW} × ${FH} px`;
   else {
     const L = layout(it);
     const r = g.fill ? L.frame : L.img;
@@ -368,31 +393,35 @@ function readouts() {
 
 /** Show/hide and refill controls. `editing` is the field being typed in; it is left alone. */
 function syncControls(editing?: string) {
-  const id = frameId();
-  const original = id === 'original';
+  const noCrop = free();
   const jpeg = format() === 'image/jpeg';
   const png = format() === 'image/png';
-  ui.custom.hidden = id !== 'custom';
-  ui.resize.hidden = !original;
-  ui.fitSet.hidden = ui.zoomCtl.hidden = original;
+  ui.customRatio.hidden = ratioId() !== 'custom';
+  ui.customSize.hidden = value('size') !== 'custom';
+  ui.swap.disabled = noCrop;
+  ui.fitSet.hidden = ui.zoomCtl.hidden = noCrop;
   ui.bgSet.hidden = jpeg;
   field('colour').disabled = !jpeg && value('bg') !== 'colour';
-  field('quality').disabled = png;
-  ui.qualityOut.textContent = png ? 'lossless' : field('quality').value;
-  ui.jpegWarn.hidden = !jpeg || items.every((it) => it.type === 'image/jpeg');
+  field('quality').disabled = ui.qualityNum.disabled = png;
+  ui.qualityOut.textContent = png ? 'lossless' : '';
+  syncHints();
   ui.downloadAll.hidden = items.length < 2;
   const it = items[cur];
-  if (it && original) {
-    const [W] = dims(it);
-    const vals: Record<string, number> = { ow: it.outW, oh: it.outH, pct: Math.round((it.outW / W) * 1000) / 10 };
-    for (const [name, v] of Object.entries(vals)) if (name !== editing) field(name).value = String(v);
-    field('pct').max = field('upscale').checked ? '' : '100';
+  if (it && !problem(it)) {
+    const [w, h] = outSize(it);
+    if (editing !== 'cw') field('cw').value = String(w);
+    if (editing !== 'ch') field('ch').value = String(h);
   }
   ui.thumbs.querySelectorAll<HTMLButtonElement>('button').forEach((b, i) => {
     b.ariaCurrent = i === cur ? 'true' : null;
     const t = items[i];
     b.querySelector('img')!.style.transform = `${t.flip ? 'scaleX(-1) ' : ''}rotate(${t.rot * 90}deg)`;
   });
+}
+
+function syncHints() {
+  ui.jpegWarn.hidden = format() !== 'image/jpeg' || !items.some((it) => it.alpha);
+  ui.gpsHint.hidden = field('strip').checked || !items.some((it) => it.gps);
 }
 
 function changed() {
@@ -414,7 +443,7 @@ function scheduleEstimate() {
   if (err) return;
   estTimer = window.setTimeout(async () => {
     try {
-      const blob = await exportBlob(it);
+      const { blob } = await exportBlob(it);
       if (gen !== estGen) return;
       const pct = Math.round((blob.size / it.file.size - 1) * 100);
       ui.estimate.textContent = `${formatBytes(blob.size)} · ${pct === 0 ? 'same as original' : pct < 0 ? `${-pct}% smaller` : `${pct}% larger`}`;
@@ -435,35 +464,11 @@ function setStatus(text: string, kind: 'idle' | 'working' | 'error' | 'done' = '
   ui.status.dataset.kind = kind;
 }
 
-function setSize(it: Item, axis: 'w' | 'h', v: number) {
-  if (!(v >= 1)) return;
-  const [W, H] = dims(it);
-  const lock = field('lock').checked;
-  v = Math.round(v);
-  if (!field('upscale').checked) v = Math.min(v, axis === 'w' ? W : H);
-  if (axis === 'w') {
-    it.outW = v;
-    if (lock) it.outH = Math.max(1, Math.round((v * H) / W));
-  } else {
-    it.outH = v;
-    if (lock) it.outW = Math.max(1, Math.round((v * W) / H));
-  }
-}
-
-function scaleTo(it: Item, pct: number) {
-  if (!(pct > 0)) return;
-  const [W, H] = dims(it);
-  const k = field('upscale').checked ? pct / 100 : Math.min(1, pct / 100);
-  it.outW = Math.max(1, Math.round(W * k));
-  it.outH = Math.max(1, Math.round(H * k));
-}
-
 function rotate(d: 1 | -1) {
   const it = items[cur];
   // Rotation is applied before the flip, so a visual turn runs the other way while flipped.
   it.rot = (it.rot + (it.flip ? -d : d) + 4) % 4;
   [it.cx, it.cy] = d > 0 ? [-it.cy, it.cx] : [it.cy, -it.cx];
-  [it.outW, it.outH] = [it.outH, it.outW];
   reorient(it);
 }
 
@@ -472,6 +477,25 @@ function flip() {
   it.flip = !it.flip;
   it.cx = -it.cx;
   reorient(it);
+}
+
+/** Turn the ratio on its side, e.g. 3:2 → 2:3; ratios without a preset become Custom. */
+function swap() {
+  const it = items[cur];
+  const id = ratioId();
+  if (!it || id === 'free') return;
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  const [W, H] = dims(it);
+  const [a, b] = id === 'custom' ? [field('rw').value, field('rh').value] : id === 'original' ? [W / gcd(W, H), H / gcd(W, H)] : id.split(':');
+  const next = `${b}:${a}`;
+  if ((RATIOS as readonly string[]).includes(next)) ui.form.querySelector<HTMLInputElement>(`[name=ratio][value="${next}"]`)!.checked = true;
+  else {
+    field('rw').value = String(b);
+    field('rh').value = String(a);
+    ui.form.querySelector<HTMLInputElement>('[name=ratio][value=custom]')!.checked = true;
+  }
+  syncControls();
+  changed();
 }
 
 function reorient(it: Item) {
@@ -546,6 +570,7 @@ function init(): HTMLElement {
   root = r;
   ui = bind(r);
   const { form, canvas } = ui;
+  linkQuality(field('quality'), ui.qualityNum);
 
   form.addEventListener('submit', (e) => e.preventDefault());
   form.addEventListener('input', (e) => {
@@ -553,14 +578,7 @@ function init(): HTMLElement {
     const it = items[cur];
     if (!it) return;
     if (t.name === 'zoom') it.zoom = Number(t.value);
-    else if (t.name === 'ow') setSize(it, 'w', Number(t.value));
-    else if (t.name === 'oh') setSize(it, 'h', Number(t.value));
-    else if (t.name === 'pct') items.forEach((x) => scaleTo(x, Number(t.value)));
-    else if (t.name === 'lock' || t.name === 'upscale')
-      for (const x of items) {
-        setSize(x, 'w', x.outW);
-        if (!field('lock').checked) setSize(x, 'h', x.outH);
-      }
+    else if (t.name === 'cw' || t.name === 'ch') sizeDriver = t.name;
     syncControls(t.name);
     changed();
   });
@@ -570,6 +588,7 @@ function init(): HTMLElement {
   r.querySelector('[data-close]')!.addEventListener('click', close);
   r.querySelector('[data-rotate-left]')!.addEventListener('click', () => rotate(-1));
   r.querySelector('[data-rotate-right]')!.addEventListener('click', () => rotate(1));
+  ui.swap.addEventListener('click', swap);
   r.querySelector('[data-flip]')!.addEventListener('click', flip);
   r.querySelector('[data-zoom-out]')!.addEventListener('click', () => zoomBy(items[cur], 1 / 1.25));
   r.querySelector('[data-zoom-in]')!.addEventListener('click', () => zoomBy(items[cur], 1.25));
@@ -592,18 +611,22 @@ function init(): HTMLElement {
     run(async () => {
       const it = items[cur];
       setStatus('Preparing download…', 'working');
-      downloadBlob(await exportBlob(it), outName(it));
-      setStatus(`Saved ${outName(it)}.`, 'done');
+      const { blob, note } = await exportBlob(it);
+      downloadBlob(blob, outName(it));
+      setStatus(`Saved ${outName(it)}.${note ? ` ${note}` : ''}`, 'done');
     }),
   );
   ui.downloadAll.addEventListener('click', () =>
     run(async () => {
       const entries: Zippable = {};
+      const failed: string[] = [];
       const taken = new Set<string>();
       for (const [i, it] of items.entries()) {
         setStatus(`Preparing ${i + 1} of ${items.length}…`, 'working');
         try {
-          entries[uniqueName(outName(it), taken)] = new Uint8Array(await (await exportBlob(it)).arrayBuffer());
+          const { blob, note } = await exportBlob(it);
+          entries[uniqueName(outName(it), taken)] = new Uint8Array(await blob.arrayBuffer());
+          if (note) failed.push(it.file.name);
         } catch (err) {
           throw err instanceof UserError ? new UserError(`${it.file.name}: ${err.message}`) : err;
         }
@@ -611,7 +634,7 @@ function init(): HTMLElement {
       // Images are already compressed, so store without deflate.
       const zip = zipSync(entries, { level: 0 });
       downloadBlob(new Blob([zip as BlobPart], { type: 'application/zip' }), 'images.zip');
-      setStatus(`Saved images.zip with ${items.length} images.`, 'done');
+      setStatus(`Saved images.zip with ${items.length} images.${failed.length ? ` Metadata could not be kept for ${failed.join(', ')}.` : ''}`, 'done');
     }),
   );
 
@@ -624,7 +647,7 @@ function init(): HTMLElement {
     gesture = a && it ? { x: a.x, y: a.y, cx: it.cx, cy: it.cy, zoom: it.zoom, dist: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0 } : undefined;
   };
   canvas.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || frameId() === 'original') return;
+    if (e.button !== 0 || free()) return;
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     startGesture();
@@ -650,7 +673,7 @@ function init(): HTMLElement {
   canvas.addEventListener(
     'wheel',
     (e) => {
-      if (!items[cur] || frameId() === 'original') return;
+      if (!items[cur] || free()) return;
       e.preventDefault();
       zoomBy(items[cur], Math.exp(-e.deltaY * 0.002));
     },
@@ -658,7 +681,7 @@ function init(): HTMLElement {
   );
   canvas.addEventListener('keydown', (e) => {
     const it = items[cur];
-    if (!it || frameId() === 'original') return;
+    if (!it || free()) return;
     const step = e.shiftKey ? 50 : 10;
     const moves: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
     if (moves[e.key]) {
@@ -687,10 +710,13 @@ export async function openImageEditor(files: File[]): Promise<void> {
   items = loaded;
   cur = 0;
   const prefs = loadPrefs();
-  const frame = prefs.editorFrame && prefs.editorFrame in FRAMES ? prefs.editorFrame : 'original';
-  ui.form.querySelector<HTMLInputElement>(`[name=frame][value="${frame}"]`)!.checked = true;
+  for (const [name, id] of [['ratio', prefs.editorRatio], ['size', prefs.editorSize]]) {
+    const radio = ui.form.querySelector<HTMLInputElement>(`[name=${name}][value="${id}"]`) ?? ui.form.querySelector<HTMLInputElement>(`[name=${name}][value=original]`)!;
+    radio.checked = true;
+  }
   ui.form.querySelector<HTMLInputElement>(`[name=format][value="${prefs.imageFormat ?? 'image/webp'}"]`)!.checked = true;
   field('quality').value = String(prefs.imageQuality ?? 82);
+  ui.qualityNum.value = field('quality').value;
   r.hidden = false;
   renderThumbs();
   syncControls();

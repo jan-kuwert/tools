@@ -1,7 +1,6 @@
 ---
 // Image editor markup. Behaviour: openImageEditor() in src/lib/editor.ts. Include at most once per page.
-import { FRAMES } from '../lib/editor';
-const icon = (w = 3, h = 2) => `width:${Math.round((20 * w) / Math.max(w, h))}px;height:${Math.round((20 * h) / Math.max(w, h))}px`;
+import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
 ---
 <section class="image-editor" data-image-editor hidden tabindex="-1" aria-labelledby="ie-title">
   <header class="ie-head">
@@ -44,36 +43,28 @@ const icon = (w = 3, h = 2) => `width:${Math.round((20 * w) / Math.max(w, h))}px
 
     <div class="ie-side">
       <fieldset>
-        <legend>Output size</legend>
-        <div class="ie-frames">
-          {Object.entries(FRAMES).map(([id, f]) => (
-            <label>
-              <input type="radio" name="frame" value={id} checked={id === 'original'} />
-              <span>
-                <i style={icon(f.w, f.h)} class:list={{ free: !f.w }} aria-hidden="true"></i>
-                {f.label}
-                <small>{f.w ? `${f.w} × ${f.h}` : id === 'custom' ? 'Any size' : 'Free resize'}</small>
-              </span>
-            </label>
-          ))}
+        <legend>Aspect ratio</legend>
+        <div class="ie-chips">
+          {RATIOS.map((id) => <label><input type="radio" name="ratio" value={id} checked={id === 'original'} /><span>{choiceLabel(id)}</span></label>)}
+          <button class="ie-swap" type="button" data-swap aria-label="Swap orientation" title="Swap orientation (e.g. 3:2 ⇄ 2:3)">⇄</button>
         </div>
       </fieldset>
-
-      <div class="ie-pair" data-custom hidden>
-        <label class="field"><span>Width (px)</span><input type="number" name="cw" min="1" step="1" value="1200" inputmode="numeric" /></label>
-        <span aria-hidden="true">×</span>
-        <label class="field"><span>Height (px)</span><input type="number" name="ch" min="1" step="1" value="1200" inputmode="numeric" /></label>
+      <div class="ie-pair" data-custom-ratio hidden>
+        <label class="field"><span>Ratio width</span><input type="number" name="rw" min="0.01" step="any" value="3" inputmode="decimal" /></label>
+        <span aria-hidden="true">:</span>
+        <label class="field"><span>Ratio height</span><input type="number" name="rh" min="0.01" step="any" value="2" inputmode="decimal" /></label>
       </div>
 
-      <div class="ie-group" data-resize>
-        <div class="ie-pair">
-          <label class="field"><span>Width (px)</span><input type="number" name="ow" min="1" step="1" inputmode="numeric" /></label>
-          <span aria-hidden="true">×</span>
-          <label class="field"><span>Height (px)</span><input type="number" name="oh" min="1" step="1" inputmode="numeric" /></label>
+      <fieldset>
+        <legend>Size, long side (px)</legend>
+        <div class="ie-chips">
+          {SIZES.map((id) => <label><input type="radio" name="size" value={id} checked={id === 'original'} /><span>{choiceLabel(id)}</span></label>)}
         </div>
-        <label class="field"><span>Scale, all images (%)</span><input type="number" name="pct" min="1" max="100" step="any" inputmode="decimal" /></label>
-        <label class="ie-check"><input type="checkbox" name="lock" checked /> Keep proportions</label>
-        <label class="ie-check"><input type="checkbox" name="upscale" /> Allow upscaling</label>
+      </fieldset>
+      <div class="ie-pair" data-custom-size hidden>
+        <label class="field"><span>Width (px)</span><input type="number" name="cw" min="1" step="1" inputmode="numeric" /></label>
+        <span aria-hidden="true">×</span>
+        <label class="field"><span>Height (px)</span><input type="number" name="ch" min="1" step="1" inputmode="numeric" /></label>
       </div>
 
       <fieldset data-fit-set>
@@ -103,12 +94,16 @@ const icon = (w = 3, h = 2) => `width:${Math.round((20 * w) / Math.max(w, h))}px
           <label><input type="radio" name="format" value="image/webp" checked /><span>WebP</span></label>
         </div>
       </fieldset>
-      <label class="field">
-        <span>Quality <output class="muted" data-quality-out>82</output></span>
-        <input type="range" name="quality" min="1" max="100" value="82" />
-      </label>
+      <div class="field">
+        <span id="ie-quality">Quality <span class="muted" data-quality-out></span></span>
+        <div class="ie-quality">
+          <input type="range" name="quality" min="1" max="100" value="82" aria-labelledby="ie-quality" />
+          <input type="number" min="1" max="100" step="1" inputmode="numeric" aria-labelledby="ie-quality" data-quality-num />
+        </div>
+      </div>
       <p class="warn-box" data-jpeg-warn hidden>JPEG has no transparency: transparent areas get the background colour.</p>
-      <p class="ie-note">Metadata such as camera details and GPS location is removed.</p>
+      <label class="ie-check"><input type="checkbox" role="switch" name="strip" checked /> Remove metadata (EXIF, GPS location)</label>
+      <p class="ie-note" data-gps-hint hidden>Location data will be kept.</p>
       <p class="warn-box" data-problem hidden></p>
 
       <div class="ie-actions">
@@ -174,19 +169,16 @@ const icon = (w = 3, h = 2) => `width:${Math.round((20 * w) / Math.max(w, h))}px
   .ie-side .segmented label { flex: 1; text-align: center; }
   .ie-side .segmented span { padding: 0.35rem 0.5rem; font-size: 0.88rem; }
   .ie-side [type='range'] { width: 100%; }
-  .ie-frames { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; }
-  .ie-frames label { position: relative; }
-  .ie-frames input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .ie-frames span { display: grid; grid-template-columns: 20px 1fr; column-gap: 0.45rem; align-items: center; padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 9px; font-weight: 600; font-size: 0.84rem; line-height: 1.25; height: 100%; }
-  .ie-frames i { grid-row: span 2; justify-self: center; border: 1.5px solid currentColor; border-radius: 3px; opacity: 0.6; }
-  .ie-frames i.free { border-style: dashed; }
-  .ie-frames small { font-weight: 400; font-size: 0.74rem; color: var(--muted); }
-  .ie-frames input:checked + span { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
-  .ie-frames input:checked + span i { opacity: 1; color: var(--accent); }
-  .ie-frames input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .ie-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .ie-chips label { position: relative; }
+  .ie-chips input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .ie-chips span, .ie-swap { display: block; padding: 0.25rem 0.6rem; border: 1px solid var(--border); border-radius: 999px; font-family: inherit; font-weight: 600; font-size: 0.82rem; line-height: 1.3; font-variant-numeric: tabular-nums; }
+  .ie-chips input:checked + span { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); }
+  .ie-chips input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .ie-swap { background: var(--surface); color: inherit; cursor: pointer; }
+  .ie-swap:disabled { opacity: 0.4; cursor: default; }
   .ie-pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.4rem; align-items: end; }
   .ie-pair > span { padding-bottom: 0.5rem; color: var(--muted); }
-  .ie-group { display: grid; gap: 0.6rem; }
   .ie-check { display: flex; gap: 0.5rem; align-items: center; }
   .ie-check input, .ie-bg [type='color'] { accent-color: var(--accent); }
   .ie-bg { display: flex; gap: 0.5rem; align-items: center; }
@@ -198,6 +190,8 @@ const icon = (w = 3, h = 2) => `width:${Math.round((20 * w) / Math.max(w, h))}px
   .ie-out dt { color: var(--muted); }
   .ie-out dd { margin: 0; text-align: right; font-weight: 600; }
   .ie-note { margin: -0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
+  .ie-quality { display: flex; gap: 0.6rem; align-items: center; }
+  .ie-side .ie-quality [type='number'] { width: 4.5rem; flex: none; }
   .ie-actions { display: grid; gap: 0.5rem; position: sticky; bottom: 0; margin: 0 -1rem -1rem; padding: 0.75rem 1rem 1rem; background: var(--surface); border-top: 1px solid var(--border); }
   .ie-actions .status { margin: 0; min-height: 0; font-size: 0.85rem; }
   .ie-actions .status:empty { display: none; }

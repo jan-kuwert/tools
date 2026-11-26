@@ -57,7 +57,7 @@ import ToolShell from '../../components/ToolShell.astro';
   const output = $<HTMLTextAreaElement>('#js-out');
   const fileInput = $<HTMLInputElement>('[data-file]');
   const runBtn = $<HTMLButtonElement>('[data-run]');
-  const bar = $<HTMLProgressElement>('[data-progress]');
+  const bar = $('[data-progress]');
   const outPanel = $('[data-output]');
   const status = $('[data-status]');
   let srcName = 'script.js';

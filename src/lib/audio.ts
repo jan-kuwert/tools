@@ -3,7 +3,8 @@
 import { createEncoder, type WasmMediaEncoder } from 'wasm-media-encoders';
 import { UserError, tick, throwIfAborted } from './tool';
 
-const MAX_SECONDS = 60 * 60;
+export const MAX_SECONDS = 60 * 60;
+export const TOO_LONG = 'Audio longer than 60 minutes is not supported (it would use too much memory).';
 // Multiple of the 1152-sample MP3 frame; ~1.7 s of audio per chunk keeps the UI responsive.
 const CHUNK = 1152 * 64;
 const STD_RATES = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400, 192000];
@@ -215,7 +216,7 @@ export async function decodeAudio(file: Blob, sampleRate: number): Promise<Float
   } catch {
     throw new UserError("Your browser can't decode this file. Try Chrome or Safari for M4A/AAC.");
   }
-  if (buf.duration > MAX_SECONDS) throw new UserError('Audio longer than 60 minutes is not supported (it would use too much memory).');
+  if (buf.duration > MAX_SECONDS) throw new UserError(TOO_LONG);
   if (buf.numberOfChannels > 2) {
     // Rendering into a 2-channel context applies the Web Audio speaker downmix rules.
     const mix = new OfflineAudioContext(2, buf.length, sampleRate);
@@ -225,6 +226,38 @@ export async function decodeAudio(file: Blob, sampleRate: number): Promise<Float
     buf = await mix.startRendering();
   }
   return Array.from({ length: buf.numberOfChannels }, (_, c) => buf.getChannelData(c));
+}
+
+/** Selection in seconds; `remove` cuts it out instead of keeping it. Fades apply to the start and end of the output. */
+export interface Edit {
+  start: number;
+  end: number;
+  remove: boolean;
+  fadeIn: number;
+  fadeOut: number;
+}
+
+/** Apply `edit` to PCM at `sampleRate`, sample-accurately, returning new arrays (input is not modified). */
+export function applyEdit(channels: Float32Array[], sampleRate: number, edit: Edit): Float32Array[] {
+  const len = channels[0].length;
+  const a = Math.min(len, Math.round(edit.start * sampleRate));
+  const b = Math.min(len, Math.round(edit.end * sampleRate));
+  const out = channels.map((ch) => {
+    if (!edit.remove) return ch.slice(a, b);
+    const o = new Float32Array(len - (b - a));
+    o.set(ch.subarray(0, a));
+    o.set(ch.subarray(b), a);
+    return o;
+  });
+  const n = out[0].length;
+  if (!n) throw new UserError(edit.remove ? 'Removing the whole file leaves no audio.' : 'The selection is empty.');
+  const fadeIn = Math.min(n, Math.round(edit.fadeIn * sampleRate));
+  const fadeOut = Math.min(n, Math.round(edit.fadeOut * sampleRate));
+  for (const o of out) {
+    for (let i = 0; i < fadeIn; i++) o[i] *= i / fadeIn;
+    for (let i = 0; i < fadeOut; i++) o[n - 1 - i] *= i / fadeOut;
+  }
+  return out;
 }
 
 /** 16-bit PCM RIFF/WAVE. */
@@ -279,7 +312,7 @@ export async function encodeLossy(
     ogg.configure({ ...base, vbrQuality: plan.vbrQuality });
     enc = ogg;
   }
-  const parts: BlobPart[] = [];
+  const parts: Uint8Array[] = [];
   const frames = channels[0].length;
   for (let i = 0; i < frames; i += CHUNK) {
     throwIfAborted(signal);
@@ -289,5 +322,61 @@ export async function encodeLossy(
     await tick();
   }
   parts.push(enc.finalize().slice());
-  return new Blob(parts, { type: mime });
+  if (plan.format === 'mp3') parts.unshift(lameInfoFrame(parts, frames));
+  return new Blob(parts as BlobPart[], { type: mime });
+}
+
+/** LAME encoder delay in samples; decoders add their own 529 on top. */
+const ENCODER_DELAY = 576;
+
+/**
+ * LAME "Info" frame (Xing header for CBR) recording encoder delay and end padding, so decoders that honour it
+ * (browsers, FFmpeg, iTunes) output exactly `samples` samples instead of ~50 ms extra silence.
+ */
+function lameInfoFrame(parts: Uint8Array[], samples: number): Uint8Array {
+  const size = parts.reduce((n, p) => n + p.length, 0);
+  // Byte at `i` across the parts without concatenating them; `i` must not decrease between calls.
+  let part = 0;
+  let base = 0;
+  const at = (i: number) => {
+    while (i >= base + parts[part].length) base += parts[part++].length;
+    return parts[part][i - base];
+  };
+  const h = [at(0), at(1), at(2), at(3)];
+  const mpeg1 = ((h[1] >> 3) & 3) === 3;
+  const rate = [44100, 48000, 32000][(h[2] >> 2) & 3] / (mpeg1 ? 1 : ((h[1] >> 3) & 3) === 2 ? 2 : 4);
+  const kbps = mpeg1 ? [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320] : [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+  const frameBytes = (brIdx: number, pad = 0) => Math.floor(((mpeg1 ? 144 : 72) * kbps[brIdx] * 1000) / rate) + pad;
+  let frames = 0;
+  for (let o = 0; o + 4 <= size; frames++) {
+    const b2 = at(o + 2);
+    o += frameBytes(b2 >> 4, (b2 >> 1) & 1);
+  }
+  const tag = 4 + (h[3] >> 6 === 3 ? (mpeg1 ? 17 : 9) : mpeg1 ? 32 : 17); // after the side info
+  const lame = tag + 120;
+  // Like LAME, raise the bitrate of this one frame when the tag does not fit at the stream's bitrate.
+  let brIdx = h[2] >> 4;
+  while (frameBytes(brIdx) < lame + 36) brIdx++;
+  const out = new Uint8Array(frameBytes(brIdx));
+  const v = new DataView(out.buffer);
+  out.set([0xff, h[1] | 1, (brIdx << 4) | (h[2] & 0x0c), h[3]]); // no CRC, no padding bit
+  const ascii = (o: number, s: string) => [...s].forEach((c, i) => (out[o + i] = c.charCodeAt(0)));
+  ascii(tag, 'Info');
+  v.setUint32(tag + 4, 0x0f); // frames, bytes, TOC and quality present
+  v.setUint32(tag + 8, frames);
+  v.setUint32(tag + 12, size + out.length);
+  for (let i = 0; i < 100; i++) out[tag + 16 + i] = Math.floor((i * 256) / 100);
+  ascii(lame, 'LAME3.100');
+  out[lame + 9] = 1; // tag revision 0, CBR
+  const padding = frames * (mpeg1 ? 1152 : 576) - ENCODER_DELAY - samples;
+  out.set([ENCODER_DELAY >> 4, ((ENCODER_DELAY & 15) << 4) | (padding >> 8), padding & 255], lame + 21);
+  v.setUint32(lame + 28, size + out.length);
+  // CRC-16 (poly 0x8005, reflected) over the frame up to the CRC field.
+  let crc = 0;
+  for (let i = 0; i < lame + 34; i++) {
+    crc ^= out[i];
+    for (let b = 0; b < 8; b++) crc = crc & 1 ? (crc >>> 1) ^ 0xa001 : crc >>> 1;
+  }
+  v.setUint16(lame + 34, crc);
+  return out;
 }

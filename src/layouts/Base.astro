@@ -1,8 +1,8 @@
 ---
 import '../styles/global.css';
 import { categories, href } from '../tools';
-interface Props { title: string; description?: string; category?: string }
-const { title, description = 'Fast, private file tools that run in your browser.', category } = Astro.props;
+interface Props { title: string; description?: string; category?: string; /** Full-width main (home page). */ wide?: boolean }
+const { title, description = 'Fast, private file tools that run in your browser.', category, wide = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 ---
 <!doctype html>
@@ -27,7 +27,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
         <button class="icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Theme">◐</button>
       </div>
     </header>
-    <main id="main"><slot /></main>
+    <main id="main" class={wide ? 'wide' : undefined}><slot /></main>
     <footer class="site-footer">
       <div class="inner">
         <span>Most tools run entirely in your browser. Cloud tools are clearly marked.</span>
