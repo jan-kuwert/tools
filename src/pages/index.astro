@@ -4,61 +4,84 @@ import ImageEditor from '../components/ImageEditor.astro';
 import ModeBadge from '../components/ModeBadge.astro';
 import { categories, href, tools, type Category } from '../tools';
 
-// Stroke paths (24×24) for the per-category glyphs.
-const glyphs: Record<Category, string[]> = {
+type Dir = 'n' | 'e' | 's' | 'w';
+// The hub: each category sits one screen away from the centre in a fixed direction.
+const placement: Record<Category, Dir> = { files: 'n', pdf: 'e', images: 's', audio: 'w' };
+const opposite: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' };
+
+// Stroke paths (24×24).
+const glyphs: Record<Category | 'code', string[]> = {
   images: ['M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z', 'm4 16 5-5 4 4 2-2 5 5', 'M14 9.5a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0'],
   pdf: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z', 'M14 3v5h5', 'M9 13h6M9 17h4'],
   audio: ['M9 18V5l11-2v13', 'M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0', 'M14 16a3 3 0 1 0 6 0 3 3 0 1 0-6 0'],
   files: ['M3 4h18v4H3z', 'M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8', 'M10 12h4'],
-  text: ['m8 8-4 4 4 4', 'm16 8 4 4-4 4', 'm13.5 5-3 14'],
+  code: ['m8 8-4 4 4 4', 'm16 8 4 4-4 4', 'm13.5 5-3 14'],
 };
-const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], ['audio', 'Audio'], ['text', 'JSON & JS'], ['files', 'Archives']];
+const dropTypes: [keyof typeof glyphs, string][] = [['images', 'Images'], ['pdf', 'PDF'], ['audio', 'Audio'], ['code', 'JSON & JS'], ['files', 'Archives']];
+const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
+const labelOf = (c: Category) => categories.find((x) => x.id === c)!.label;
+// Pointing down; .ha-* rotates it toward its edge.
+const ARROW = 'M12 5v14M6 13l6 6 6-6';
 ---
 <Base title="Tools · fast, private file tools" wide>
-<div class="home">
-  <section class="home-hero" data-home>
-    <div class="home-inner hero-grid">
-      <div class="hero-copy">
-        <h1>Quick file tools that respect your files.</h1>
-        <p>Convert, compress and edit images, PDFs, audio and text. Almost everything runs right here in your browser, so your files never leave your device.</p>
+<div class="home" data-at="centre">
+  <div class="hub" data-home data-hub tabindex="0" role="region" aria-label="Tools. Arrow keys move between Images, PDF, Audio and Files & text; Escape returns to the start.">
+    <section class="hub-cell hub-centre" data-panel="centre" aria-label="Start">
+      <div class="cell-scroll">
+        <div class="cell-inner centre-inner">
+          <h1>Quick file tools that respect your files.</h1>
+          <p class="lede">Almost everything runs right here in your browser. Your files never leave your device.</p>
+          <label class="drop hero-drop" data-hero-drop>
+            <input type="file" multiple data-hero-input />
+            <span class="drop-types" aria-hidden="true">
+              {dropTypes.map(([g, label]) => (
+                <span class="drop-type"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[g].map((d) => <path d={d} />)}</svg>{label}</span>
+              ))}
+            </span>
+            <span class="drop-title">Drop any file to start</span>
+            <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
+            <span class="drop-hint">Or paste from the clipboard. We pick the right tool for you.</span>
+          </label>
+          <p class="status" data-drop-status role="status" aria-live="polite"></p>
+          <div class="hub-search">
+            <label class="visually-hidden" for="search">Search tools</label>
+            <input id="search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" aria-controls="search-results" data-search />
+            <ul class="search-results" id="search-results" data-search-results hidden>
+              {tools.map((t) => (
+                <li data-keywords={`${t.title} ${t.summary} ${labelOf(t.category)} ${t.slug}`.toLowerCase()} hidden>
+                  <a href={href(t.slug)}>
+                    <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[t.category].map((d) => <path d={d} />)}</svg></span>
+                    <span class="sr-text"><strong>{t.title}</strong><small>{labelOf(t.category)}</small></span>
+                    <ModeBadge mode={t.mode} />
+                  </a>
+                </li>
+              ))}
+              <li class="muted sr-empty" data-empty hidden>No tool matches that search.</li>
+            </ul>
+          </div>
+        </div>
       </div>
-      <div>
-        <label class="drop hero-drop" data-hero-drop>
-          <input type="file" multiple data-hero-input />
-          <span class="drop-types" aria-hidden="true">
-            {dropTypes.map(([c, label]) => (
-              <span class="drop-type"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c].map((d) => <path d={d} />)}</svg>{label}</span>
-            ))}
-          </span>
-          <span class="drop-title">Drop any file to start</span>
-          <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
-          <span class="drop-hint">Or paste from the clipboard. We pick the right tool for you.</span>
-        </label>
-        <p class="status" data-drop-status role="status" aria-live="polite"></p>
-      </div>
-    </div>
-  </section>
+      {categories.map((c) => (
+        <a class={`hub-arrow ha-${placement[c.id]}`} href={`#${c.id}`} data-go={c.id}>
+          <svg class="ico ha-ico" viewBox="0 0 24 24" aria-hidden="true"><path d={ARROW} /></svg>
+          <span>{c.label}</span>
+          <span class="ha-meta">{toolsIn(c.id).length === 1 ? '1 tool' : `${toolsIn(c.id).length} tools`}</span>
+        </a>
+      ))}
+    </section>
 
-  <div class="home-inner home-tools" data-home>
-    <div class="tools-bar">
-      <label class="visually-hidden" for="search">Search tools</label>
-      <input id="search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" data-search />
-      <nav class="cat-jump" aria-label="Jump to category">
-        {categories.map((c) => (
-          <a class="cat-chip" href={`#${c.id}`}><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg>{c.label}</a>
-        ))}
-      </nav>
-    </div>
-
-    <div class="home-cats">
-      {categories.map((c) => {
-        const list = tools.filter((t) => t.category === c.id);
-        return (
-          <section class="category" id={c.id} data-category style={`--n: ${list.length}`}>
-            <h2><span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg></span>{c.label}</h2>
+    {categories.map((c) => (
+      <section class="hub-cell hub-panel" data-panel={c.id} data-dir={placement[c.id]} aria-labelledby={`hub-${c.id}`}>
+        <div class="cell-scroll">
+          <div class="cell-inner" style={`--cols: ${Math.min(toolsIn(c.id).length, 4)}`}>
+            <div class="panel-head">
+              <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg></span>
+              <h2 id={`hub-${c.id}`} tabindex="-1">{c.label}</h2>
+            </div>
+            <p class="panel-blurb">{c.blurb}</p>
             <ul class="tool-grid">
-              {list.map((t) => (
-                <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
+              {toolsIn(c.id).map((t) => (
+                <li>
                   <a class="tool-card" href={href(t.slug)}>
                     <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[c.id].map((d) => <path d={d} />)}</svg></span>
                     <h3>{t.title}</h3>
@@ -68,52 +91,57 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
                 </li>
               ))}
             </ul>
-          </section>
-        );
-      })}
-    </div>
-    <p class="muted" data-empty hidden>No tool matches that search.</p>
+            <p class="panel-hint">Drop files anywhere on this page and we pick the right tool.</p>
+          </div>
+        </div>
+        <a class={`hub-arrow ha-${opposite[placement[c.id]]}`} href={href()} data-go="centre">
+          <svg class="ico ha-ico" viewBox="0 0 24 24" aria-hidden="true"><path d={ARROW} /></svg>
+          <span>Start</span>
+        </a>
+      </section>
+    ))}
   </div>
+  <div class="hub-veil" aria-hidden="true"><span>Drop to start</span></div>
 
   <div class="home-inner home-work">
-  <section class="stage" data-stage hidden aria-label="Your files">
-    <div class="stage-bar" data-stage-bar>
-      <button class="btn" type="button" data-back>← Back</button>
-      <button class="btn btn-ghost" type="button" data-restart>Start over</button>
-    </div>
-    <div data-chooser>
-      <h2 tabindex="-1" data-chooser-title>What do you want to do?</h2>
-      <p class="muted" data-file-summary></p>
-      <ul class="tool-grid" data-choices>
-        {tools.map((t) => (
-          <li data-choice={t.slug} hidden>
-            <button class="tool-card choice-card" type="button" data-pick={t.slug} data-url={href(t.slug)} data-title={t.title}>
-              <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[t.category].map((d) => <path d={d} />)}</svg></span>
-              <h3>{t.title}</h3>
-              <p>{t.summary}</p>
-              <span class="card-mode"><ModeBadge mode={t.mode} /></span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-    <div class="cloud-alt" data-cloud-alt>
-      <span>Need a transparent cutout instead?</span>
-      <button class="btn" type="button" data-pick="images/remove-background">Remove background <ModeBadge mode="cloud" /></button>
-    </div>
-  </section>
+    <section class="stage" data-stage hidden aria-label="Your files">
+      <div class="stage-bar" data-stage-bar>
+        <button class="btn" type="button" data-back>← Back</button>
+        <button class="btn btn-ghost" type="button" data-restart>Start over</button>
+      </div>
+      <div data-chooser>
+        <h2 tabindex="-1" data-chooser-title>What do you want to do?</h2>
+        <p class="muted" data-file-summary></p>
+        <ul class="tool-grid" data-choices>
+          {tools.map((t) => (
+            <li data-choice={t.slug} hidden>
+              <button class="tool-card choice-card" type="button" data-pick={t.slug} data-url={href(t.slug)} data-title={t.title}>
+                <span class="tile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">{glyphs[t.category].map((d) => <path d={d} />)}</svg></span>
+                <h3>{t.title}</h3>
+                <p>{t.summary}</p>
+                <span class="card-mode"><ModeBadge mode={t.mode} /></span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div class="cloud-alt" data-cloud-alt>
+        <span>Need a transparent cutout instead?</span>
+        <button class="btn" type="button" data-pick="images/remove-background">Remove background <ModeBadge mode="cloud" /></button>
+      </div>
+    </section>
 
-  <ImageEditor />
+    <ImageEditor />
   </div>
 </div>
 </Base>
 
 <style is:global>
   /* Home only. Neutral surfaces; --accent only on the primary button, focus and drop hover. */
-  main.wide { width: 100%; padding: 0 0 4rem; }
+  main.wide { width: 100%; padding: 0; }
   /* Line the header and footer up with the full-width content. */
   body:has(main.wide) :is(.site-header, .site-footer) .inner { width: min(100% - 2 * clamp(1rem, 4vw, 3rem), 1600px); }
-  .home { --gutter: clamp(1rem, 4vw, 3rem); }
+  .home { --gutter: clamp(1rem, 4vw, 3rem); position: relative; }
   .home-inner { width: min(100% - 2 * var(--gutter), 1600px); margin-inline: auto; }
   .home .ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   .home .tile {
@@ -121,79 +149,151 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
     color: var(--muted); background: var(--surface-2);
   }
 
-  /* Hero: full-bleed band with one faint accent wash. */
-  .home-hero {
-    padding-block: clamp(2rem, 6vw, 5rem);
-    border-bottom: 1px solid var(--border);
-    background: radial-gradient(60rem 30rem at 75% 0%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 70%), var(--bg);
+  /* Hub: 3×3 snap grid, one cell per screen. Corners are empty and have no snap points. */
+  .hub {
+    position: relative; display: grid;
+    grid-template-columns: repeat(3, 100%); grid-template-rows: repeat(3, 100%);
+    height: calc(100dvh - 57px); /* sticky header: 56px + border */
+    overflow: auto; scroll-snap-type: both mandatory; overscroll-behavior-x: contain;
+    scrollbar-width: none; background: var(--surface-2);
   }
-  .hero-grid { display: grid; gap: clamp(1.5rem, 4vw, 4rem); align-items: center; }
-  @media (min-width: 960px) { .hero-grid { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); } }
-  .hero-copy h1 { font-size: clamp(2.1rem, 5.2vw, 4.2rem); line-height: 1.04; letter-spacing: -0.035em; margin: 0 0 1rem; }
-  .hero-copy p { color: var(--muted); font-size: clamp(1.05rem, 1.5vw, 1.25rem); max-width: 44ch; margin: 0; }
+  .hub::-webkit-scrollbar { display: none; }
+  .hub.moving { scroll-snap-type: none; }
+  .hub:focus-visible { outline-offset: -4px; }
+  /* The global rule shows every .mode tooltip inside a focused ancestor; the hub itself is focusable. */
+  .hub:focus-visible .mode::after { opacity: 0; transform: translateY(-3px); }
+  .hub:focus-visible .mode:hover::after { opacity: 1; transform: none; }
+  .hub-cell { position: relative; min-width: 0; min-height: 0; background: var(--bg); scroll-snap-align: center; scroll-snap-stop: always; }
+  .hub-centre { grid-area: 2 / 2; scroll-initial-target: nearest; }
+  .hub-panel[data-dir='n'] { grid-area: 1 / 2; }
+  .hub-panel[data-dir='e'] { grid-area: 2 / 3; }
+  .hub-panel[data-dir='s'] { grid-area: 3 / 2; }
+  .hub-panel[data-dir='w'] { grid-area: 2 / 1; }
+  /* Faint edge washes hint that there is more in every direction. */
+  .hub-centre::before {
+    --edge: color-mix(in srgb, var(--accent) 7%, transparent);
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background:
+      linear-gradient(var(--edge), transparent 5rem), linear-gradient(to top, var(--edge), transparent 5rem),
+      linear-gradient(to right, var(--edge), transparent 5rem), linear-gradient(to left, var(--edge), transparent 5rem);
+  }
+  .cell-scroll {
+    position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column;
+    padding: 4.25rem 3.75rem; scrollbar-width: thin;
+  }
+  /* Auto margins centre short content but keep tall content scrollable from its top. */
+  .cell-inner {
+    margin: auto; width: min(100%, 1120px);
+    opacity: 0.4; transform: scale(0.985); transition: opacity 0.22s ease-out, transform 0.22s ease-out;
+  }
+  [data-active] > .cell-scroll > .cell-inner { opacity: 1; transform: none; }
+  @media (max-width: 600px) { .cell-scroll { padding: 3.75rem 3rem; } }
 
-  /* Drop zone: dashed border turns accent and lifts on hover, focus and drag-over. */
+  /* Edge arrows. Positioning uses `translate`; hover/press feedback uses `transform`/`scale`. */
+  .hub-arrow {
+    position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.45rem 0.95rem 0.45rem 0.65rem; border-radius: 999px; border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(8px);
+    color: var(--fg); font-size: 0.9rem; font-weight: 600; text-decoration: none; white-space: nowrap;
+    box-shadow: var(--shadow); transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s;
+  }
+  .hub-arrow:hover { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
+  .hub-arrow:active { scale: 0.96; }
+  .ha-meta { color: var(--muted); font-weight: 500; font-size: 0.82rem; }
+  .ha-ico { width: 18px; height: 18px; color: var(--accent); }
+  .ha-n { top: 0.75rem; left: 50%; translate: -50% 0; }
+  .ha-s { bottom: 0.75rem; left: 50%; translate: -50% 0; }
+  .ha-e, .ha-w { top: 50%; translate: 0 -50%; writing-mode: vertical-rl; padding: 0.95rem 0.45rem 0.65rem; }
+  .ha-e { right: 0.5rem; }
+  .ha-w { left: 0.5rem; rotate: 180deg; }
+  .ha-n .ha-ico { rotate: 180deg; }
+  .ha-e .ha-ico, .ha-w .ha-ico { rotate: -90deg; }
+  .ha-n:hover { transform: translateY(-2px); }
+  .ha-s:hover { transform: translateY(2px); }
+  .ha-e:hover, .ha-w:hover { transform: translateX(2px); }
+
+  /* Centre */
+  .centre-inner { width: min(100%, 46rem); text-align: center; }
+  .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.7rem); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 0.6rem; }
+  .lede { color: var(--muted); margin: 0 auto 1.5rem; max-width: 40ch; }
   .home .hero-drop {
-    min-height: clamp(16rem, 30vw, 23rem); align-content: center; gap: 0.9rem;
-    padding: 2rem 1.25rem; border-radius: 24px; border: 2px dashed var(--border);
+    min-height: clamp(12rem, 32vh, 19rem); align-content: center; gap: 0.8rem;
+    padding: 1.75rem 1rem; border-radius: 24px; border: 2px dashed var(--border);
     background: var(--surface); box-shadow: var(--shadow);
-    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    transition: transform 0.12s ease-out, box-shadow 0.12s, border-color 0.12s;
   }
   .home .hero-drop:is(:hover, .over, :focus-within) {
     border-color: var(--accent); background: var(--surface);
-    transform: translateY(-3px);
-    box-shadow: 0 16px 40px -20px rgb(0 0 0 / 0.25);
+    transform: translateY(-2px); box-shadow: 0 16px 40px -20px rgb(0 0 0 / 0.25);
   }
   .hero-drop:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 3px; }
-  .hero-drop .drop-title { font-size: clamp(1.4rem, 3vw, 2rem); letter-spacing: -0.02em; }
-  .drop-btn { pointer-events: none; font-size: 1.05rem; padding: 0.75rem 1.5rem; border-radius: 12px; }
-  .drop-types { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+  .hero-drop .drop-title { font-size: clamp(1.3rem, 3vw, 1.75rem); letter-spacing: -0.02em; }
+  .drop-btn { pointer-events: none; font-size: 1.02rem; padding: 0.7rem 1.4rem; border-radius: 12px; }
+  .drop-types { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.45rem; }
   .drop-type {
-    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.75rem 0.3rem 0.5rem;
-    border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: var(--fg); border: 1px solid var(--border);
+    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem 0.25rem 0.45rem;
+    border-radius: 999px; font-size: 0.82rem; font-weight: 600; color: var(--fg); border: 1px solid var(--border);
   }
-  .drop-type .ico { color: var(--muted); width: 18px; height: 18px; }
-  .home-hero .status { min-height: 0; margin: 0.5rem 0 0; }
-
-  /* Tool catalogue: categories flow side by side, each sized by its tool count. */
-  .home-tools { padding-top: clamp(1.5rem, 4vw, 3rem); }
-  .tools-bar { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: center; margin-bottom: 2rem; }
+  .drop-type .ico { color: var(--muted); width: 16px; height: 16px; }
+  .centre-inner .status { min-height: 0; margin: 0.5rem 0 0; }
+  .hub-search { position: relative; margin: 1rem auto 0; max-width: 30rem; text-align: left; }
   .home .search {
-    flex: 1 1 20rem; max-width: 36rem; margin: 0; border-radius: 999px; padding-left: 2.8rem;
-    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8f98' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 1rem center / 20px;
+    width: 100%; margin: 0; border-radius: 999px; padding: 0.6rem 1rem 0.6rem 2.6rem; font-size: 0.98rem;
+    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8f98' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 0.9rem center / 18px;
   }
-  .cat-jump { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-  .cat-chip {
-    display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.85rem 0.4rem 0.6rem;
-    border-radius: 999px; font-size: 0.9rem; font-weight: 600; color: var(--fg); text-decoration: none;
-    background: var(--surface); border: 1px solid var(--border);
-    transition: border-color 0.15s;
+  .search-results {
+    position: absolute; z-index: 3; left: 0; right: 0; top: calc(100% + 0.4rem);
+    list-style: none; margin: 0; padding: 0.35rem; max-height: min(45vh, 22rem); overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 16px 40px -16px rgb(0 0 0 / 0.3);
   }
-  .cat-chip .ico { color: var(--muted); width: 18px; height: 18px; }
-  .cat-chip:hover { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
-  .home-cats { display: flex; flex-wrap: wrap; gap: 1.25rem; }
-  .home .category {
-    flex: var(--n) 1 calc(var(--n) * 14rem + (var(--n) - 1) * 0.75rem + 2.5rem); min-width: 0;
-    margin: 0; padding: 1.25rem; border-radius: 22px; scroll-margin-top: 72px;
-    background: color-mix(in srgb, var(--surface-2) 55%, transparent); border: 1px solid var(--border);
+  .search-results a {
+    display: flex; align-items: center; gap: 0.7rem; padding: 0.45rem 0.6rem; border-radius: 10px;
+    color: var(--fg); text-decoration: none; transition: background 0.1s;
   }
-  .home .category h2 { display: flex; align-items: center; gap: 0.6rem; }
-  .home .category h2 .tile { width: 2rem; height: 2rem; border-radius: 10px; background: var(--surface); }
-  .home .category h2 .ico { width: 18px; height: 18px; }
-  .home .tool-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); }
+  .search-results a:hover, .search-results a:focus-visible { background: var(--surface-2); }
+  .search-results .tile { width: 2rem; height: 2rem; border-radius: 9px; }
+  .search-results .ico { width: 17px; height: 17px; }
+  .sr-text { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+  .sr-text small { color: var(--muted); }
+  .sr-empty { padding: 0.5rem 0.6rem; }
+
+  /* Category panels */
+  .panel-head { display: flex; align-items: center; gap: 0.75rem; }
+  .panel-head h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); letter-spacing: -0.02em; margin: 0; }
+  .panel-head h2:focus { outline: none; }
+  .panel-blurb { color: var(--muted); margin: 0.4rem 0 1.5rem; }
+  .panel-hint { color: var(--muted); font-size: 0.88rem; margin: 1.25rem 0 0; text-align: center; }
+  .home .tool-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.9rem; }
+  /* Size panels to their card count so short categories don't sit in an empty half-screen. */
+  .hub-panel .cell-inner { width: min(100%, max(26rem, var(--cols) * 16rem + (var(--cols) - 1) * 0.9rem)); }
   .home .tool-card {
     display: grid; grid-template-columns: auto 1fr; grid-template-areas: 'tile mode' 'title title' 'text text';
     align-content: start; gap: 0.6rem 0.5rem; border-radius: 16px; padding: 1rem 1.1rem 1.15rem;
-    transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
+    transition: transform 0.12s ease-out, border-color 0.12s, box-shadow 0.12s;
   }
   .home .tool-card .tile { grid-area: tile; }
   .card-mode { grid-area: mode; justify-self: end; align-self: start; display: flex; }
   .home .tool-card h3 { grid-area: title; margin-top: 0.15rem; }
   .home .tool-card p { grid-area: text; }
-  .home .tool-card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -16px rgb(0 0 0 / 0.3); }
+  .home .tool-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -16px rgb(0 0 0 / 0.3); }
+  .home .tool-card:active { transform: translateY(0) scale(0.99); }
+  @media (max-width: 600px) {
+    .home .tool-card { grid-template-columns: auto 1fr auto; grid-template-areas: 'tile title mode' 'tile text text'; align-items: start; gap: 0.2rem 0.75rem; padding: 0.85rem 0.9rem; }
+    .home .tool-card h3 { margin: 0; font-size: 0.98rem; }
+  }
+
+  /* Shown while dragging files over a category panel (the centre has its own drop zone). */
+  .hub-veil {
+    position: absolute; inset: 0.75rem; height: calc(100dvh - 57px - 1.5rem); z-index: 4; pointer-events: none;
+    display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 24px;
+    background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(4px);
+    font-size: 1.4rem; font-weight: 650; opacity: 0; transition: opacity 0.12s;
+  }
+  .home[data-dragging]:not([data-at='centre']) .hub-veil { opacity: 1; }
+  .home:has(> .hub[hidden]) .hub-veil { display: none; }
 
   /* Handoff stage (chooser, embedded tool) and the image editor. */
-  .home-work { padding-top: 2rem; max-width: 1280px; }
+  .home-work { padding: 2rem 0 4rem; max-width: 1280px; }
   .home-work:not(:has(> [data-stage]:not([hidden]), > [data-image-editor]:not([hidden]))) { display: none; }
   .stage-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
   .stage-bar [data-restart] { margin-left: auto; }
@@ -209,26 +309,156 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
-  // Search
+  // Search: matches open as a list under the field on the centre screen.
   const search = $<HTMLInputElement>('[data-search]');
+  const results = $('[data-search-results]');
   const empty = $('[data-empty]');
   search.addEventListener('input', () => {
     const terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
     let shown = 0;
-    for (const section of document.querySelectorAll<HTMLElement>('[data-category]')) {
-      let visible = 0;
-      for (const li of section.querySelectorAll<HTMLElement>('li[data-keywords]')) {
-        const match = terms.every((t) => li.dataset.keywords!.includes(t));
-        li.hidden = !match;
-        if (match) visible++;
-      }
-      section.hidden = visible === 0;
-      shown += visible;
+    for (const li of results.querySelectorAll<HTMLElement>('li[data-keywords]')) {
+      const match = terms.length > 0 && terms.every((t) => li.dataset.keywords!.includes(t));
+      li.hidden = !match;
+      if (match) shown++;
     }
+    results.hidden = terms.length === 0;
     empty.hidden = shown > 0;
   });
   search.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') document.querySelector<HTMLAnchorElement>('li[data-keywords]:not([hidden]) a')?.click();
+    if (e.key === 'Enter') results.querySelector<HTMLAnchorElement>('li[data-keywords]:not([hidden]) a')?.click();
+  });
+
+  // Hub navigation. Native scroll snap does wheel/touch/drag; JS only handles buttons, keys and the URL hash.
+  type Dir = 'n' | 'e' | 's' | 'w';
+  const home = $('.home');
+  const hub = $('[data-hub]');
+  const cells = new Map([...hub.querySelectorAll<HTMLElement>('[data-panel]')].map((c) => [c.dataset.panel!, c]));
+  const KEY_DIR: Record<string, Dir> = { ArrowUp: 'n', ArrowDown: 's', ArrowLeft: 'w', ArrowRight: 'e' };
+  const OPPOSITE: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' };
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  let active = 'centre';
+  let anim = 0;
+
+  const neighbour = (from: string, dir: Dir): string | undefined => {
+    if (from === 'centre') return [...cells.values()].find((c) => c.dataset.dir === dir)?.dataset.panel;
+    return cells.get(from)?.dataset.dir === OPPOSITE[dir] ? 'centre' : undefined;
+  };
+  const panelFromHash = () => (cells.has(location.hash.slice(1)) ? location.hash.slice(1) : 'centre');
+
+  function setActive(id: string) {
+    active = id;
+    home.dataset.at = id;
+    for (const [key, cell] of cells) {
+      cell.inert = key !== id;
+      cell.toggleAttribute('data-active', key === id);
+    }
+    // Keep the URL shareable without adding a history entry per swipe.
+    if (current === 'home' && panelFromHash() !== id) history.replaceState(history.state, '', id === 'centre' ? location.pathname + location.search : `#${id}`);
+  }
+
+  function cancelMove() {
+    if (!anim) return;
+    cancelAnimationFrame(anim);
+    anim = 0;
+    hub.classList.remove('moving');
+  }
+
+  /** Scroll the hub to a cell. Native smooth scrolling is too slow here, so ease it over ~280 ms with snapping paused. */
+  function move(id: string, instant = reduceMotion.matches) {
+    const cell = cells.get(id);
+    if (!cell) return;
+    cancelMove();
+    cell.inert = false;
+    const x = cell.offsetLeft;
+    const y = cell.offsetTop;
+    if (instant) {
+      hub.scrollTo(x, y);
+      return setActive(id);
+    }
+    const x0 = hub.scrollLeft;
+    const y0 = hub.scrollTop;
+    const t0 = performance.now();
+    hub.classList.add('moving');
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 280);
+      const e = 1 - (1 - k) ** 3;
+      hub.scrollTo(x0 + (x - x0) * e, y0 + (y - y0) * e);
+      if (k < 1) anim = requestAnimationFrame(step);
+      else {
+        anim = 0;
+        hub.classList.remove('moving');
+      }
+    };
+    anim = requestAnimationFrame(step);
+  }
+
+  /** Move and, when focus is inside the hub, carry it to the destination so it isn't lost in an inert cell. */
+  function go(id: string) {
+    const focusInside = hub.contains(document.activeElement) && document.activeElement !== hub;
+    move(id);
+    if (focusInside) (id === 'centre' ? hub : cells.get(id)!.querySelector<HTMLElement>('h2[tabindex]')!).focus({ preventScroll: true });
+  }
+
+  const io = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) if (e.intersectionRatio >= 0.6) setActive((e.target as HTMLElement).dataset.panel!);
+    },
+    { root: hub, threshold: 0.6 },
+  );
+  cells.forEach((c) => io.observe(c));
+  for (const type of ['pointerdown', 'touchstart'] as const) hub.addEventListener(type, cancelMove, { passive: true });
+
+  // A mouse-wheel notch (~100 px) is too small to cross mandatory snap on a full-screen panel, so it would snap
+  // back. Treat notches as "next panel"; leave trackpad (small, fractional deltas) to native snapping.
+  let wheelLock = 0;
+  hub.addEventListener(
+    'wheel',
+    (e) => {
+      const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+      const delta = dx ? e.deltaX : e.deltaY;
+      const notch = e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || (Math.abs(delta) >= 50 && Number.isInteger(delta));
+      if (!notch || e.ctrlKey) return cancelMove();
+      const dir: Dir = dx ? (delta > 0 ? 'e' : 'w') : delta > 0 ? 's' : 'n';
+      const inner = cells.get(active)?.querySelector<HTMLElement>('.cell-scroll');
+      const room = !inner ? 0 : dir === 's' ? inner.scrollHeight - inner.clientHeight - inner.scrollTop : dir === 'n' ? inner.scrollTop : 0;
+      if (room > 1) return; // let a tall panel scroll its own content first
+      const next = neighbour(active, dir);
+      if (!next && !anim) return; // edge of the hub: let the page scroll on (e.g. to the footer)
+      e.preventDefault();
+      if (anim || performance.now() < wheelLock || !next) return; // one panel per notch burst
+      wheelLock = performance.now() + 450;
+      go(next);
+    },
+    { passive: false },
+  );
+
+  hub.addEventListener('keydown', (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if ((e.target as Element).closest('input, textarea, select, [contenteditable]')) return;
+    if (e.key === 'Escape' || e.key === 'Home') {
+      e.preventDefault();
+      return go('centre');
+    }
+    const dir = KEY_DIR[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    // Tall panels (small screens) scroll their own content before moving on.
+    const inner = cells.get(active)!.querySelector<HTMLElement>('.cell-scroll')!;
+    const room = dir === 's' ? inner.scrollHeight - inner.clientHeight - inner.scrollTop : dir === 'n' ? inner.scrollTop : 0;
+    if (room > 1) return inner.scrollBy({ top: (dir === 's' ? 1 : -1) * inner.clientHeight * 0.8, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+    const next = neighbour(active, dir);
+    if (next) go(next);
+  });
+
+  // Arrow links, header category links and the brand link move the hub instead of navigating.
+  document.addEventListener('click', (e) => {
+    if (current !== 'home' || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = (e.target as Element).closest<HTMLAnchorElement>('a[href]');
+    if (!a) return;
+    const id = a.dataset.go ?? (a.pathname === location.pathname && a.search === location.search ? a.hash.slice(1) || 'centre' : undefined);
+    if (!id || !cells.has(id)) return;
+    e.preventDefault();
+    go(id);
   });
 
   // Universal drop zone → chooser, embedded tool or image editor.
@@ -302,9 +532,11 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
     else showHome();
   }
 
+  /** Back on the hub at the panel the files were dropped on (kept in the URL hash). */
   function showHome() {
     show('home');
-    input.focus();
+    move(panelFromHash(), true);
+    (active === 'centre' ? input : hub).focus({ preventScroll: true });
   }
 
   function choose(slugs: string[]) {
@@ -400,19 +632,23 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
   });
   // Accept drops anywhere on the home view so a near miss doesn't open the file in the browser.
   const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+  const setDragging = (on: boolean) => {
+    drop.classList.toggle('over', on);
+    home.toggleAttribute('data-dragging', on);
+  };
   document.addEventListener('dragover', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    if (current === 'home') drop.classList.add('over');
+    if (current === 'home') setDragging(true);
     else e.dataTransfer!.dropEffect = 'none';
   });
   document.addEventListener('dragleave', (e) => {
-    if (!e.relatedTarget) drop.classList.remove('over');
+    if (!e.relatedTarget) setDragging(false);
   });
   document.addEventListener('drop', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    drop.classList.remove('over');
+    setDragging(false);
     if (current === 'home') handle([...e.dataTransfer!.files]);
   });
   document.addEventListener('paste', (e) => {
@@ -435,14 +671,8 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
   });
   addEventListener('popstate', () => {
     const e = entry();
-    if (!e) {
-      // Home, or a header #category link (fragment navigation also lands here).
-      if (location.hash) {
-        show('home');
-        document.getElementById(location.hash.slice(1))?.scrollIntoView();
-      } else showHome();
-      return;
-    }
+    // Home (possibly with a #category from a header link or Back).
+    if (!e) return showHome();
     if (!files.length || (e.view === 'editor' && !editorOpen)) {
       history.replaceState(null, '');
       return showHome();
@@ -453,4 +683,5 @@ const dropTypes: [Category, string][] = [['images', 'Images'], ['pdf', 'PDF'], [
   });
   // A reload keeps history.state but not the in-memory files.
   if (entry()) history.replaceState(null, '');
+  move(panelFromHash(), true);
 </script>

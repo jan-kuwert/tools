@@ -1,5 +1,5 @@
 export type Mode = 'local' | 'cloud';
-export type Category = 'images' | 'pdf' | 'audio' | 'files' | 'text';
+export type Category = 'images' | 'pdf' | 'audio' | 'files';
 
 export interface Tool {
   slug: string; // path below base, e.g. "images/convert"
@@ -11,12 +11,11 @@ export interface Tool {
   limits: string;
 }
 
-export const categories: { id: Category; label: string }[] = [
-  { id: 'images', label: 'Images' },
-  { id: 'pdf', label: 'PDF' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'files', label: 'Files' },
-  { id: 'text', label: 'Text' },
+export const categories: { id: Category; label: string; blurb: string }[] = [
+  { id: 'images', label: 'Images', blurb: 'Edit, resize, convert and compress photos and graphics.' },
+  { id: 'pdf', label: 'PDF', blurb: 'Merge, split, reorder and optimize PDF documents.' },
+  { id: 'audio', label: 'Audio', blurb: 'Trim, convert and shrink recordings and music.' },
+  { id: 'files', label: 'Files & text', blurb: 'Archives, compression, JSON and JavaScript.' },
 ];
 
 export const tools: Tool[] = [
@@ -118,7 +117,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'text/json',
-    category: 'text',
+    category: 'files',
     title: 'Format & minify JSON',
     summary: 'Validate, pretty-print or compact JSON without changing numbers.',
     mode: 'local',
@@ -126,7 +125,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'text/js-minify',
-    category: 'text',
+    category: 'files',
     title: 'Minify JavaScript',
     summary: 'Parser-based minification with Terser.',
     mode: 'local',
