@@ -55,5 +55,4 @@ Backend: see [backend/README.md](backend/README.md).
 
 - Heavy work (PDF edits, Terser, audio encoding) runs on the main thread in chunks, not in workers; very large inputs can briefly freeze the page.
 - Audio tags and cover art are not copied. MP3 output uses the nearest encoder-supported sample rate (8–48 kHz).
-- The home page embeds tools in a same-origin iframe; the browser back button leaves the page instead of stepping back.
 - The 24-megapixel background-removal limit is enforced server-side only.
