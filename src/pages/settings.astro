@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import { FRAMES } from '../lib/editor';
 ---
 <Base title="Settings · Tools">
   <h1>Settings</h1>
@@ -25,6 +26,12 @@ import Base from '../layouts/Base.astro';
       <span>Default image quality: <output name="qualityOut">82</output></span>
       <input type="range" name="imageQuality" min="1" max="100" value="82" />
     </label>
+    <label class="field">
+      <span>Default image editor output size</span>
+      <select name="editorFrame">
+        {Object.entries(FRAMES).filter(([id]) => id !== 'custom').map(([id, f]) => <option value={id}>{f.label}{f.w ? ` · ${f.w} × ${f.h}` : ''}</option>)}
+      </select>
+    </label>
     <div class="actions">
       <button class="btn" type="button" data-reset>Reset preferences</button>
       <span class="muted" data-saved role="status" aria-live="polite"></span>
@@ -39,6 +46,7 @@ import Base from '../layouts/Base.astro';
   const saved = document.querySelector<HTMLElement>('[data-saved]')!;
   const quality = form.elements.namedItem('imageQuality') as HTMLInputElement;
   const qualityOut = form.elements.namedItem('qualityOut') as HTMLOutputElement;
+  const editorFrame = form.elements.namedItem('editorFrame') as HTMLSelectElement;
 
   const fill = () => {
     const p = loadPrefs();
@@ -46,6 +54,7 @@ import Base from '../layouts/Base.astro';
     form.querySelector<HTMLInputElement>(`[name=imageFormat][value="${p.imageFormat ?? 'image/webp'}"]`)!.checked = true;
     quality.value = String(p.imageQuality ?? 82);
     qualityOut.value = quality.value;
+    editorFrame.value = p.editorFrame ?? 'original';
   };
 
   form.addEventListener('input', () => {
@@ -54,6 +63,7 @@ import Base from '../layouts/Base.astro';
       theme: data.get('theme') as Prefs['theme'],
       imageFormat: data.get('imageFormat') as Prefs['imageFormat'],
       imageQuality: Number(data.get('imageQuality')),
+      editorFrame: data.get('editorFrame') as Prefs['editorFrame'],
     };
     savePrefs(prefs);
     applyTheme(prefs.theme);

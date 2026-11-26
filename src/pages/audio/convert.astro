@@ -13,8 +13,9 @@ import ToolShell from '../../components/ToolShell.astro';
   <label class="field" data-for="mp3">
     <span>Bitrate</span>
     <select name="bitrate">
+      <option value="match" selected>Match source</option>
       <option value="128">128 kbps · smaller</option>
-      <option value="192" selected>192 kbps · good</option>
+      <option value="192">192 kbps · good</option>
       <option value="256">256 kbps · high</option>
       <option value="320">320 kbps · highest</option>
     </select>
@@ -22,61 +23,112 @@ import ToolShell from '../../components/ToolShell.astro';
   <label class="field" data-for="ogg" hidden>
     <span>Quality</span>
     <select name="quality">
+      <option value="match" selected>Match source</option>
       <option value="3">Standard (~112 kbps)</option>
-      <option value="5" selected>High (~160 kbps)</option>
+      <option value="5">High (~160 kbps)</option>
       <option value="8">Very high (~256 kbps)</option>
     </select>
   </label>
   <p class="muted" data-for="wav" hidden>Uncompressed 16-bit PCM: large files, no quality loss.</p>
+  <p class="muted">Output keeps the source sample rate. Match source picks a bitrate close to the source’s, so lossy files don’t grow; lossless sources get 192 kbps MP3 or high-quality OGG.</p>
+  <ul class="audio-info" data-info aria-live="polite" hidden></ul>
 </ToolShell>
+
+<style>
+  .audio-info { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; font-size: 0.88rem; }
+  .audio-info :global(li) { padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; }
+  .audio-info :global(strong) { display: block; }
+  .audio-info :global(span) { color: var(--muted); display: block; }
+</style>
 
 <script>
   import mp3Wasm from 'wasm-media-encoders/wasm/mp3?url';
   import oggWasm from 'wasm-media-encoders/wasm/ogg?url';
-  import { decodeAudio, encodeLossy, encodeWav, SAMPLE_RATE } from '../../lib/audio';
-  import { createTool, replaceExt, throwIfAborted } from '../../lib/tool';
+  import { decodeAudio, encodeLossy, encodeWav, growthReason, planOutput, probeAudio, sourceKbps, type AudioInfo, type Format, type Plan } from '../../lib/audio';
+  import { createTool, el, formatBytes, replaceExt, throwIfAborted } from '../../lib/tool';
 
   const MAX_FILE = 200 * 1024 * 1024;
   const form = document.querySelector<HTMLFormElement>('[data-options]')!;
-  const syncOptions = () => {
-    const format = new FormData(form).get('format');
-    form.querySelectorAll<HTMLElement>('[data-for]').forEach((e) => (e.hidden = e.dataset.for !== format));
+  const infoList = form.querySelector<HTMLUListElement>('[data-info]')!;
+  const matchOptions = form.querySelectorAll<HTMLOptionElement>('option[value="match"]');
+
+  const probes = new WeakMap<File, Promise<AudioInfo>>();
+  const probe = (f: File) => {
+    if (!probes.has(f)) probes.set(f, probeAudio(f));
+    return probes.get(f)!;
   };
-  form.addEventListener('change', syncOptions);
-  syncOptions();
+
+  const settings = () => {
+    const data = new FormData(form);
+    const format = String(data.get('format')) as Format;
+    const raw = String(data.get(format === 'ogg' ? 'quality' : 'bitrate'));
+    return { format, choice: raw === 'match' ? ('match' as const) : Number(raw) };
+  };
+
+  const khz = (rate: number) => `${+(rate / 1000).toFixed(3)} kHz`;
+  const chans = (n?: number) => (n === 1 ? 'mono' : n === 2 ? 'stereo' : n ? `${n} ch` : '');
+  const time = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  const outLabel = (p: Plan) =>
+    p.format === 'wav' ? `WAV · ${khz(p.sampleRate)} · 16-bit` : `${p.format.toUpperCase()} · ${khz(p.sampleRate)} · ${p.format === 'ogg' ? '≈' : ''}${p.kbps} kbps`;
+
+  let files: File[] = [];
+  let renderId = 0;
+  async function render() {
+    const id = ++renderId;
+    const { format, choice } = settings();
+    form.querySelectorAll<HTMLElement>('[data-for]').forEach((e) => (e.hidden = e.dataset.for !== format));
+    const infos = await Promise.all(files.map(probe));
+    if (id !== renderId) return;
+    const plans = infos.map((info) => planOutput(info, format, choice));
+    // With one effective bitrate across files, show it on the Match option itself.
+    const matched = new Set(infos.map((info) => planOutput(info, format, 'match').kbps));
+    const only = matched.size === 1 ? [...matched][0] : undefined;
+    matchOptions.forEach((o) => (o.textContent = only ? `Match source (${format === 'ogg' ? '~' : ''}${only} kbps)` : 'Match source'));
+    infoList.replaceChildren(
+      ...files.map((f, i) => {
+        const info = infos[i];
+        const kbps = sourceKbps(info);
+        const src = [info.format, khz(info.sampleRate), chans(info.channels), kbps && `≈${Math.round(kbps)} kbps`, info.duration && time(info.duration)].filter(Boolean).join(' · ');
+        const est = plans[i].bytes ? ` · ≈${formatBytes(plans[i].bytes!)}` : '';
+        return el('li', {}, el('strong', { textContent: f.name }), el('span', { textContent: `Source: ${src}` }), el('span', { textContent: `Output: ${outLabel(plans[i])}${est}` }));
+      }),
+    );
+    infoList.hidden = files.length === 0;
+  }
+  form.addEventListener('change', render);
+  render();
 
   createTool({
     validate: (f) => (f.size > MAX_FILE ? 'Larger than 200 MB.' : undefined),
-    async run(files, { form, signal, progress }) {
-      const data = new FormData(form);
-      const format = String(data.get('format')) as 'mp3' | 'wav' | 'ogg';
+    onFilesChange(next) {
+      files = next;
+      render();
+    },
+    async run(files, { signal, progress }) {
+      const { format, choice } = settings();
       const results = [];
       for (const [i, f] of files.entries()) {
         throwIfAborted(signal);
         const step = (text: string, frac: number) => progress(`${text} ${f.name}`, (i + frac) / files.length);
         step('Decoding', 0);
-        const channels = await decodeAudio(f);
+        const info = await probe(f);
+        const plan = planOutput(info, format, choice);
+        const channels = await decodeAudio(f, plan.sampleRate);
         throwIfAborted(signal);
         step('Encoding', 0);
+        plan.channels = channels.length as 1 | 2;
         const blob =
           format === 'wav'
-            ? encodeWav(channels, SAMPLE_RATE)
-            : await encodeLossy(
-                channels,
-                SAMPLE_RATE,
-                format === 'mp3'
-                  ? { mime: 'audio/mpeg', bitrate: Number(data.get('bitrate')) as 128 | 192 | 256 | 320 }
-                  : { mime: 'audio/ogg', vbrQuality: Number(data.get('quality')) },
-                format === 'mp3' ? mp3Wasm : oggWasm,
-                signal,
-                (frac) => step('Encoding', frac),
-              );
+            ? encodeWav(channels, plan.sampleRate)
+            : await encodeLossy(channels, plan, format === 'mp3' ? mp3Wasm : oggWasm, signal, (frac) => step('Encoding', frac));
+        const seconds = channels[0].length / plan.sampleRate;
+        const actual = format === 'ogg' ? `${format.toUpperCase()} · ${khz(plan.sampleRate)} · ≈${Math.round((blob.size * 8) / seconds / 1000)} kbps` : outLabel(plan);
         results.push({
           name: replaceExt(f.name, format),
           blob,
           inputSize: f.size,
           preview: true,
-          note: 'Tags and cover art are not copied.',
+          note: [actual + '.', growthReason({ ...info, duration: info.duration ?? seconds }, plan, blob.size, f.size), 'Tags and cover art are not copied.'].filter(Boolean).join(' '),
         });
       }
       return results;

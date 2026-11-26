@@ -21,6 +21,14 @@ export const categories: { id: Category; label: string }[] = [
 
 export const tools: Tool[] = [
   {
+    slug: 'images/editor',
+    category: 'images',
+    title: 'Image editor',
+    summary: 'Resize, crop to a frame, compress and convert in one place.',
+    mode: 'local',
+    limits: 'JPEG, PNG or WebP · up to 16.7 megapixels each',
+  },
+  {
     slug: 'images/remove-background',
     category: 'images',
     title: 'Remove background',

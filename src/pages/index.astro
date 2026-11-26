@@ -1,43 +1,86 @@
 ---
 import Base from '../layouts/Base.astro';
+import ImageEditor from '../components/ImageEditor.astro';
 import ModeBadge from '../components/ModeBadge.astro';
 import { categories, href, tools } from '../tools';
 ---
 <Base title="Tools · fast, private file tools">
-  <section class="hero">
+  <section class="hero" data-home>
     <h1>Quick file tools that respect your files.</h1>
     <p>Convert, compress and edit images, PDFs, audio and text. Almost everything runs right here in your browser, so your files never leave your device.</p>
+    <label class="drop hero-drop" data-hero-drop>
+      <input type="file" multiple data-hero-input />
+      <span class="drop-title">Drop any file to start</span>
+      <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
+      <span class="drop-hint">Images, PDFs, audio, JSON, JavaScript or anything else. You can also paste from the clipboard.</span>
+    </label>
+    <p class="status" data-drop-status role="status" aria-live="polite"></p>
     <div class="legend">
-      <ModeBadge mode="local" /> processed in your browser, never uploaded
-      <ModeBadge mode="cloud" /> uploaded to our EU server, asked first, not stored
+      <span><ModeBadge mode="local" /> processed in your browser, never uploaded</span>
+      <span><ModeBadge mode="cloud" /> uploaded to our EU server, asked first, not stored</span>
     </div>
   </section>
 
-  <label class="visually-hidden" for="search">Search tools</label>
-  <input id="search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" data-search />
+  <div data-home>
+    <label class="visually-hidden" for="search">Search tools</label>
+    <input id="search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" data-search />
 
-  {categories.map((c) => (
-    <section class="category" id={c.id} data-category>
-      <h2>{c.label}</h2>
-      <ul class="tool-grid">
-        {tools.filter((t) => t.category === c.id).map((t) => (
-          <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
-            <a class="tool-card" href={href(t.slug)}>
+    {categories.map((c) => (
+      <section class="category" id={c.id} data-category>
+        <h2>{c.label}</h2>
+        <ul class="tool-grid">
+          {tools.filter((t) => t.category === c.id).map((t) => (
+            <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
+              <a class="tool-card" href={href(t.slug)}>
+                <h3>{t.title}</h3>
+                <p>{t.summary}</p>
+                <ModeBadge mode={t.mode} />
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+    <p class="muted" data-empty hidden>No tool matches that search.</p>
+  </div>
+
+  <section class="stage" data-stage hidden aria-label="Your files">
+    <div class="stage-bar" data-stage-bar>
+      <button class="btn" type="button" data-back>← Back</button>
+      <button class="btn btn-ghost" type="button" data-restart>Start over</button>
+    </div>
+    <div data-chooser>
+      <h2 tabindex="-1" data-chooser-title>What do you want to do?</h2>
+      <p class="muted" data-file-summary></p>
+      <ul class="tool-grid" data-choices>
+        {tools.map((t) => (
+          <li data-choice={t.slug} hidden>
+            <button class="tool-card choice-card" type="button" data-pick={t.slug} data-url={href(t.slug)} data-title={t.title}>
               <h3>{t.title}</h3>
               <p>{t.summary}</p>
               <ModeBadge mode={t.mode} />
-            </a>
+            </button>
           </li>
         ))}
       </ul>
-    </section>
-  ))}
-  <p class="muted" data-empty hidden>No tool matches that search.</p>
+    </div>
+    <div class="cloud-alt" data-cloud-alt>
+      <span>Need a transparent cutout instead?</span>
+      <button class="btn" type="button" data-pick="images/remove-background">Remove background <ModeBadge mode="cloud" /></button>
+    </div>
+  </section>
+
+  <ImageEditor />
 </Base>
 
 <script>
-  const search = document.querySelector<HTMLInputElement>('[data-search]')!;
-  const empty = document.querySelector<HTMLElement>('[data-empty]')!;
+  import { el, sniff } from '../lib/tool';
+
+  const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+
+  // Search
+  const search = $<HTMLInputElement>('[data-search]');
+  const empty = $('[data-empty]');
   search.addEventListener('input', () => {
     const terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
     let shown = 0;
@@ -55,5 +98,196 @@ import { categories, href, tools } from '../tools';
   });
   search.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.querySelector<HTMLAnchorElement>('li[data-keywords]:not([hidden]) a')?.click();
+  });
+
+  // Universal drop zone → chooser, embedded tool or image editor.
+  // Files are handed over in memory only: nothing is persisted or uploaded.
+  type View = 'home' | 'choose' | 'tool' | 'editor';
+  type Kind = 'image' | 'pdf' | 'audio' | 'json' | 'js' | 'gzip' | 'other';
+
+  const homeParts = document.querySelectorAll<HTMLElement>('[data-home]');
+  const drop = $('[data-hero-drop]');
+  const input = $<HTMLInputElement>('[data-hero-input]');
+  const status = $('[data-drop-status]');
+  const stage = $('[data-stage]');
+  const back = $<HTMLButtonElement>('[data-back]');
+  const restart = $<HTMLButtonElement>('[data-restart]');
+  const chooser = $('[data-chooser]');
+  const cloudAlt = $('[data-cloud-alt]');
+  const editor = $('[data-image-editor]');
+
+  let files: File[] = [];
+  let current: View = 'home';
+  let prev: View = 'home';
+  let frame: HTMLIFrameElement | undefined;
+
+  const AUDIO_EXT = /\.(m4a|aac|mp3|wav|ogg|oga|opus|flac|weba)$/i;
+  // ISO-BMFF brands that carry audio; excludes HEIC/AVIF (also "ftyp").
+  const AUDIO_BRAND = /^(M4A |M4B |M4P |mp4[12]|isom|iso[2-6]|dash|3gp)/;
+
+  async function kindOf(f: File): Promise<Kind> {
+    const t = await sniff(f);
+    if (t === 'jpeg' || t === 'png' || t === 'webp') return 'image';
+    if (t === 'pdf' || t === 'gzip') return t;
+    if (t === 'zip') return 'other';
+    const b = new Uint8Array(await f.slice(0, 12).arrayBuffer());
+    const s = (o: number, str: string) => [...str].every((c, i) => b[o + i] === c.charCodeAt(0));
+    const ascii = String.fromCharCode(...b.subarray(8, 12));
+    if (s(0, 'ID3') || s(0, 'OggS') || s(0, 'fLaC') || (s(0, 'RIFF') && s(8, 'WAVE')) || (s(4, 'ftyp') && AUDIO_BRAND.test(ascii))) return 'audio';
+    if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return 'audio'; // MPEG/ADTS frame sync
+    if (f.type.startsWith('audio/') || AUDIO_EXT.test(f.name)) return 'audio';
+    if (f.type === 'application/json' || /\.json$/i.test(f.name)) return 'json';
+    if (/^(text|application)\/javascript$/.test(f.type) || /\.[mc]?js$/i.test(f.name)) return 'js';
+    return 'other';
+  }
+
+  function show(view: View) {
+    if (view !== 'tool') {
+      frame?.remove();
+      frame = undefined;
+    }
+    current = view;
+    homeParts.forEach((p) => (p.hidden = view !== 'home'));
+    chooser.hidden = view !== 'choose';
+    cloudAlt.hidden = !(view === 'editor' && files.length === 1);
+    editor.hidden = view !== 'editor';
+    // The editor has its own close control.
+    back.hidden = view === 'editor';
+    restart.hidden = !(view === 'tool' && prev !== 'home');
+    stage.hidden = view === 'home' || (view === 'editor' && cloudAlt.hidden);
+  }
+
+  function goHome() {
+    files = [];
+    show('home');
+    input.focus();
+  }
+
+  function choose(slugs: string[]) {
+    if (slugs.length === 1) return openTool(slugs[0]);
+    for (const li of document.querySelectorAll<HTMLElement>('[data-choice]')) li.hidden = !slugs.includes(li.dataset.choice!);
+    const list = $('[data-choices]');
+    slugs.forEach((s) => list.append(list.querySelector(`[data-choice="${s}"]`)!));
+    $('[data-file-summary]').textContent = files.length === 1 ? files[0].name : `${files.length} files`;
+    show('choose');
+    $('[data-chooser-title]').focus();
+  }
+
+  function openTool(slug: string) {
+    const pick = $(`[data-pick="${slug}"][data-url]`);
+    prev = current === 'tool' ? prev : current;
+    frame = el('iframe', { src: `${pick.dataset.url}?embed`, title: pick.dataset.title!, className: 'tool-frame' });
+    const f = frame;
+    f.addEventListener('load', () => onFrameLoad(f));
+    show('tool');
+    stage.append(f);
+    stage.scrollIntoView({ block: 'start' });
+    back.focus();
+  }
+
+  function onFrameLoad(f: HTMLIFrameElement) {
+    const win = f.contentWindow as (Window & typeof globalThis) | null;
+    const doc = f.contentDocument;
+    if (!win || !doc?.querySelector('[data-tool]')) return;
+    // ToolShell pages take files through [data-input]; text tools through [data-file].
+    const target = doc.querySelector<HTMLInputElement>('[data-input], [data-file]');
+    if (target) {
+      const dt = new win.DataTransfer();
+      // Rebuild each File in the frame's realm so arrayBuffer() returns that realm's ArrayBuffer;
+      // libraries' `instanceof ArrayBuffer` checks fail otherwise (e.g. pdf-lib).
+      (target.multiple ? files : files.slice(0, 1)).forEach((file) => dt.items.add(new win.File([file], file.name, { type: file.type, lastModified: file.lastModified })));
+      target.files = dt.files;
+      target.dispatchEvent(new win.Event('change'));
+    }
+    new win.ResizeObserver(() => (f.style.height = `${Math.ceil(doc.documentElement.getBoundingClientRect().height)}px`)).observe(doc.documentElement);
+    // Site links (privacy, settings) leave the embed instead of navigating inside it.
+    doc.addEventListener('click', (e) => {
+      const a = (e.target as Element).closest?.<HTMLAnchorElement>('a[href]');
+      if (!a || a.download || a.getAttribute('href')!.startsWith('#') || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      location.href = a.href;
+    });
+  }
+
+  async function openEditor() {
+    show('editor');
+    try {
+      (await import('../lib/editor')).openImageEditor(files);
+    } catch (err) {
+      console.error(err);
+      goHome();
+      status.textContent = 'The image editor could not be loaded. Please reload the page.';
+    }
+  }
+
+  async function handle(list: File[]) {
+    if (!list.length) return;
+    status.textContent = '';
+    let kinds: Kind[];
+    try {
+      kinds = await Promise.all(list.map(kindOf));
+    } catch {
+      status.textContent = 'Could not read that file.';
+      return;
+    }
+    files = list;
+    prev = 'home';
+    const kind = kinds.every((k) => k === kinds[0]) ? kinds[0] : 'other';
+    const single = list.length === 1;
+    if (kind === 'image') return openEditor();
+    if (kind === 'audio') return openTool('audio/convert');
+    if (kind === 'pdf') return choose(single ? ['pdf/split', 'pdf/organize', 'pdf/compress'] : ['pdf/merge', 'files/zip']);
+    if (single && kind === 'json') return openTool('text/json');
+    if (single && kind === 'js') return openTool('text/js-minify');
+    if (single && kind === 'gzip') return openTool('files/gzip');
+    choose(single ? ['files/zip', 'files/gzip'] : ['files/zip']);
+  }
+
+  input.addEventListener('change', () => {
+    handle([...(input.files ?? [])]);
+    input.value = '';
+  });
+  // Accept drops anywhere on the home view so a near miss doesn't open the file in the browser.
+  const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+  document.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    if (current === 'home') drop.classList.add('over');
+    else e.dataTransfer!.dropEffect = 'none';
+  });
+  document.addEventListener('dragleave', (e) => {
+    if (!e.relatedTarget) drop.classList.remove('over');
+  });
+  document.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (current === 'home') handle([...e.dataTransfer!.files]);
+  });
+  document.addEventListener('paste', (e) => {
+    const pasted = [...(e.clipboardData?.files ?? [])];
+    if (current === 'home' && pasted.length) {
+      e.preventDefault();
+      handle(pasted);
+    }
+  });
+
+  stage.addEventListener('click', (e) => {
+    const pick = (e.target as Element).closest<HTMLElement>('[data-pick]');
+    if (pick) openTool(pick.dataset.pick!);
+  });
+  back.addEventListener('click', () => {
+    if (current === 'tool' && prev !== 'home') {
+      show(prev);
+      if (prev === 'choose') $('[data-chooser-title]').focus();
+    } else goHome();
+  });
+  restart.addEventListener('click', goHome);
+  editor.addEventListener('editor:close', goHome);
+  // Header category links point at #anchors on this page.
+  addEventListener('hashchange', () => {
+    if (current === 'home') return;
+    goHome();
+    document.getElementById(location.hash.slice(1))?.scrollIntoView();
   });
 </script>

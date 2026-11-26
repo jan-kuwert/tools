@@ -184,7 +184,8 @@ export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(f
         delta = pct === 0 ? ' · same size' : pct < 0 ? ` · ${-pct}% smaller` : ` · ${pct}% larger`;
       }
       const meta = el('p', { className: 'result-meta', textContent: `${formatBytes(r.blob.size)}${delta}` });
-      if (r.inputSize && r.blob.size > r.inputSize) meta.classList.add('warn');
+      // A note explains expected growth (e.g. WAV output); only flag unexplained growth.
+      if (r.inputSize && r.blob.size > r.inputSize && !r.note) meta.classList.add('warn');
       const preview = !r.preview
         ? null
         : r.blob.type.startsWith('image/')

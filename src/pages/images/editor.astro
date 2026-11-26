@@ -1,0 +1,80 @@
+---
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import ImageEditor from '../../components/ImageEditor.astro';
+import ModeBadge from '../../components/ModeBadge.astro';
+import { href, toolBySlug } from '../../tools';
+
+const tool = toolBySlug('images/editor');
+---
+<Base title={`${tool.title} · Tools`} description={tool.summary} category="images">
+  <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#images'}>Images</a></div>
+  <div class="tool-head">
+    <h1>{tool.title}</h1>
+    <ModeBadge mode={tool.mode} />
+  </div>
+  <p class="tool-summary">{tool.summary}</p>
+  <div class="privacy-note privacy-local" role="note">
+    <Icon name="lock" />
+    <p><strong>Your files stay on this device.</strong> Processing happens in your browser; nothing is uploaded. <a href={href('privacy')}>How we check</a></p>
+  </div>
+
+  <section class="panel" data-picker>
+    <label class="drop" data-drop>
+      <input type="file" accept="image/jpeg,image/png,image/webp" multiple data-input />
+      <span class="drop-title"><span>Choose images</span> or drop them here</span>
+      <span class="drop-hint">{tool.limits}</span>
+      <span class="drop-hint">You can also paste from the clipboard.</span>
+    </label>
+    <p class="status" data-status role="status" aria-live="polite"></p>
+  </section>
+
+  <ImageEditor />
+</Base>
+
+<script>
+  import { openImageEditor } from '../../lib/editor';
+  import { UserError } from '../../lib/tool';
+
+  const picker = document.querySelector<HTMLElement>('[data-picker]')!;
+  const drop = picker.querySelector<HTMLElement>('[data-drop]')!;
+  const input = picker.querySelector<HTMLInputElement>('[data-input]')!;
+  const status = picker.querySelector<HTMLElement>('[data-status]')!;
+
+  const open = async (files: File[]) => {
+    if (!files.length) return;
+    status.dataset.kind = 'working';
+    status.textContent = 'Opening…';
+    try {
+      await openImageEditor(files);
+      status.textContent = '';
+      picker.hidden = true;
+    } catch (err) {
+      if (!(err instanceof UserError)) console.error(err);
+      status.dataset.kind = 'error';
+      status.textContent = err instanceof UserError ? err.message : `Something went wrong: ${(err as Error).message ?? err}`;
+    }
+  };
+
+  input.addEventListener('change', () => {
+    void open([...(input.files ?? [])]);
+    input.value = '';
+  });
+  drop.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop.classList.add('over');
+  });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    void open([...(e.dataTransfer?.files ?? [])]);
+  });
+  document.addEventListener('paste', (e) => {
+    if (!picker.hidden) void open([...(e.clipboardData?.files ?? [])]);
+  });
+  document.querySelector('[data-image-editor]')!.addEventListener('editor:close', () => {
+    picker.hidden = false;
+    input.focus();
+  });
+</script>

@@ -53,21 +53,27 @@ export async function decodeImage(file: File): Promise<{ bitmap: ImageBitmap; ty
   return { bitmap, type: `image/${kind}` as ImageType };
 }
 
-const canvasOf = (w: number, h: number) => Object.assign(document.createElement('canvas'), { width: w, height: h });
+export const canvasOf = (w: number, h: number) => Object.assign(document.createElement('canvas'), { width: w, height: h });
 
-/** Draw at w×h, halving in steps when shrinking a lot to avoid aliasing. `background` fills transparency. */
-export function drawImage(bitmap: ImageBitmap, w: number, h: number, background?: string): HTMLCanvasElement {
+export interface Rect { x: number; y: number; w: number; h: number }
+
+/**
+ * Draw `crop` of `source` (default: all of it) at w×h, halving in steps when shrinking a lot
+ * to avoid aliasing. `background` fills transparency. `source` itself is never modified.
+ */
+export function drawImage(source: ImageBitmap | HTMLCanvasElement, w: number, h: number, background?: string, crop?: Rect): HTMLCanvasElement {
   if (w * h > MAX_PIXELS) throw tooLarge('The result', w, h);
-  let src: CanvasImageSource = bitmap;
-  let sw = bitmap.width;
-  let sh = bitmap.height;
+  let src: ImageBitmap | HTMLCanvasElement = source;
+  let { x, y, w: sw, h: sh } = crop ?? { x: 0, y: 0, w: source.width, h: source.height };
+  const free = () => { if (src !== source && src instanceof HTMLCanvasElement) src.width = 0; }; // free memory early (Safari)
   while (sw / 2 >= w && sh / 2 >= h) {
     const step = canvasOf(Math.floor(sw / 2), Math.floor(sh / 2));
     const ctx = step.getContext('2d')!;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(src, 0, 0, step.width, step.height);
-    if (src instanceof HTMLCanvasElement) src.width = 0; // free memory early (Safari)
+    ctx.drawImage(src, x, y, sw, sh, 0, 0, step.width, step.height);
+    free();
     src = step;
+    x = y = 0;
     sw = step.width;
     sh = step.height;
   }
@@ -78,8 +84,8 @@ export function drawImage(bitmap: ImageBitmap, w: number, h: number, background?
     ctx.fillRect(0, 0, w, h);
   }
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(src, 0, 0, w, h);
-  if (src instanceof HTMLCanvasElement) src.width = 0;
+  ctx.drawImage(src, x, y, sw, sh, 0, 0, w, h);
+  free();
   return out;
 }
 

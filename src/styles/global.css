@@ -215,3 +215,23 @@ dialog form { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* Home: universal drop zone and handoff stage */
+.hero-drop { margin-top: 1.5rem; padding: clamp(2.5rem, 8vw, 4.5rem) 1rem; gap: 0.75rem; background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+.hero-drop .drop-title { font-size: clamp(1.3rem, 3.5vw, 1.7rem); }
+.hero-drop:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 2px; }
+.drop-btn { pointer-events: none; }
+.hero .status { min-height: 0; }
+.stage-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+.stage-bar [data-restart] { margin-left: auto; }
+.stage-bar:not(:has(button:not([hidden]))) { display: none; }
+.choice-card { width: 100%; font: inherit; text-align: left; cursor: pointer; }
+.stage h2[tabindex]:focus { outline: none; }
+.cloud-alt { display: flex; gap: 0.5rem 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; color: var(--muted); font-size: 0.93rem; }
+.cloud-alt .btn { border-color: color-mix(in srgb, var(--cloud) 45%, var(--border)); }
+.tool-frame { display: block; width: 100%; height: 70vh; border: 0; }
+
+/* Tool pages embedded on the home page (?embed inside a same-origin frame, set by theme.js) */
+:root[data-embed] .site-header, :root[data-embed] .site-footer, :root[data-embed] .crumbs, :root[data-embed] body > .visually-hidden { display: none; }
+:root[data-embed] body { min-height: 0; }
+:root[data-embed] main { width: 100%; padding: 0.25rem 0.25rem 1rem; }
