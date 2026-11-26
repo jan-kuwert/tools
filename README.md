@@ -5,7 +5,7 @@ Fast, privacy-first file tools. Static Astro site (Netlify) plus one small Cloud
 | Category | Tool | Runs |
 | --- | --- | --- |
 | Images | Remove background | Cloud (EU) |
-| Images | Convert & compress, Resize | Browser |
+| Images | Editor (frame presets, crop, resize, compress, convert), Convert & compress, Resize | Browser |
 | PDF | Merge, Split, Reorder/rotate/delete, Images to PDF, Optimize | Browser |
 | Audio | Convert (M4A/MP3/WAV/OGG/FLAC → MP3/WAV/OGG) | Browser |
 | Files | Create ZIP, Gzip/gunzip | Browser |
@@ -48,9 +48,12 @@ Backend: see [backend/README.md](backend/README.md).
 4. **Public endpoint protection.** Pilot uses the direct Cloud Run URL with max 2 instances and concurrency 1. Decide whether to add Load Balancer + Cloud Armor before public launch.
 5. **Split → “Extract into one PDF”.** Pages currently follow the typed order and keep duplicates (`5, 1-2`). Alternative: sort and de-duplicate.
 6. **JS minify output target.** Terser default (ES5-compatible output). Targeting modern JS gives smaller output.
+7. **Editor upscaling.** Frame presets always output the exact frame size, so small images are enlarged (shown as “scaled to N%”).
+8. **AAC/M4A output and tag copying.** Not supported locally; would need an ffmpeg container or a new AAC WebAssembly encoder.
 
 ## Known limitations
 
 - Heavy work (PDF edits, Terser, audio encoding) runs on the main thread in chunks, not in workers; very large inputs can briefly freeze the page.
-- Audio output is always 44.1 kHz; tags and cover art are not copied.
+- Audio tags and cover art are not copied. MP3 output uses the nearest encoder-supported sample rate (8–48 kHz).
+- The home page embeds tools in a same-origin iframe; the browser back button leaves the page instead of stepping back.
 - The 24-megapixel background-removal limit is enforced server-side only.
