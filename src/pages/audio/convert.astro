@@ -1,0 +1,85 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="audio/convert" multiple action="Convert" accept="audio/*,.m4a,.aac,.mp3,.wav,.ogg,.oga,.opus,.flac,.webm">
+  <fieldset>
+    <legend>Output format</legend>
+    <div class="segmented">
+      <label><input type="radio" name="format" value="mp3" checked /><span>MP3</span></label>
+      <label><input type="radio" name="format" value="wav" /><span>WAV</span></label>
+      <label><input type="radio" name="format" value="ogg" /><span>OGG</span></label>
+    </div>
+  </fieldset>
+  <label class="field" data-for="mp3">
+    <span>Bitrate</span>
+    <select name="bitrate">
+      <option value="128">128 kbps · smaller</option>
+      <option value="192" selected>192 kbps · good</option>
+      <option value="256">256 kbps · high</option>
+      <option value="320">320 kbps · highest</option>
+    </select>
+  </label>
+  <label class="field" data-for="ogg" hidden>
+    <span>Quality</span>
+    <select name="quality">
+      <option value="3">Standard (~112 kbps)</option>
+      <option value="5" selected>High (~160 kbps)</option>
+      <option value="8">Very high (~256 kbps)</option>
+    </select>
+  </label>
+  <p class="muted" data-for="wav" hidden>Uncompressed 16-bit PCM: large files, no quality loss.</p>
+</ToolShell>
+
+<script>
+  import mp3Wasm from 'wasm-media-encoders/wasm/mp3?url';
+  import oggWasm from 'wasm-media-encoders/wasm/ogg?url';
+  import { decodeAudio, encodeLossy, encodeWav, SAMPLE_RATE } from '../../lib/audio';
+  import { createTool, replaceExt, throwIfAborted } from '../../lib/tool';
+
+  const MAX_FILE = 200 * 1024 * 1024;
+  const form = document.querySelector<HTMLFormElement>('[data-options]')!;
+  const syncOptions = () => {
+    const format = new FormData(form).get('format');
+    form.querySelectorAll<HTMLElement>('[data-for]').forEach((e) => (e.hidden = e.dataset.for !== format));
+  };
+  form.addEventListener('change', syncOptions);
+  syncOptions();
+
+  createTool({
+    validate: (f) => (f.size > MAX_FILE ? 'Larger than 200 MB.' : undefined),
+    async run(files, { form, signal, progress }) {
+      const data = new FormData(form);
+      const format = String(data.get('format')) as 'mp3' | 'wav' | 'ogg';
+      const results = [];
+      for (const [i, f] of files.entries()) {
+        throwIfAborted(signal);
+        const step = (text: string, frac: number) => progress(`${text} ${f.name}`, (i + frac) / files.length);
+        step('Decoding', 0);
+        const channels = await decodeAudio(f);
+        throwIfAborted(signal);
+        step('Encoding', 0);
+        const blob =
+          format === 'wav'
+            ? encodeWav(channels, SAMPLE_RATE)
+            : await encodeLossy(
+                channels,
+                SAMPLE_RATE,
+                format === 'mp3'
+                  ? { mime: 'audio/mpeg', bitrate: Number(data.get('bitrate')) as 128 | 192 | 256 | 320 }
+                  : { mime: 'audio/ogg', vbrQuality: Number(data.get('quality')) },
+                format === 'mp3' ? mp3Wasm : oggWasm,
+                signal,
+                (frac) => step('Encoding', frac),
+              );
+        results.push({
+          name: replaceExt(f.name, format),
+          blob,
+          inputSize: f.size,
+          preview: true,
+          note: 'Tags and cover art are not copied.',
+        });
+      }
+      return results;
+    },
+  });
+</script>

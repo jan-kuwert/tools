@@ -1,0 +1,327 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="pdf/organize" accept="application/pdf,.pdf" action="Save PDF">
+  <section slot="before-options" class="organizer" data-organizer hidden aria-label="Pages">
+    <p class="org-error" data-org-error role="alert" hidden></p>
+    <p class="warn-box" data-org-warn hidden>
+      This PDF has signature fields. Any digital signatures will not be valid in the reorganized copy.
+    </p>
+    <div class="org-bar" data-org-bar hidden>
+      <p class="muted org-count" data-org-count></p>
+      <button class="btn" type="button" data-reverse>Reverse order</button>
+      <button class="btn" type="button" data-reset>Reset</button>
+    </div>
+    <ol class="page-grid" data-grid></ol>
+    <p class="visually-hidden" data-announce aria-live="polite"></p>
+  </section>
+</ToolShell>
+
+<script>
+  import type { PDFDocument } from '@cantoo/pdf-lib';
+  import type { PDFDocumentProxy } from 'pdfjs-dist';
+  import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+  import { createTool, el, throwIfAborted, sniff, UserError } from '../../lib/tool';
+
+  const MAX_BYTES = 100 * 1024 * 1024;
+  const MAX_PAGES = 500;
+  const THUMB_PX = 180;
+  const RENDER_CONCURRENCY = 3;
+
+  interface Page {
+    index: number;
+    rotation: number;
+    deleted: boolean;
+    card: HTMLLIElement;
+    thumb: HTMLElement;
+    earlier: HTMLButtonElement;
+    later: HTMLButtonElement;
+    remove: HTMLButtonElement;
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-organizer]')!;
+  const grid = root.querySelector<HTMLOListElement>('[data-grid]')!;
+  const errorBox = root.querySelector<HTMLElement>('[data-org-error]')!;
+  const warnBox = root.querySelector<HTMLElement>('[data-org-warn]')!;
+  const bar = root.querySelector<HTMLElement>('[data-org-bar]')!;
+  const count = root.querySelector<HTMLElement>('[data-org-count]')!;
+  const announce = root.querySelector<HTMLElement>('[data-announce]')!;
+
+  let current: File | undefined;
+  let loading: Promise<PDFDocument> | undefined;
+  let order: Page[] = [];
+  let preview: PDFDocumentProxy | undefined;
+  let observer: IntersectionObserver | undefined;
+  let queue: Page[] = [];
+  let active = 0;
+  let dragged: Page | undefined;
+
+  const say = (text: string) => (announce.textContent = text);
+
+  function reset() {
+    observer?.disconnect();
+    observer = undefined;
+    void preview?.loadingTask.destroy();
+    preview = undefined;
+    queue = [];
+    order = [];
+    grid.replaceChildren();
+    errorBox.hidden = warnBox.hidden = bar.hidden = true;
+  }
+
+  async function loadSource(file: File): Promise<PDFDocument> {
+    if ((await sniff(file)) !== 'pdf') throw new UserError('This file is not a PDF.');
+    const { PDFDocument, ParseSpeeds } = await import('@cantoo/pdf-lib');
+    let doc: PDFDocument;
+    try {
+      doc = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true, updateMetadata: false, parseSpeed: ParseSpeeds.Fast });
+    } catch {
+      throw new UserError('This PDF could not be read. It may be damaged.');
+    }
+    if (doc.isEncrypted) throw new UserError('This PDF is encrypted or password-protected. Remove the protection first, then try again.');
+    const n = doc.getPageCount();
+    if (n === 0) throw new UserError('This PDF has no pages.');
+    if (n > MAX_PAGES) throw new UserError(`This PDF has ${n} pages; the limit is ${MAX_PAGES}.`);
+    return doc;
+  }
+
+  async function open(file: File) {
+    const pending = (loading = loadSource(file));
+    let doc: PDFDocument;
+    try {
+      doc = await pending;
+    } catch (err) {
+      if (loading !== pending) return;
+      errorBox.textContent = err instanceof UserError ? err.message : 'This PDF could not be read.';
+      errorBox.hidden = false;
+      return;
+    }
+    if (loading !== pending) return;
+    const { PDFSignature } = await import('@cantoo/pdf-lib');
+    if (loading !== pending) return;
+    try {
+      warnBox.hidden = !doc.getForm().getFields().some((f) => f instanceof PDFSignature);
+    } catch {
+      // A malformed form dictionary only costs us the warning.
+    }
+    order = Array.from({ length: doc.getPageCount() }, (_, i) => createCard(i));
+    bar.hidden = false;
+    layout();
+
+    // Thumbnails are best-effort: pdf.js may fail on files pdf-lib can still reorganize.
+    try {
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+      // pdf.js v6 has no eval code path, so the CSP needs no isEvalSupported flag (the option no longer exists).
+      const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+      if (loading !== pending) return void doc.loadingTask.destroy();
+      preview = doc;
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const e of entries) {
+            if (!e.isIntersecting) continue;
+            observer?.unobserve(e.target);
+            const page = order.find((p) => p.card === e.target);
+            if (page) queue.push(page);
+          }
+          pump();
+        },
+        { rootMargin: '300px 0px' },
+      );
+      for (const p of order) observer.observe(p.card);
+    } catch {
+      if (loading === pending) for (const p of order) p.thumb.dataset.state = 'failed';
+    }
+  }
+
+  function pump() {
+    while (active < RENDER_CONCURRENCY && queue.length) {
+      const page = queue.shift()!;
+      const doc = preview!;
+      active++;
+      renderThumb(doc, page)
+        .catch(() => {
+          if (doc === preview) page.thumb.dataset.state = 'failed';
+        })
+        .finally(() => {
+          active--;
+          if (doc === preview) pump();
+        });
+    }
+  }
+
+  async function renderThumb(doc: PDFDocumentProxy, page: Page) {
+    const p = await doc.getPage(page.index + 1);
+    const base = p.getViewport({ scale: 1 });
+    const scale = (THUMB_PX * Math.min(devicePixelRatio, 2)) / Math.max(base.width, base.height);
+    const viewport = p.getViewport({ scale });
+    const canvas = el('canvas', { width: Math.ceil(viewport.width), height: Math.ceil(viewport.height) });
+    canvas.setAttribute('aria-hidden', 'true');
+    await p.render({ canvas, viewport }).promise;
+    p.cleanup();
+    if (doc !== preview) return;
+    page.thumb.replaceChildren(canvas);
+    page.thumb.dataset.state = 'ready';
+  }
+
+  function createCard(index: number): Page {
+    const n = index + 1;
+    const btn = (label: string, text: string) => el('button', { type: 'button', className: 'icon-btn', title: label, ariaLabel: `${label}: page ${n}`, textContent: text });
+    const left = btn('Rotate left', '⟲');
+    const right = btn('Rotate right', '⟳');
+    const earlier = btn('Move earlier', '←');
+    const later = btn('Move later', '→');
+    const remove = btn('Delete', '✕');
+    const thumb = el('div', { className: 'thumb' });
+    const card = el(
+      'li',
+      { className: 'page-card', draggable: true },
+      el('div', { className: 'thumb-box' }, thumb),
+      el('p', { className: 'page-label', textContent: `Page ${n}` }),
+      el('div', { className: 'page-actions' }, left, right, earlier, later, remove),
+    );
+    const page: Page = { index, rotation: 0, deleted: false, card, thumb, earlier, later, remove };
+
+    const rotate = (delta: number) => {
+      page.rotation = (page.rotation + delta + 360) % 360;
+      layout();
+      say(`Page ${n} rotated to ${page.rotation}°.`);
+    };
+    left.addEventListener('click', () => rotate(-90));
+    right.addEventListener('click', () => rotate(90));
+    earlier.addEventListener('click', () => move(page, order.indexOf(page) - 1, earlier));
+    later.addEventListener('click', () => move(page, order.indexOf(page) + 1, later));
+    remove.addEventListener('click', () => {
+      page.deleted = !page.deleted;
+      layout();
+      say(`Page ${n} ${page.deleted ? 'deleted' : 'restored'}.`);
+    });
+
+    // Drag-and-drop is an enhancement; the move buttons are the accessible path.
+    card.addEventListener('dragstart', (e) => {
+      dragged = page;
+      e.dataTransfer?.setData('text/plain', '');
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => {
+      dragged = undefined;
+      card.classList.remove('dragging');
+    });
+    card.addEventListener('dragover', (e) => {
+      if (dragged) e.preventDefault();
+    });
+    card.addEventListener('drop', (e) => {
+      if (!dragged || dragged === page) return;
+      e.preventDefault();
+      e.stopPropagation();
+      move(dragged, order.indexOf(page));
+    });
+    return page;
+  }
+
+  function move(page: Page, to: number, focusAfter?: HTMLButtonElement) {
+    if (to < 0 || to >= order.length) return;
+    order.splice(order.indexOf(page), 1);
+    order.splice(to, 0, page);
+    layout();
+    // Re-inserting a node drops focus; keep keyboard users on the same control.
+    (focusAfter?.disabled ? (focusAfter === page.earlier ? page.later : page.earlier) : focusAfter)?.focus();
+    say(`Page ${page.index + 1} moved to position ${to + 1} of ${order.length}.`);
+  }
+
+  function layout() {
+    order.forEach((p, i) => {
+      p.earlier.disabled = i === 0;
+      p.later.disabled = i === order.length - 1;
+      p.card.classList.toggle('deleted', p.deleted);
+      p.thumb.style.transform = p.rotation ? `rotate(${p.rotation}deg)` : '';
+      p.remove.textContent = p.deleted ? '↺' : '✕';
+      p.remove.title = p.deleted ? 'Restore' : 'Delete';
+      p.remove.ariaLabel = `${p.remove.title}: page ${p.index + 1}`;
+      p.remove.setAttribute('aria-pressed', String(p.deleted));
+    });
+    // Only touch the DOM when the order changed, so focus and scroll stay put otherwise.
+    if (order.some((p, i) => grid.children[i] !== p.card)) grid.append(...order.map((p) => p.card));
+    const kept = order.filter((p) => !p.deleted).length;
+    count.textContent = `${order.length} ${order.length === 1 ? 'page' : 'pages'}${kept < order.length ? ` · ${order.length - kept} deleted` : ''}`;
+  }
+
+  root.querySelector('[data-reverse]')!.addEventListener('click', () => {
+    order.reverse();
+    layout();
+    say('Page order reversed.');
+  });
+  root.querySelector('[data-reset]')!.addEventListener('click', () => {
+    order.sort((a, b) => a.index - b.index);
+    for (const p of order) {
+      p.rotation = 0;
+      p.deleted = false;
+    }
+    layout();
+    say('All changes reset.');
+  });
+
+  createTool({
+    validate: (f) => (f.size > MAX_BYTES ? 'File is larger than 100 MB.' : undefined),
+    onFilesChange(files) {
+      // The shell re-reports the same file on unrelated changes; keep the user's edits.
+      if (files[0] === current) return;
+      current = files[0];
+      loading = undefined;
+      reset();
+      root.hidden = !current;
+      if (current) void open(current);
+    },
+    async run(files, { signal, progress }) {
+      if (!loading) throw new UserError('Choose a PDF first.');
+      progress('Reading PDF…');
+      const src = await loading;
+      throwIfAborted(signal);
+      const kept = order.filter((p) => !p.deleted);
+      if (!kept.length) throw new UserError('All pages are deleted. Restore at least one page.');
+      const { PDFDocument, degrees } = await import('@cantoo/pdf-lib');
+      const out = await PDFDocument.create();
+      const copied = await out.copyPages(src, kept.map((p) => p.index));
+      kept.forEach((p, i) => {
+        const page = copied[i];
+        page.setRotation(degrees((page.getRotation().angle + p.rotation) % 360));
+        out.addPage(page);
+      });
+      throwIfAborted(signal);
+      progress('Saving…');
+      const bytes = await out.save();
+      throwIfAborted(signal);
+      const name = files[0].name.replace(/\.pdf$/i, '') + '-organized.pdf';
+      return [{ name, blob: new Blob([bytes as BlobPart], { type: 'application/pdf' }), inputSize: files[0].size }];
+    },
+  });
+</script>
+
+<style is:global>
+  /* Global because the cards are created at runtime and miss Astro's scope attribute. */
+  .organizer { margin-top: 1.25rem; display: grid; gap: 0.75rem; }
+  .organizer .org-error { margin: 0; color: var(--error); }
+  .organizer .org-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .organizer .org-count { margin: 0 auto 0 0; font-size: 0.9rem; }
+  .organizer .page-grid {
+    list-style: none; padding: 0; margin: 0;
+    display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .organizer .page-card {
+    display: grid; gap: 0.4rem; padding: 0.5rem; border-radius: 12px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    transition: opacity 0.15s;
+  }
+  .organizer .page-card.dragging { opacity: 0.4; }
+  .organizer .page-card.deleted .thumb-box, .organizer .page-card.deleted .page-label { opacity: 0.35; filter: grayscale(1); }
+  .organizer .page-card.deleted .page-label { text-decoration: line-through; }
+  /* Square box: any page rotated by 90° still fits, so rotating never shifts layout. */
+  .organizer .thumb-box { aspect-ratio: 1; position: relative; overflow: hidden; border-radius: 8px; background: var(--surface); }
+  .organizer .thumb { position: absolute; inset: 0; transition: transform 0.2s; }
+  .organizer .thumb[data-state='failed']::after { content: 'No preview'; display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 0.85rem; }
+  .organizer .thumb canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .organizer .page-label { margin: 0; font-size: 0.88rem; font-weight: 600; text-align: center; }
+  .organizer .page-actions { display: flex; justify-content: center; flex-wrap: wrap; }
+  .organizer .page-actions .icon-btn[aria-pressed='true'] { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .organizer .thumb { transition: none; } }
+</style>

@@ -1,0 +1,80 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+
+const configured = Boolean(import.meta.env.PUBLIC_API_URL);
+---
+<ToolShell slug="images/remove-background" accept="image/jpeg,image/png,image/webp" action="Remove background">
+  {!configured && (
+    <p slot="before-options" class="warn-box unconfigured" role="note">
+      The cloud processing service is not configured for this site, so this tool is currently unavailable. Nothing will be uploaded.
+    </p>
+  )}
+  <section slot="after" class="panel" data-compare hidden aria-labelledby="compare-title">
+    <h2 id="compare-title">Before and after</h2>
+    <div class="compare-frame checker" data-frame>
+      <img data-before alt="Original image" />
+      <img data-after alt="Image with the background removed" />
+    </div>
+    <label class="field compare-slider">
+      <span>Compare: original on the left, result on the right</span>
+      <input type="range" min="0" max="100" value="50" data-slider />
+    </label>
+  </section>
+</ToolShell>
+
+<style>
+  .compare-frame { display: grid; margin-top: 0.75rem; border-radius: 8px; overflow: hidden; --pos: 50%; }
+  .compare-frame > img, .compare-frame::after { grid-area: 1 / 1; }
+  .compare-frame > img { width: 100%; max-height: 480px; object-fit: contain; }
+  [data-before] { clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+  [data-after] { clip-path: inset(0 0 0 var(--pos)); }
+  .compare-frame::after { content: ''; width: 2px; margin-left: calc(var(--pos) - 1px); background: var(--accent); pointer-events: none; }
+  .compare-slider, .unconfigured { margin-top: 0.75rem; }
+</style>
+
+<script>
+  import { API_URL, uploadForResult } from '../../lib/api';
+  import { createTool, sniff, UserError } from '../../lib/tool';
+
+  const MAX_BYTES = 20 * 1024 * 1024;
+  const runBtn = document.querySelector<HTMLButtonElement>('[data-run]')!;
+  const compare = document.querySelector<HTMLElement>('[data-compare]')!;
+  const frame = compare.querySelector<HTMLElement>('[data-frame]')!;
+  const before = compare.querySelector<HTMLImageElement>('[data-before]')!;
+  const after = compare.querySelector<HTMLImageElement>('[data-after]')!;
+  const slider = compare.querySelector<HTMLInputElement>('[data-slider]')!;
+
+  slider.addEventListener('input', () => frame.style.setProperty('--pos', `${slider.value}%`));
+
+  const hideCompare = () => {
+    compare.hidden = true;
+    for (const img of [before, after]) {
+      if (img.src) URL.revokeObjectURL(img.src);
+      img.removeAttribute('src');
+    }
+  };
+
+  createTool({
+    cloud: true,
+    validate: (f) => (f.size > MAX_BYTES ? 'larger than 20 MB.' : undefined),
+    onFilesChange() {
+      hideCompare();
+      if (!API_URL) runBtn.disabled = true;
+    },
+    async run([file], { signal, progress }) {
+      hideCompare();
+      const kind = await sniff(file);
+      if (kind !== 'jpeg' && kind !== 'png' && kind !== 'webp') throw new UserError('This file is not a JPEG, PNG or WebP image.');
+      progress('Uploading… 0%', 0);
+      // Type the body by its content, not the browser-reported MIME type.
+      const blob = await uploadForResult('/v1/remove-background', file.slice(0, file.size, `image/${kind}`), {
+        signal,
+        onUploadProgress: (f) => (f < 1 ? progress(`Uploading… ${Math.round(f * 100)}%`, f) : progress('Processing on server…')),
+      });
+      before.src = URL.createObjectURL(file);
+      after.src = URL.createObjectURL(blob);
+      compare.hidden = false;
+      return [{ name: file.name.replace(/\.[^./]*$/, '') + '-no-background.png', blob, preview: true }];
+    },
+  });
+</script>

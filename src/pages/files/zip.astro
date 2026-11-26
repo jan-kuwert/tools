@@ -1,0 +1,54 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="files/zip" multiple action="Create ZIP">
+  <label class="field">
+    <span>Archive name</span>
+    <input type="text" name="name" value="archive" autocomplete="off" />
+  </label>
+  <fieldset>
+    <legend>Compression</legend>
+    <div class="segmented">
+      <label><input type="radio" name="level" value="0" /><span>Store</span></label>
+      <label><input type="radio" name="level" value="6" checked /><span>Balanced</span></label>
+      <label><input type="radio" name="level" value="9" /><span>Smallest</span></label>
+    </div>
+  </fieldset>
+</ToolShell>
+
+<script>
+  import { zip, type Zippable } from 'fflate';
+  import { createTool, throwIfAborted, UserError } from '../../lib/tool';
+
+  const MAX_TOTAL = 500 * 1024 * 1024;
+
+  createTool({
+    async run(files, { form, signal, progress }) {
+      const total = files.reduce((s, f) => s + f.size, 0);
+      if (total > MAX_TOTAL) throw new UserError('Total size exceeds 500 MB.');
+      const data = new FormData(form);
+      const level = Number(data.get('level')) as 0 | 6 | 9;
+      const name = (String(data.get('name')).trim() || 'archive').replace(/\.zip$/i, '') + '.zip';
+
+      // Deduplicate names so files with the same name don't overwrite each other.
+      const entries: Zippable = {};
+      for (const [i, f] of files.entries()) {
+        throwIfAborted(signal);
+        progress(`Reading ${f.name}`, i / files.length);
+        let entry = f.name;
+        for (let n = 2; entry in entries; n++) entry = f.name.replace(/(\.[^.]*)?$/, ` (${n})$1`);
+        entries[entry] = [new Uint8Array(await f.arrayBuffer()), { level, mtime: f.lastModified }];
+      }
+      progress('Compressing…');
+      const { promise, resolve, reject } = Promise.withResolvers<Uint8Array>();
+      // Async fflate runs in workers and keeps the page responsive.
+      const terminate = zip(entries, (err, out) => (err ? reject(err) : resolve(out)));
+      signal.addEventListener('abort', () => {
+        terminate();
+        reject(new DOMException('Cancelled', 'AbortError'));
+      });
+      const out = await promise;
+      return [{ name, blob: new Blob([out as BlobPart], { type: 'application/zip' }), inputSize: total }];
+    },
+  });
+</script>

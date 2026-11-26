@@ -1,0 +1,71 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="images/convert" multiple accept="image/jpeg,image/png,image/webp" action="Convert">
+  <fieldset>
+    <legend>Output format</legend>
+    <div class="segmented">
+      <label><input type="radio" name="format" value="image/jpeg" /><span>JPEG</span></label>
+      <label><input type="radio" name="format" value="image/png" /><span>PNG</span></label>
+      <label><input type="radio" name="format" value="image/webp" checked /><span>WebP</span></label>
+    </div>
+  </fieldset>
+  <label class="field">
+    <span>Quality <output data-quality-value for="quality">82</output></span>
+    <input type="range" id="quality" name="quality" min="1" max="100" value="82" />
+    <small data-quality-hint>Lower means smaller files. 75–85 is a good balance.</small>
+  </label>
+  <p class="warn-box" data-jpeg-warn hidden>JPEG has no transparency: transparent areas become white.</p>
+  <p class="muted">Metadata such as camera details and GPS location is removed.</p>
+</ToolShell>
+
+<script>
+  import { createTool, replaceExt, throwIfAborted, type Result } from '../../lib/tool';
+  import { loadPrefs } from '../../lib/prefs';
+  import { decodeImage, drawImage, encodeCanvas, EXT, uniqueName, withZip, type ImageType } from '../../lib/image';
+
+  const form = document.querySelector<HTMLFormElement>('[data-options]')!;
+  const quality = form.querySelector<HTMLInputElement>('[name=quality]')!;
+  const qualityValue = form.querySelector<HTMLOutputElement>('[data-quality-value]')!;
+  const qualityHint = form.querySelector<HTMLElement>('[data-quality-hint]')!;
+  const jpegWarn = form.querySelector<HTMLElement>('[data-jpeg-warn]')!;
+
+  const prefs = loadPrefs();
+  if (prefs.imageFormat) form.querySelector<HTMLInputElement>(`[name=format][value="${prefs.imageFormat}"]`)!.checked = true;
+  if (prefs.imageQuality) quality.value = String(prefs.imageQuality);
+
+  const format = () => new FormData(form).get('format') as ImageType;
+  const sync = () => {
+    const png = format() === 'image/png';
+    quality.disabled = png;
+    qualityHint.textContent = png ? 'PNG is lossless, so quality does not apply.' : 'Lower means smaller files. 75–85 is a good balance.';
+    qualityValue.value = png ? '–' : quality.value;
+    jpegWarn.hidden = format() !== 'image/jpeg';
+  };
+  form.addEventListener('input', sync);
+  sync();
+
+  createTool({
+    async run(files, { signal, progress }) {
+      const type = format();
+      const q = Number(quality.value) / 100;
+      const taken = new Set<string>();
+      const results: Result[] = [];
+      for (const [i, file] of files.entries()) {
+        throwIfAborted(signal);
+        progress(`Converting ${file.name}`, i / files.length);
+        const { bitmap } = await decodeImage(file);
+        let canvas: HTMLCanvasElement;
+        try {
+          canvas = drawImage(bitmap, bitmap.width, bitmap.height, type === 'image/jpeg' ? '#fff' : undefined);
+        } finally {
+          bitmap.close();
+        }
+        const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : q);
+        results.push({ name: uniqueName(replaceExt(file.name, EXT[type]), taken), blob, inputSize: file.size, preview: true });
+      }
+      progress('Packing ZIP…');
+      return withZip(results, 'images.zip');
+    },
+  });
+</script>

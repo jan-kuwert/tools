@@ -1,0 +1,103 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="text/json" action="Format" noFiles>
+  <div slot="before-options" class="field io">
+    <div class="io-head">
+      <label for="json-in">Input JSON</label>
+      <button class="btn" type="button" data-open>Open file…</button>
+      <input type="file" accept=".json,application/json,text/plain" data-file hidden />
+    </div>
+    <textarea id="json-in" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder='{"paste": "your JSON here"}'></textarea>
+  </div>
+  <fieldset>
+    <legend>Indent</legend>
+    <div class="segmented">
+      <label><input type="radio" name="indent" value="2" checked /><span>2 spaces</span></label>
+      <label><input type="radio" name="indent" value="4" /><span>4 spaces</span></label>
+      <label><input type="radio" name="indent" value="tab" /><span>Tab</span></label>
+    </div>
+  </fieldset>
+  <button slot="actions" class="btn" type="button" data-minify>Minify</button>
+
+  <section slot="after" class="panel" data-output hidden>
+    <div class="io-head">
+      <label for="json-out">Output</label>
+      <span class="muted" data-sizes></span>
+      <button class="btn" type="button" data-copy>Copy</button>
+      <button class="btn btn-primary" type="button" data-download>Download</button>
+    </div>
+    <textarea id="json-out" readonly spellcheck="false"></textarea>
+  </section>
+</ToolShell>
+
+<style>
+  .io { margin-bottom: 1rem; }
+  .io-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .io-head label { font-weight: 600; font-size: 0.92rem; margin-right: auto; }
+  .io-head .muted { font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+</style>
+
+<script>
+  import { formatJson, jsonError } from '../../lib/json';
+  import { downloadBlob, formatBytes, sniff } from '../../lib/tool';
+
+  const MAX = 50 * 1024 * 1024;
+  const INDENTS: Record<string, string> = { '2': '  ', '4': '    ', tab: '\t' };
+  const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+  const form = $<HTMLFormElement>('[data-options]');
+  const input = $<HTMLTextAreaElement>('#json-in');
+  const output = $<HTMLTextAreaElement>('#json-out');
+  const fileInput = $<HTMLInputElement>('[data-file]');
+  const outPanel = $('[data-output]');
+  const status = $('[data-status]');
+  let baseName = 'data';
+  let result: { blob: Blob; name: string } | undefined;
+
+  const setStatus = (kind: 'idle' | 'working' | 'done' | 'error', text: string) => {
+    status.dataset.kind = kind;
+    status.textContent = text;
+  };
+
+  async function run(minify: boolean) {
+    const text = input.value;
+    outPanel.hidden = true;
+    if (!text.trim()) return setStatus('error', 'Paste JSON or open a file first.');
+    setStatus('working', 'Working…');
+    // Let the status paint before a potentially long synchronous parse.
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
+    const err = jsonError(text);
+    if (err) return setStatus('error', `Invalid JSON: ${err}`);
+    const out = formatJson(text, minify ? '' : INDENTS[String(new FormData(form).get('indent'))]);
+    result = { blob: new Blob([out], { type: 'application/json' }), name: `${baseName}${minify ? '.min' : ''}.json` };
+    output.value = out;
+    $('[data-sizes]').textContent = `${formatBytes(new Blob([text]).size)} → ${formatBytes(result.blob.size)}`;
+    outPanel.hidden = false;
+    setStatus('done', minify ? 'Valid JSON, minified.' : 'Valid JSON, formatted.');
+  }
+
+  form.addEventListener('submit', (e) => e.preventDefault());
+  $('[data-run]').addEventListener('click', () => run(false));
+  $('[data-minify]').addEventListener('click', () => run(true));
+  $('[data-open]').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = '';
+    if (!file) return;
+    if (file.size > MAX) return setStatus('error', `${file.name} is larger than ${formatBytes(MAX)}.`);
+    if ((await sniff(file)) !== 'unknown') return setStatus('error', `${file.name} is not a text file.`);
+    input.value = await file.text();
+    baseName = file.name.replace(/\.[^./]*$/, '') || 'data';
+    outPanel.hidden = true;
+    setStatus('idle', `Opened ${file.name} (${formatBytes(file.size)}).`);
+  });
+  $('[data-copy]').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(output.value);
+      setStatus('done', 'Copied to clipboard.');
+    } catch {
+      setStatus('error', 'Copy failed. Select the output and copy it manually.');
+    }
+  });
+  $('[data-download]').addEventListener('click', () => result && downloadBlob(result.blob, result.name));
+</script>

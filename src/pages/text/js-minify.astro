@@ -1,0 +1,131 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="text/js-minify" action="Minify" noFiles>
+  <div slot="before-options" class="field io">
+    <div class="io-head">
+      <label for="js-in">Input JavaScript</label>
+      <button class="btn" type="button" data-open>Open file…</button>
+      <input type="file" accept=".js,.mjs,.cjs,text/javascript" data-file hidden />
+    </div>
+    <textarea id="js-in" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="function hello(name) { console.log('Hello ' + name); }"></textarea>
+  </div>
+  <div class="row">
+    <fieldset>
+      <legend>Code type</legend>
+      <div class="segmented">
+        <label><input type="radio" name="type" value="script" checked /><span>Script</span></label>
+        <label><input type="radio" name="type" value="module" /><span>ES module</span></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Options</legend>
+      <label class="check"><input type="checkbox" name="mangle" checked /> Mangle names</label>
+      <label class="check"><input type="checkbox" name="keepConsole" /> Keep console calls</label>
+    </fieldset>
+  </div>
+
+  <section slot="after" class="panel" data-output hidden>
+    <div class="io-head">
+      <label for="js-out">Output</label>
+      <span class="muted" data-sizes></span>
+      <button class="btn" type="button" data-copy>Copy</button>
+      <button class="btn btn-primary" type="button" data-download>Download</button>
+    </div>
+    <textarea id="js-out" readonly spellcheck="false"></textarea>
+  </section>
+</ToolShell>
+
+<style>
+  .io { margin-bottom: 1rem; }
+  .io-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .io-head label { font-weight: 600; font-size: 0.92rem; margin-right: auto; }
+  .io-head .muted { font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+  .row { gap: 2rem; }
+  .check { display: flex; gap: 0.5rem; align-items: center; font-size: 0.95rem; }
+  .check input { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; }
+</style>
+
+<script>
+  import { gzipSync } from 'fflate';
+  import { downloadBlob, formatBytes, sniff } from '../../lib/tool';
+
+  const MAX = 10 * 1024 * 1024;
+  const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+  const form = $<HTMLFormElement>('[data-options]');
+  const input = $<HTMLTextAreaElement>('#js-in');
+  const output = $<HTMLTextAreaElement>('#js-out');
+  const fileInput = $<HTMLInputElement>('[data-file]');
+  const runBtn = $<HTMLButtonElement>('[data-run]');
+  const bar = $<HTMLProgressElement>('[data-progress]');
+  const outPanel = $('[data-output]');
+  const status = $('[data-status]');
+  let srcName = 'script.js';
+  let result: Blob | undefined;
+
+  const setStatus = (kind: 'idle' | 'working' | 'done' | 'error', text: string) => {
+    status.dataset.kind = kind;
+    status.textContent = text;
+    bar.hidden = kind !== 'working';
+  };
+
+  runBtn.addEventListener('click', async () => {
+    const code = input.value;
+    outPanel.hidden = true;
+    if (!code.trim()) return setStatus('error', 'Paste code or open a file first.');
+    runBtn.disabled = true;
+    setStatus('working', 'Minifying…');
+    try {
+      // Terser is large; only fetch it when actually needed.
+      const { minify } = await import('terser');
+      const data = new FormData(form);
+      const out = (
+        await minify(code, {
+          module: data.get('type') === 'module',
+          mangle: data.has('mangle'),
+          compress: { drop_console: !data.has('keepConsole') },
+        })
+      ).code ?? '';
+      result = new Blob([out], { type: 'text/javascript' });
+      output.value = out;
+      const before = new Blob([code]).size;
+      const pct = before ? Math.round((1 - result.size / before) * 100) : 0;
+      const delta = pct >= 0 ? `${pct}% smaller` : `${-pct}% larger`;
+      const gz = gzipSync(new TextEncoder().encode(out)).length;
+      $('[data-sizes]').textContent = `${formatBytes(before)} → ${formatBytes(result.size)} (${delta}) · gzip ≈ ${formatBytes(gz)}`;
+      outPanel.hidden = false;
+      setStatus('done', 'Done.');
+    } catch (err) {
+      // Terser parse errors carry a 1-based line and 0-based col.
+      const { message, line, col } = err as { message: string; line?: number; col?: number };
+      setStatus('error', line ? `Syntax error at line ${line}, column ${(col ?? 0) + 1}: ${message}` : `Could not minify: ${message}`);
+    } finally {
+      runBtn.disabled = false;
+    }
+  });
+
+  form.addEventListener('submit', (e) => e.preventDefault());
+  $('[data-open]').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = '';
+    if (!file) return;
+    if (file.size > MAX) return setStatus('error', `${file.name} is larger than ${formatBytes(MAX)}.`);
+    if ((await sniff(file)) !== 'unknown') return setStatus('error', `${file.name} is not a text file.`);
+    input.value = await file.text();
+    srcName = file.name;
+    outPanel.hidden = true;
+    setStatus('idle', `Opened ${file.name} (${formatBytes(file.size)}).`);
+  });
+  $('[data-copy]').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(output.value);
+      setStatus('done', 'Copied to clipboard.');
+    } catch {
+      setStatus('error', 'Copy failed. Select the output and copy it manually.');
+    }
+  });
+  $('[data-download]').addEventListener('click', () => {
+    if (result) downloadBlob(result, srcName.replace(/(\.[cm]?js)?$/i, (ext) => `.min${ext || '.js'}`));
+  });
+</script>

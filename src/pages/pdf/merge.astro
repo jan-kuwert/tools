@@ -1,0 +1,36 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="pdf/merge" multiple accept="application/pdf,.pdf" action="Merge PDFs">
+  <p class="muted">Pages are combined in the order of the file list. Use the arrows to reorder.</p>
+</ToolShell>
+
+<script>
+  import { createTool, throwIfAborted, tick, UserError } from '../../lib/tool';
+  import { loadPdf, pdfBlob, SIGNATURE_NOTE } from '../../lib/pdf';
+
+  const MAX_TOTAL = 200 * 1024 * 1024;
+
+  createTool({
+    async run(files, { signal, progress }) {
+      if (files.length < 2) throw new UserError('Add at least two PDFs to merge.');
+      const total = files.reduce((s, f) => s + f.size, 0);
+      if (total > MAX_TOTAL) throw new UserError('Total size exceeds 200 MB.');
+      const { PDFDocument } = await import('@cantoo/pdf-lib');
+      const out = await PDFDocument.create();
+      let signed = false;
+      for (const [i, f] of files.entries()) {
+        throwIfAborted(signal);
+        progress(`Adding ${f.name}`, i / files.length);
+        await tick();
+        const { doc, hasSignature } = await loadPdf(f);
+        signed ||= hasSignature;
+        for (const p of await out.copyPages(doc, doc.getPageIndices())) out.addPage(p);
+      }
+      progress('Saving…');
+      const bytes = await out.save({ useObjectStreams: true });
+      const note = 'Bookmarks and form fields may not be preserved.' + (signed ? ' ' + SIGNATURE_NOTE : '');
+      return [{ name: 'merged.pdf', blob: pdfBlob(bytes), inputSize: total, note }];
+    },
+  });
+</script>

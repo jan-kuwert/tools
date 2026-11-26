@@ -1,0 +1,85 @@
+---
+// Standard tool page: header, privacy note, file picker, options slot, run/cancel, results.
+// Client logic attaches through createTool() in src/lib/tool.ts via the data-* hooks.
+import Base from '../layouts/Base.astro';
+import Icon from './Icon.astro';
+import ModeBadge from './ModeBadge.astro';
+import { categories, href, toolBySlug } from '../tools';
+
+interface Props {
+  slug: string;
+  accept?: string;
+  multiple?: boolean;
+  /** Label on the run button, e.g. "Merge PDFs". */
+  action: string;
+  /** Hide the file picker for text-only tools. */
+  noFiles?: boolean;
+}
+const { slug, accept, multiple = false, action, noFiles = false } = Astro.props;
+const tool = toolBySlug(slug);
+const category = categories.find((c) => c.id === tool.category)!;
+const cloud = tool.mode === 'cloud';
+---
+<Base title={`${tool.title} · Tools`} description={tool.summary} category={tool.category}>
+  <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#' + category.id}>{category.label}</a></div>
+  <div class="tool-head">
+    <h1>{tool.title}</h1>
+    <ModeBadge mode={tool.mode} />
+  </div>
+  <p class="tool-summary">{tool.summary}</p>
+
+  {cloud ? (
+    <div class="privacy-note privacy-cloud" role="note">
+      <Icon name="cloud" />
+      <p><strong>This tool uploads your file.</strong> It is sent over HTTPS to our processing server in Belgium (EU), processed, and deleted as soon as the result is returned. Nothing is stored or used for training. You will be asked before each upload. <a href={href('privacy')}>Details</a></p>
+    </div>
+  ) : (
+    <div class="privacy-note privacy-local" role="note">
+      <Icon name="lock" />
+      <p><strong>Your files stay on this device.</strong> Processing happens in your browser; nothing is uploaded. <a href={href('privacy')}>How we check</a></p>
+    </div>
+  )}
+
+  <section class="panel" data-tool>
+    {!noFiles && (
+      <>
+        <label class="drop" data-drop>
+          <input type="file" data-input accept={accept} multiple={multiple} />
+          <span class="drop-title"><span>Choose {multiple ? 'files' : 'a file'}</span> or drop {multiple ? 'them' : 'it'} here</span>
+          <span class="drop-hint">{tool.limits}</span>
+          <span class="drop-hint">You can also paste from the clipboard.</span>
+        </label>
+        <ol class="file-list" data-files hidden></ol>
+      </>
+    )}
+    <slot name="before-options" />
+    <form class="options" data-options style={noFiles ? '' : 'margin-top:1.25rem'}>
+      <slot />
+    </form>
+    <div class="actions">
+      <button class="btn btn-primary" type="button" data-run disabled={!noFiles}>
+        {cloud && <Icon name="upload" />}{action}
+      </button>
+      <slot name="actions" />
+      <button class="btn" type="button" data-cancel hidden>Cancel</button>
+      <button class="btn btn-ghost" type="button" data-clear hidden>Clear files</button>
+    </div>
+    <progress data-progress max="1" hidden></progress>
+    <p class="status" data-status role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="panel results" data-results hidden aria-live="polite"></section>
+  <slot name="after" />
+
+  {cloud && (
+    <dialog data-consent aria-labelledby="consent-title">
+      <h2 id="consent-title"><Icon name="cloud" /> Upload to process?</h2>
+      <p>This tool uploads your file for processing in Belgium (EU). Files are not intentionally retained after processing. Operational request metadata (time, size, IP address) may be logged.</p>
+      <p class="muted">Your answer is not remembered; we ask every time.</p>
+      <form method="dialog">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn btn-primary" value="upload" autofocus>Upload &amp; process</button>
+      </form>
+    </dialog>
+  )}
+</Base>

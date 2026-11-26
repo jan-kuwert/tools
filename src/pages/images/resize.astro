@@ -1,0 +1,90 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="images/resize" multiple accept="image/jpeg,image/png,image/webp" action="Resize">
+  <fieldset>
+    <legend>Resize by</legend>
+    <div class="segmented">
+      <label><input type="radio" name="mode" value="width" checked /><span>Width</span></label>
+      <label><input type="radio" name="mode" value="height" /><span>Height</span></label>
+      <label><input type="radio" name="mode" value="percent" /><span>Percentage</span></label>
+    </div>
+  </fieldset>
+  <div class="row">
+    <label class="field">
+      <span data-size-label>Width in pixels</span>
+      <input type="number" name="size" min="1" step="1" value="1600" required inputmode="numeric" />
+    </label>
+    <label class="check">
+      <input type="checkbox" name="upscale" />
+      <span>Allow upscaling</span>
+    </label>
+  </div>
+  <p class="muted">Proportions are kept. Output stays in the original format; metadata such as camera details and GPS location is removed.</p>
+</ToolShell>
+
+<style>
+  .check { display: flex; gap: 0.5rem; align-items: center; min-height: 2.6rem; }
+</style>
+
+<script>
+  import { createTool, throwIfAborted, UserError, type Result } from '../../lib/tool';
+  import { decodeImage, drawImage, encodeCanvas, uniqueName, withZip } from '../../lib/image';
+
+  const form = document.querySelector<HTMLFormElement>('[data-options]')!;
+  const size = form.querySelector<HTMLInputElement>('[name=size]')!;
+  const sizeLabel = form.querySelector<HTMLElement>('[data-size-label]')!;
+  const labels = { width: 'Width in pixels', height: 'Height in pixels', percent: 'Percentage of original' };
+  type Mode = keyof typeof labels;
+
+  // Browsers may restore form state on back/forward navigation.
+  let shown = new FormData(form).get('mode') as Mode;
+  sizeLabel.textContent = labels[shown];
+  const sync = () => {
+    const next = new FormData(form).get('mode') as Mode;
+    // Pixels and percentages have different sensible defaults.
+    if ((next === 'percent') !== (shown === 'percent')) size.value = next === 'percent' ? '50' : '1600';
+    shown = next;
+    sizeLabel.textContent = labels[next];
+  };
+  form.addEventListener('change', (e) => {
+    if ((e.target as HTMLInputElement).name === 'mode') sync();
+  });
+
+  createTool({
+    async run(files, { signal, progress }) {
+      const data = new FormData(form);
+      const value = Number(data.get('size'));
+      const mode = data.get('mode') as Mode;
+      if (!Number.isFinite(value) || value <= 0) throw new UserError(`Enter a ${mode === 'percent' ? 'percentage' : 'size'} greater than 0.`);
+      const upscale = data.has('upscale');
+      const taken = new Set<string>();
+      const results: Result[] = [];
+      for (const [i, file] of files.entries()) {
+        throwIfAborted(signal);
+        progress(`Resizing ${file.name}`, i / files.length);
+        const { bitmap, type } = await decodeImage(file);
+        const sw = bitmap.width;
+        const sh = bitmap.height;
+        const scale = mode === 'width' ? value / sw : mode === 'height' ? value / sh : value / 100;
+        let w = Math.max(1, Math.round(sw * scale));
+        let h = Math.max(1, Math.round(sh * scale));
+        let note = `${sw} × ${sh} → ${w} × ${h} px`;
+        if (scale > 1 && !upscale) {
+          [w, h] = [sw, sh];
+          note = `Already smaller than the target, so kept at ${sw} × ${sh} px. Turn on “Allow upscaling” to enlarge.`;
+        }
+        let canvas: HTMLCanvasElement;
+        try {
+          canvas = drawImage(bitmap, w, h);
+        } finally {
+          bitmap.close();
+        }
+        const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : 0.9);
+        results.push({ name: uniqueName(file.name, taken), blob, inputSize: file.size, preview: true, note });
+      }
+      progress('Packing ZIP…');
+      return withZip(results, 'resized-images.zip');
+    },
+  });
+</script>

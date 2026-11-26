@@ -1,0 +1,89 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="pdf/split" accept="application/pdf,.pdf" action="Split PDF">
+  <p class="muted" data-pages aria-live="polite"></p>
+  <fieldset>
+    <legend>Mode</legend>
+    <div class="segmented">
+      <label><input type="radio" name="mode" value="each" checked /><span>Every page</span></label>
+      <label><input type="radio" name="mode" value="ranges" /><span>Custom ranges</span></label>
+      <label><input type="radio" name="mode" value="extract" /><span>Extract into one PDF</span></label>
+    </div>
+  </fieldset>
+  <label class="field" data-ranges hidden>
+    <span>Pages</span>
+    <input type="text" name="ranges" placeholder="e.g. 1-3, 5, 8-" autocomplete="off" />
+    <small class="muted" data-hint>Each range becomes its own PDF.</small>
+  </label>
+</ToolShell>
+
+<script>
+  import { zipSync } from 'fflate';
+  import { createTool, replaceExt, throwIfAborted, tick, UserError, type Result } from '../../lib/tool';
+  import { loadPdf, parseRanges, pdfBlob, SIGNATURE_NOTE } from '../../lib/pdf';
+
+  const MAX = 100 * 1024 * 1024;
+  const form = document.querySelector<HTMLFormElement>('[data-options]')!;
+  const rangesField = form.querySelector<HTMLElement>('[data-ranges]')!;
+  const hint = form.querySelector<HTMLElement>('[data-hint]')!;
+  const pagesInfo = form.querySelector<HTMLElement>('[data-pages]')!;
+
+  form.addEventListener('change', () => {
+    const mode = new FormData(form).get('mode');
+    rangesField.hidden = mode === 'each';
+    hint.textContent = mode === 'extract' ? 'Listed pages are combined into one PDF, in this order.' : 'Each range becomes its own PDF.';
+  });
+
+  createTool({
+    async onFilesChange(files) {
+      pagesInfo.textContent = '';
+      const f = files[0];
+      if (!f || f.size > MAX) return;
+      try {
+        const { doc, hasSignature } = await loadPdf(f);
+        if (files[0] !== f) return;
+        const n = doc.getPageCount();
+        pagesInfo.textContent = `${n} page${n === 1 ? '' : 's'}.` + (hasSignature ? ' Signed document: output copies will not carry valid signatures.' : '');
+      } catch (e) {
+        pagesInfo.textContent = e instanceof UserError ? e.message : '';
+      }
+    },
+    async run(files, { form, signal, progress }) {
+      const f = files[0];
+      if (f.size > MAX) throw new UserError('File exceeds 100 MB.');
+      const data = new FormData(form);
+      const mode = data.get('mode');
+      const { doc, hasSignature } = await loadPdf(f);
+      const count = doc.getPageCount();
+      let groups: number[][];
+      if (mode === 'each') groups = doc.getPageIndices().map((i) => [i]);
+      else {
+        groups = parseRanges(String(data.get('ranges')), count);
+        if (mode === 'extract') groups = [groups.flat()];
+      }
+
+      const { PDFDocument } = await import('@cantoo/pdf-lib');
+      const base = replaceExt(f.name, '').slice(0, -1);
+      const results: Result[] = [];
+      for (const [i, idx] of groups.entries()) {
+        throwIfAborted(signal);
+        progress(`Creating PDF ${i + 1} of ${groups.length}`, i / groups.length);
+        await tick();
+        const out = await PDFDocument.create();
+        for (const p of await out.copyPages(doc, idx)) out.addPage(p);
+        const label = idx.length === 1 ? `p${idx[0] + 1}` : `p${idx[0] + 1}-${idx[idx.length - 1] + 1}`;
+        const name = mode === 'extract' ? `${base}-extract.pdf` : `${base}-${label}.pdf`;
+        results.push({ name, blob: pdfBlob(await out.save({ useObjectStreams: true })) });
+      }
+      if (hasSignature) results[0].note = SIGNATURE_NOTE;
+      if (results.length > 1) {
+        progress('Packing ZIP…');
+        const entries: Record<string, [Uint8Array, { level: 0 }]> = {};
+        for (const r of results) entries[r.name] = [new Uint8Array(await r.blob.arrayBuffer()), { level: 0 }];
+        results.unshift({ name: `${base}-split.zip`, blob: new Blob([zipSync(entries) as BlobPart], { type: 'application/zip' }), note: `All ${results.length} PDFs` });
+      }
+      return results;
+    },
+  });
+</script>

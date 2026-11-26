@@ -1,0 +1,42 @@
+---
+import '../styles/global.css';
+import { categories, href } from '../tools';
+interface Props { title: string; description?: string; category?: string }
+const { title, description = 'Fast, private file tools that run in your browser.', category } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href={href('favicon.svg').replace(/\/$/, '')} type="image/svg+xml" />
+    <script is:inline src={href('theme.js').replace(/\/$/, '')}></script>
+  </head>
+  <body>
+    <a class="visually-hidden" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="inner">
+        <a class="brand" href={href()}><span class="brand-mark" aria-hidden="true">✦</span>Tools</a>
+        <nav class="site-nav" aria-label="Categories">
+          {categories.map((c) => <a href={href() + '#' + c.id} aria-current={category === c.id ? 'page' : undefined}>{c.label}</a>)}
+        </nav>
+        <button class="icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Toggle colour theme" title="Theme">◐</button>
+      </div>
+    </header>
+    <main id="main"><slot /></main>
+    <footer class="site-footer">
+      <div class="inner">
+        <span>Most tools run entirely in your browser. Cloud tools are clearly marked.</span>
+        <span><a href={href('privacy')}>Privacy</a> · <a href={href('settings')}>Settings</a></span>
+      </div>
+    </footer>
+    <script>
+      import { cycleTheme } from '../lib/prefs';
+      document.querySelector('[data-theme-toggle]')?.addEventListener('click', cycleTheme);
+    </script>
+  </body>
+</html>

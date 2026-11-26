@@ -1,0 +1,67 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="files/gzip" action="Start">
+  <fieldset>
+    <legend>Mode</legend>
+    <div class="segmented">
+      <label><input type="radio" name="mode" value="compress" checked /><span>Compress</span></label>
+      <label><input type="radio" name="mode" value="decompress" /><span>Decompress</span></label>
+    </div>
+    <small class="muted">Picked automatically from the file's contents; you can change it.</small>
+  </fieldset>
+</ToolShell>
+
+<script>
+  import { Gunzip, Gzip } from 'fflate';
+  import { createTool, formatBytes, sniff, throwIfAborted, UserError } from '../../lib/tool';
+
+  const MAX_INPUT = 200 * 1024 * 1024;
+  const MAX_OUTPUT = 500 * 1024 * 1024;
+
+  createTool({
+    validate: (f) => (f.size > MAX_INPUT ? `larger than ${formatBytes(MAX_INPUT)}.` : undefined),
+    async onFilesChange([file]) {
+      if (!file) return;
+      const mode = (await sniff(file)) === 'gzip' ? 'decompress' : 'compress';
+      document.querySelector<HTMLInputElement>(`input[name="mode"][value="${mode}"]`)!.checked = true;
+    },
+    async run([file], { form, signal, progress }) {
+      const compress = new FormData(form).get('mode') === 'compress';
+      if (!compress && (await sniff(file)) !== 'gzip') throw new UserError('This file is not gzip-compressed. Choose Compress instead.');
+
+      const chunks: Uint8Array[] = [];
+      let outSize = 0;
+      const ondata = (chunk: Uint8Array) => {
+        outSize += chunk.length;
+        if (outSize > MAX_OUTPUT) throw new UserError(`Decompressed data is larger than ${formatBytes(MAX_OUTPUT)}; stopped to protect your device.`);
+        chunks.push(chunk);
+      };
+      const stream = compress ? new Gzip({ mtime: file.lastModified }, ondata) : new Gunzip(ondata);
+
+      const reader = file.stream().getReader();
+      let read = 0;
+      try {
+        for (;;) {
+          throwIfAborted(signal);
+          const { done, value } = await reader.read();
+          if (done) break;
+          read += value.length;
+          stream.push(value);
+          progress(compress ? 'Compressing…' : 'Decompressing…', read / file.size);
+        }
+        stream.push(new Uint8Array(0), true);
+      } catch (err) {
+        reader.cancel().catch(() => {});
+        if (err instanceof UserError || (err instanceof DOMException && err.name === 'AbortError')) throw err;
+        // fflate throws plain errors for corrupt or truncated input.
+        if (!compress) throw new UserError('The gzip data is damaged or incomplete.');
+        throw err;
+      }
+
+      const name = compress ? `${file.name}.gz` : file.name.replace(/\.tgz$/i, '.tar').replace(/\.gz$/i, '');
+      const type = compress ? 'application/gzip' : 'application/octet-stream';
+      return [{ name, blob: new Blob(chunks as BlobPart[], { type }), inputSize: file.size }];
+    },
+  });
+</script>

@@ -1,0 +1,59 @@
+---
+import Base from '../layouts/Base.astro';
+import ModeBadge from '../components/ModeBadge.astro';
+import { categories, href, tools } from '../tools';
+---
+<Base title="Tools · fast, private file tools">
+  <section class="hero">
+    <h1>Quick file tools that respect your files.</h1>
+    <p>Convert, compress and edit images, PDFs, audio and text. Almost everything runs right here in your browser, so your files never leave your device.</p>
+    <div class="legend">
+      <ModeBadge mode="local" /> processed in your browser, never uploaded
+      <ModeBadge mode="cloud" /> uploaded to our EU server, asked first, not stored
+    </div>
+  </section>
+
+  <label class="visually-hidden" for="search">Search tools</label>
+  <input id="search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" data-search />
+
+  {categories.map((c) => (
+    <section class="category" id={c.id} data-category>
+      <h2>{c.label}</h2>
+      <ul class="tool-grid">
+        {tools.filter((t) => t.category === c.id).map((t) => (
+          <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
+            <a class="tool-card" href={href(t.slug)}>
+              <h3>{t.title}</h3>
+              <p>{t.summary}</p>
+              <ModeBadge mode={t.mode} />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))}
+  <p class="muted" data-empty hidden>No tool matches that search.</p>
+</Base>
+
+<script>
+  const search = document.querySelector<HTMLInputElement>('[data-search]')!;
+  const empty = document.querySelector<HTMLElement>('[data-empty]')!;
+  search.addEventListener('input', () => {
+    const terms = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const section of document.querySelectorAll<HTMLElement>('[data-category]')) {
+      let visible = 0;
+      for (const li of section.querySelectorAll<HTMLElement>('li[data-keywords]')) {
+        const match = terms.every((t) => li.dataset.keywords!.includes(t));
+        li.hidden = !match;
+        if (match) visible++;
+      }
+      section.hidden = visible === 0;
+      shown += visible;
+    }
+    empty.hidden = shown > 0;
+  });
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.querySelector<HTMLAnchorElement>('li[data-keywords]:not([hidden]) a')?.click();
+  });
+</script>

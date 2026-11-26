@@ -1,0 +1,75 @@
+---
+import ToolShell from '../../components/ToolShell.astro';
+---
+<ToolShell slug="pdf/from-images" multiple accept="image/jpeg,image/png" action="Create PDF">
+  <fieldset>
+    <legend>Page size</legend>
+    <div class="segmented">
+      <label><input type="radio" name="size" value="a4" checked /><span>A4</span></label>
+      <label><input type="radio" name="size" value="letter" /><span>Letter</span></label>
+      <label><input type="radio" name="size" value="fit" /><span>Fit image</span></label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Orientation</legend>
+    <div class="segmented">
+      <label><input type="radio" name="orientation" value="auto" checked /><span>Auto</span></label>
+      <label><input type="radio" name="orientation" value="portrait" /><span>Portrait</span></label>
+      <label><input type="radio" name="orientation" value="landscape" /><span>Landscape</span></label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Margin</legend>
+    <div class="segmented">
+      <label><input type="radio" name="margin" value="0" checked /><span>None</span></label>
+      <label><input type="radio" name="margin" value="18" /><span>Small</span></label>
+      <label><input type="radio" name="margin" value="54" /><span>Large</span></label>
+    </div>
+  </fieldset>
+</ToolShell>
+
+<script>
+  import { createTool, sniff, throwIfAborted, tick, UserError } from '../../lib/tool';
+  import { pdfBlob } from '../../lib/pdf';
+
+  const MAX_IMAGES = 100;
+  // PDF points (1/72 in).
+  const SIZES = { a4: [595.28, 841.89], letter: [612, 792] } as const;
+
+  createTool({
+    async run(files, { form, signal, progress }) {
+      if (files.length > MAX_IMAGES) throw new UserError(`Up to ${MAX_IMAGES} images per PDF.`);
+      const data = new FormData(form);
+      const size = String(data.get('size')) as 'a4' | 'letter' | 'fit';
+      const orientation = data.get('orientation');
+      const margin = Number(data.get('margin'));
+      const { PDFDocument } = await import('@cantoo/pdf-lib');
+      const pdf = await PDFDocument.create();
+      for (const [i, f] of files.entries()) {
+        throwIfAborted(signal);
+        progress(`Adding ${f.name}`, i / files.length);
+        await tick();
+        const kind = await sniff(f);
+        if (kind !== 'jpeg' && kind !== 'png') throw new UserError(`“${f.name}” is not a JPEG or PNG image.`);
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        let img;
+        try {
+          // JPEG bytes are embedded as-is (DCTDecode), so there is no quality loss.
+          img = kind === 'jpeg' ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes);
+        } catch {
+          throw new UserError(`“${f.name}” could not be read. It may be damaged or use an unsupported variant.`);
+        }
+        const landscape = orientation === 'landscape' || (orientation === 'auto' && img.width > img.height);
+        let [pw, ph]: number[] = size === 'fit' ? [img.width + 2 * margin, img.height + 2 * margin] : [...SIZES[size]];
+        if (size !== 'fit' && landscape) [pw, ph] = [ph, pw];
+        const scale = Math.min((pw - 2 * margin) / img.width, (ph - 2 * margin) / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        pdf.addPage([pw, ph]).drawImage(img, { x: (pw - w) / 2, y: (ph - h) / 2, width: w, height: h });
+      }
+      progress('Saving…');
+      const bytes = await pdf.save({ useObjectStreams: true });
+      return [{ name: 'images.pdf', blob: pdfBlob(bytes), inputSize: files.reduce((s, f) => s + f.size, 0) }];
+    },
+  });
+</script>

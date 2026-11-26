@@ -1,0 +1,9 @@
+---
+import Icon from './Icon.astro';
+import type { Mode } from '../tools';
+interface Props { mode: Mode }
+const { mode } = Astro.props;
+---
+{mode === 'local'
+  ? <span class="badge badge-local" title="Runs in your browser. Files never leave your device."><Icon name="device" />On your device</span>
+  : <span class="badge badge-cloud" title="Uploads your file to our server in the EU for processing."><Icon name="cloud" />Cloud · EU</span>}

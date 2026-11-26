@@ -1,0 +1,69 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="Settings · Tools">
+  <h1>Settings</h1>
+  <p class="muted">Saved in this browser only. Documents and upload consent are never saved.</p>
+  <form class="panel options" data-settings>
+    <fieldset>
+      <legend>Theme</legend>
+      <div class="segmented">
+        <label><input type="radio" name="theme" value="system" checked /><span>System</span></label>
+        <label><input type="radio" name="theme" value="light" /><span>Light</span></label>
+        <label><input type="radio" name="theme" value="dark" /><span>Dark</span></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Default image output</legend>
+      <div class="segmented">
+        <label><input type="radio" name="imageFormat" value="image/webp" checked /><span>WebP</span></label>
+        <label><input type="radio" name="imageFormat" value="image/jpeg" /><span>JPEG</span></label>
+        <label><input type="radio" name="imageFormat" value="image/png" /><span>PNG</span></label>
+      </div>
+    </fieldset>
+    <label class="field">
+      <span>Default image quality: <output name="qualityOut">82</output></span>
+      <input type="range" name="imageQuality" min="1" max="100" value="82" />
+    </label>
+    <div class="actions">
+      <button class="btn" type="button" data-reset>Reset preferences</button>
+      <span class="muted" data-saved role="status" aria-live="polite"></span>
+    </div>
+  </form>
+</Base>
+
+<script>
+  import { applyTheme, loadPrefs, resetPrefs, savePrefs, type Prefs } from '../lib/prefs';
+
+  const form = document.querySelector<HTMLFormElement>('[data-settings]')!;
+  const saved = document.querySelector<HTMLElement>('[data-saved]')!;
+  const quality = form.elements.namedItem('imageQuality') as HTMLInputElement;
+  const qualityOut = form.elements.namedItem('qualityOut') as HTMLOutputElement;
+
+  const fill = () => {
+    const p = loadPrefs();
+    form.querySelector<HTMLInputElement>(`[name=theme][value="${p.theme ?? 'system'}"]`)!.checked = true;
+    form.querySelector<HTMLInputElement>(`[name=imageFormat][value="${p.imageFormat ?? 'image/webp'}"]`)!.checked = true;
+    quality.value = String(p.imageQuality ?? 82);
+    qualityOut.value = quality.value;
+  };
+
+  form.addEventListener('input', () => {
+    const data = new FormData(form);
+    const prefs: Prefs = {
+      theme: data.get('theme') as Prefs['theme'],
+      imageFormat: data.get('imageFormat') as Prefs['imageFormat'],
+      imageQuality: Number(data.get('imageQuality')),
+    };
+    savePrefs(prefs);
+    applyTheme(prefs.theme);
+    qualityOut.value = quality.value;
+    saved.textContent = 'Saved.';
+  });
+  form.querySelector('[data-reset]')!.addEventListener('click', () => {
+    resetPrefs();
+    fill();
+    saved.textContent = 'Preferences reset.';
+  });
+  fill();
+</script>
