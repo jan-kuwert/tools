@@ -5,20 +5,25 @@ export interface Tool {
   slug: string; // path below base, e.g. "images/convert"
   category: Category;
   title: string;
-  /** Tab label on the home hub. */
+  /** Short label (picker rows, compact UI). */
   short: string;
   summary: string;
   mode: Mode;
   /** Shown before file selection. */
   limits: string;
+  /** Mode of the category app that covers this tool (`<app>/?mode=<appMode>`); omitted = the app's default. */
+  appMode?: string;
 }
 
-/** `tabs`: tool slugs in hub tab order; the first is the default. */
-export const categories: { id: Category; label: string; blurb: string; tabs: string[] }[] = [
-  { id: 'images', label: 'Images', blurb: 'Edit, resize, convert and compress photos and graphics.', tabs: ['images/editor'] },
-  { id: 'pdf', label: 'PDF', blurb: 'Merge, split, reorder and optimize PDF documents.', tabs: ['pdf/organize', 'pdf/merge', 'pdf/split', 'pdf/from-images', 'pdf/compress'] },
-  { id: 'audio', label: 'Audio', blurb: 'Trim, convert and shrink recordings and music.', tabs: ['audio/convert'] },
-  { id: 'files', label: 'Files & text', blurb: 'Archives, compression, JSON and JavaScript.', tabs: ['text/json', 'text/js-minify', 'files/zip', 'files/gzip'] },
+/**
+ * Each category has one integrated app page shown full screen on its hub screen (`app` = page slug).
+ * Individual tool pages stay available standalone; the hub opens the app in the matching mode instead.
+ */
+export const categories: { id: Category; label: string; blurb: string; app: string }[] = [
+  { id: 'images', label: 'Images', blurb: 'Edit, resize, convert and compress photos and graphics.', app: 'images/editor' },
+  { id: 'pdf', label: 'PDF', blurb: 'View, merge, split, reorder and optimize PDF documents.', app: 'pdf' },
+  { id: 'audio', label: 'Audio', blurb: 'Trim, convert and shrink recordings and music.', app: 'audio/convert' },
+  { id: 'files', label: 'Files & text', blurb: 'Archives, compression, JSON and JavaScript.', app: 'files' },
 ];
 
 export const tools: Tool[] = [
@@ -60,6 +65,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'pdf/merge',
+    appMode: 'merge',
     category: 'pdf',
     title: 'Merge PDFs',
     short: 'Merge',
@@ -69,6 +75,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'pdf/split',
+    appMode: 'split',
     category: 'pdf',
     title: 'Split & extract pages',
     short: 'Split',
@@ -78,6 +85,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'pdf/organize',
+    appMode: 'organize',
     category: 'pdf',
     title: 'Reorder, rotate & delete pages',
     short: 'Organize',
@@ -87,6 +95,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'pdf/from-images',
+    appMode: 'from-images',
     category: 'pdf',
     title: 'Images to PDF',
     short: 'Images to PDF',
@@ -96,6 +105,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'pdf/compress',
+    appMode: 'compress',
     category: 'pdf',
     title: 'Optimize PDF',
     short: 'Optimize',
@@ -114,6 +124,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'files/zip',
+    appMode: 'zip',
     category: 'files',
     title: 'Create ZIP',
     short: 'ZIP',
@@ -123,6 +134,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'files/gzip',
+    appMode: 'gzip',
     category: 'files',
     title: 'Gzip / gunzip',
     short: 'Gzip',
@@ -132,6 +144,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'text/json',
+    appMode: 'json',
     category: 'files',
     title: 'Format & minify JSON',
     short: 'JSON',
@@ -141,6 +154,7 @@ export const tools: Tool[] = [
   },
   {
     slug: 'text/js-minify',
+    appMode: 'js',
     category: 'files',
     title: 'Minify JavaScript',
     short: 'JavaScript',

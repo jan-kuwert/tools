@@ -1,0 +1,425 @@
+---
+// PDF category app: viewer-style workspace (organize, merge, split, images to PDF, optimize). Behaviour: src/lib/pdf-app.ts.
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import ModeBadge from '../../components/ModeBadge.astro';
+import ProgressDial from '../../components/ProgressDial.astro';
+import { categories, href, tools } from '../../tools';
+
+const category = categories.find((c) => c.id === 'pdf')!;
+const modeTool = (id: string) => tools.find((t) => t.category === 'pdf' && t.appMode === id)!;
+const modes = [
+  { id: 'organize', icon: 'grid', label: 'Organize', action: 'Save PDF' },
+  { id: 'merge', icon: 'pages', label: 'Merge', action: 'Merge' },
+  { id: 'split', icon: 'scissor', label: 'Split', action: 'Split' },
+  { id: 'from-images', icon: 'images', label: 'Images to PDF', action: 'Create PDF' },
+  { id: 'compress', icon: 'compress', label: 'Optimize', action: 'Optimize' },
+] as const;
+const accept = 'application/pdf,.pdf,image/jpeg,image/png';
+---
+<Base title="PDF · Tools" description={category.blurb}>
+  <div class="tool-shell" data-wide>
+    <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#pdf'}>PDF</a></div>
+    <div class="tool-head">
+      <h1>PDF</h1>
+      <ModeBadge mode="local" />
+    </div>
+    <p class="tool-summary">{category.blurb}</p>
+    <div class="privacy-note privacy-local" role="note">
+      <Icon name="lock" />
+      <p><strong>Runs in your browser; nothing is uploaded.</strong> <a href={href('privacy')}>How we check</a></p>
+    </div>
+
+    <section class="pdf-app" data-pdf-app data-empty aria-label="PDF">
+      <header class="pa-tb">
+        <div class="pa-title"><Icon name="pdf" /><span>PDF</span><ModeBadge mode="local" /></div>
+        <button class="pa-tool" type="button" data-open title="Open or add PDFs and images"><Icon name="plus" /><span class="pa-tool-label">Add</span></button>
+        <div class="pa-modes" role="radiogroup" aria-label="Mode">
+          {modes.map((m) => (
+            <label title={modeTool(m.id).summary}>
+              <input type="radio" name="pa-mode" value={m.id} data-action={m.action} checked={m.id === 'organize'} />
+              <span><Icon name={m.icon} />{m.label}</span>
+            </label>
+          ))}
+        </div>
+        <div class="pa-group" data-pdf-only>
+          <button class="pa-tool" type="button" data-zoom-out aria-label="Zoom out" title="Zoom out"><Icon name="zoom-out" /></button>
+          <select class="pa-select" data-zoom aria-label="Zoom">
+            <option value="width">Fit width</option>
+            <option value="page">Fit page</option>
+            {[25, 50, 75, 100, 125, 150, 200, 300, 400].map((z) => <option value={z / 100}>{z}%</option>)}
+          </select>
+          <button class="pa-tool" type="button" data-zoom-in aria-label="Zoom in" title="Zoom in"><Icon name="zoom-in" /></button>
+        </div>
+        <div class="pa-group pa-pageno">
+          <input type="number" min="1" value="1" inputmode="numeric" data-page aria-label="Page number" />
+          <span>/ <span data-page-count>0</span></span>
+        </div>
+        <div class="pa-end">
+          <button class="btn btn-primary" type="button" data-run disabled><span data-run-label>Save PDF</span></button>
+          <button class="btn" type="button" data-download disabled title="Create the file and download it"><Icon name="download" /><span class="pa-tool-label">Download</span></button>
+          <button class="pa-tool" type="button" data-close-all disabled aria-label="Close all files" title="Close all files"><Icon name="xmark" /></button>
+        </div>
+      </header>
+
+      <div class="pa-msg" data-msg hidden>
+        <p data-msg-text role="status" aria-live="polite"></p>
+        <button class="pa-tool" type="button" data-msg-close aria-label="Dismiss message"><Icon name="xmark" /></button>
+      </div>
+
+      <div class="pa-body">
+        <aside class="pa-side" data-side aria-label="Pages">
+          <div data-docs></div>
+          <ol class="pa-list" data-images role="listbox" aria-multiselectable="true" aria-label="Images, in page order"></ol>
+          <p class="pa-hint">Arrow keys move, Shift selects a range, Alt+arrows reorder, R rotates, Delete deletes.</p>
+        </aside>
+
+        <div class="pa-main">
+          <div class="pa-view" data-view tabindex="0" aria-label="Page view">
+            <div class="pa-pages" data-pages></div>
+          </div>
+          <label class="pa-empty" data-empty-state>
+            <span class="pa-ph" aria-hidden="true"><Icon name="pdf" /></span>
+            <span class="pa-empty-title" data-empty-title>Drop PDFs or images, or choose files</span>
+            <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
+            <span class="pa-empty-hint">PDFs, or JPEG and PNG images to turn into a PDF. You can also paste from the clipboard.</span>
+            <input class="visually-hidden" type="file" accept={accept} multiple data-input />
+          </label>
+          <div class="pa-busy" data-busy hidden>
+            <ProgressDial data-dial />
+            <p data-busy-text role="status" aria-live="polite"></p>
+            <button class="btn" type="button" data-busy-cancel>Cancel</button>
+          </div>
+          <section class="pa-results" data-results hidden aria-labelledby="pa-results-title">
+            <header>
+              <h2 id="pa-results-title" data-results-title>Result</h2>
+              <button class="pa-tool" type="button" data-results-close aria-label="Close results" title="Close"><Icon name="xmark" /></button>
+            </header>
+            <ul data-result-list></ul>
+          </section>
+        </div>
+
+        <aside class="pa-insp" aria-label="Options">
+          <p class="pa-doc-line" data-doc-line></p>
+
+          <section data-panel="organize">
+            <h2>Pages</h2>
+            <p class="pa-note" data-sel-info></p>
+            <div class="pa-actions">
+              <button class="btn" type="button" data-act="rotate-left"><Icon name="rotate-left" />Rotate left</button>
+              <button class="btn" type="button" data-act="rotate-right"><Icon name="rotate-right" />Rotate right</button>
+              <button class="btn" type="button" data-act="up"><Icon name="arrow-up" />Move up</button>
+              <button class="btn" type="button" data-act="down"><Icon name="arrow-down" />Move down</button>
+              <button class="btn" type="button" data-act="delete"><Icon name="trash" /><span data-label>Delete</span></button>
+              <button class="btn" type="button" data-act="select-all"><Icon name="grid" />Select all</button>
+            </div>
+            <h2>Document</h2>
+            <div class="pa-actions">
+              <button class="btn" type="button" data-act="reverse"><Icon name="reverse" />Reverse</button>
+              <button class="btn" type="button" data-act="reset"><Icon name="restart" />Reset</button>
+            </div>
+            <p class="pa-note">Changes here also apply when you merge, split or optimize.</p>
+          </section>
+
+          <section data-panel="merge">
+            <h2>Merge</h2>
+            <p class="pa-note" data-merge-info></p>
+            <p class="pa-note">Documents are combined in sidebar order; reorder them with the arrows next to each name. Deleted pages are left out. Bookmarks and form fields may not be preserved.</p>
+          </section>
+
+          <section data-panel="split">
+            <h2>Split</h2>
+            <form class="pa-form" data-split-form>
+              <fieldset>
+                <legend>Output</legend>
+                <div class="segmented pa-seg">
+                  <label><input type="radio" name="split" value="each" checked /><span>Every page</span></label>
+                  <label><input type="radio" name="split" value="ranges" /><span>Ranges</span></label>
+                  <label><input type="radio" name="split" value="extract" /><span>Extract</span></label>
+                </div>
+              </fieldset>
+              <label class="field" data-ranges-field hidden>
+                <span>Pages</span>
+                <input type="text" name="ranges" placeholder="e.g. 1-3, 5, 8-" autocomplete="off" aria-describedby="pa-split-info" />
+              </label>
+              <button class="btn" type="button" data-use-selection hidden>Use selected pages</button>
+              <p class="pa-note" id="pa-split-info" data-split-info aria-live="polite"></p>
+            </form>
+          </section>
+
+          <section data-panel="from-images">
+            <h2>Images to PDF</h2>
+            <form class="pa-form" data-img-form>
+              <fieldset>
+                <legend>Page size</legend>
+                <div class="segmented pa-seg">
+                  <label><input type="radio" name="size" value="a4" checked /><span>A4</span></label>
+                  <label><input type="radio" name="size" value="letter" /><span>Letter</span></label>
+                  <label><input type="radio" name="size" value="fit" /><span>Fit image</span></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Orientation</legend>
+                <div class="segmented pa-seg">
+                  <label><input type="radio" name="orientation" value="auto" checked /><span>Auto</span></label>
+                  <label><input type="radio" name="orientation" value="portrait" /><span>Portrait</span></label>
+                  <label><input type="radio" name="orientation" value="landscape" /><span>Landscape</span></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Margin</legend>
+                <div class="segmented pa-seg">
+                  <label><input type="radio" name="margin" value="0" checked /><span>None</span></label>
+                  <label><input type="radio" name="margin" value="18" /><span>Small</span></label>
+                  <label><input type="radio" name="margin" value="54" /><span>Large</span></label>
+                </div>
+              </fieldset>
+            </form>
+            <p class="pa-note" data-img-info></p>
+            <div class="pa-actions">
+              <button class="btn" type="button" data-act="up"><Icon name="arrow-up" />Move up</button>
+              <button class="btn" type="button" data-act="down"><Icon name="arrow-down" />Move down</button>
+              <button class="btn" type="button" data-act="reverse"><Icon name="reverse" />Reverse</button>
+              <button class="btn" type="button" data-act="delete"><Icon name="trash" />Remove</button>
+            </div>
+          </section>
+
+          <section data-panel="compress">
+            <h2>Optimize</h2>
+            <p class="pa-note">Lossless: streams are recompressed and objects packed. Images and text are not altered, so savings vary. If nothing gets smaller, you get the original back.</p>
+            <dl class="pa-dl" data-compress-info></dl>
+          </section>
+
+          <p class="warn-box" data-sig hidden>This PDF is digitally signed. Signatures will not be valid in the new copy.</p>
+          {modes.map((m) => <p class="pa-limits" data-limits={m.id}>{modeTool(m.id).limits}</p>)}
+          <p class="visually-hidden" data-announce aria-live="polite"></p>
+        </aside>
+      </div>
+
+      <template data-icons>
+        <Icon name="chevron" class="i-chevron" />
+        <Icon name="arrow-up" class="i-up" />
+        <Icon name="arrow-down" class="i-down" />
+        <Icon name="xmark" class="i-close" />
+        <Icon name="download" class="i-download" />
+        <Icon name="open" class="i-open" />
+      </template>
+    </section>
+  </div>
+</Base>
+
+<style is:global>
+  .pdf-app {
+    --pa-w: min(100vw - 2rem, 1440px);
+    --stage: light-dark(#e6e7eb, #141518);
+    --paper-shadow: 0 1px 2px rgb(0 0 0 / 0.16), 0 4px 16px rgb(0 0 0 / 0.1);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: var(--pa-w);
+    height: clamp(600px, calc(100dvh - 120px), 1000px);
+    margin: 1.5rem calc((100% - var(--pa-w)) / 2) 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .pdf-app .icon svg { width: 18px; height: 18px; }
+  .pdf-app h2 { margin: 0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+
+  /* Toolbar */
+  .pa-tb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); }
+  .pa-title { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.5rem 0 0.3rem; font-weight: 700; font-size: 1rem; }
+  .pa-title > .icon { color: var(--accent); }
+  .pa-title .mode { margin-left: 0.15rem; }
+  .pa-title .mode::after { left: -6px; right: auto; }
+  .pa-group { display: flex; align-items: center; gap: 0.1rem; }
+  .pa-tool {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-width: 34px; height: 34px; padding: 0 0.5rem;
+    border: 0; border-radius: 8px; background: transparent; color: var(--fg); font: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .pa-tool:hover:not(:disabled) { background: var(--surface-2); }
+  .pa-tool:disabled { opacity: 0.4; cursor: default; }
+  .pa-select, .pa-pageno input { height: 34px; padding: 0 0.45rem; border-radius: 8px; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+  .pa-pageno { gap: 0.4rem; font-size: 0.86rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pa-pageno input { width: 4.2rem; text-align: right; }
+  .pa-modes { display: flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-2); }
+  .pa-modes label { position: relative; }
+  .pa-modes input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .pa-modes span { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.55rem; border-radius: 8px; color: var(--muted); font-size: 0.86rem; font-weight: 600; white-space: nowrap; }
+  .pa-modes input:checked + span { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / 0.14); }
+  .pa-modes input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .pa-end { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+  .pa-end .btn { padding: 0.4rem 0.9rem; font-size: 0.88rem; }
+  .pdf-app[data-mode='from-images'] [data-pdf-only] { display: none; }
+
+  .pa-msg { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.6rem 0.35rem 1rem; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 0.88rem; }
+  .pa-msg p { flex: 1; margin: 0; white-space: pre-line; }
+  .pa-msg[data-kind='error'] { background: color-mix(in srgb, var(--error) 10%, var(--surface)); color: var(--error); }
+  .pa-msg[data-kind='error'] .pa-tool { color: inherit; }
+
+  .pa-body { flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr) 300px; min-height: 0; }
+  .pdf-app[data-empty] .pa-body { grid-template-columns: minmax(0, 1fr) 300px; }
+  .pdf-app[data-empty] .pa-side { display: none; }
+
+  /* Sidebar */
+  .pa-side { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem; border-right: 1px solid var(--border); }
+  .pa-hint { margin: 0.5rem 0.25rem; font-size: 0.75rem; color: var(--muted); }
+  .pdf-app[data-mode='from-images'] .pa-hint { display: none; }
+  .pdf-app[data-mode='from-images'] [data-docs], .pdf-app:not([data-mode='from-images']) [data-images] { display: none; }
+  .pa-doc + .pa-doc { margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid var(--border); }
+  .pa-doc-head { display: flex; align-items: center; }
+  .pa-doc-head .pa-tool { min-width: 26px; height: 26px; padding: 0; color: var(--muted); }
+  .pa-doc-head .icon svg { width: 15px; height: 15px; }
+  .pa-doc-toggle {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.25rem; padding: 0.25rem; border: 0; border-radius: 6px;
+    background: none; color: var(--fg); font: inherit; font-size: 0.8rem; font-weight: 650; text-align: left; cursor: pointer;
+  }
+  .pa-doc-toggle:hover { background: var(--surface-2); }
+  .pa-doc-toggle .icon { transition: transform 0.15s; }
+  .pa-doc-toggle[aria-expanded='false'] .icon { transform: rotate(-90deg); }
+  .pa-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pa-doc-count { flex: none; color: var(--muted); font-weight: 500; }
+  .pa-doc[data-active] .pa-doc-name { color: var(--accent); }
+  .pa-list { list-style: none; margin: 0; padding: 0.25rem 0; display: grid; gap: 0.25rem; }
+  .pa-thumb { display: grid; justify-items: center; gap: 0.25rem; padding: 0.45rem 0.4rem 0.3rem; border-radius: 10px; border: 2px solid transparent; cursor: pointer; }
+  .pa-thumb:hover { background: var(--surface-2); }
+  .pa-thumb[aria-selected='true'] { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .pa-thumb:focus-visible { outline: 3px solid var(--accent); outline-offset: 0; }
+  .pa-thumb.dragging { opacity: 0.4; }
+  .pa-thumb.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+  .pa-thumb.drop-after { box-shadow: 0 3px 0 var(--accent); }
+  /* Square box: a page rotated by 90° still fits, so rotating never shifts the list. */
+  .pa-thumb-box { display: grid; place-items: center; width: 128px; max-width: 100%; aspect-ratio: 1; }
+  .pa-art { display: grid; place-items: center; width: 100%; height: 100%; transition: transform 0.2s; }
+  .pa-art > * { display: block; max-width: 100%; max-height: 100%; background: #fff; box-shadow: var(--paper-shadow); }
+  .pa-art img { image-orientation: none; object-fit: contain; }
+  .pa-paper[data-failed]::after { content: 'No preview'; display: grid; place-items: center; height: 100%; color: #6b6f76; font-size: 0.7rem; }
+  .pa-thumb-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pa-thumb[aria-current='true'] .pa-thumb-label { color: var(--accent); }
+  .pa-thumb[data-deleted] .pa-art { opacity: 0.3; filter: grayscale(1); }
+  .pa-thumb[data-deleted] .pa-thumb-label { color: var(--muted); text-decoration: line-through; }
+
+  /* Main view */
+  .pa-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--stage); }
+  .pa-view { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+  .pa-view:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 0; }
+  .pa-pages { display: flex; flex-direction: column; align-items: center; gap: 18px; width: max-content; min-width: 100%; padding: 22px; }
+  .pa-page { position: relative; flex: none; background: #fff; box-shadow: var(--paper-shadow); }
+  .pa-page > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pa-page > img { position: absolute; image-orientation: none; object-fit: fill; }
+  .pa-page[data-selected] { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 4px; }
+  .pa-page[data-deleted] > * { opacity: 0.3; filter: grayscale(1); }
+  .pa-page[data-deleted]::after {
+    content: 'Deleted'; position: absolute; top: 12px; left: 50%; translate: -50% 0; padding: 0.2rem 0.6rem; border-radius: 999px;
+    background: var(--fg); color: var(--bg); font-size: 0.78rem; font-weight: 650;
+  }
+  .pa-page[data-failed]::before { content: 'No preview'; position: absolute; inset: 0; display: grid; place-items: center; color: #6b6f76; font-size: 0.9rem; }
+  .pdf-app[data-empty] .pa-view, .pdf-app:not([data-empty]) .pa-empty { display: none; }
+
+  .pa-empty {
+    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
+    padding: 1rem; border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+  .pa-empty:hover, .pdf-app.pa-over .pa-empty { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .pa-empty:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .pa-ph { display: grid; place-items: center; width: 96px; height: 120px; margin-bottom: 0.25rem; border-radius: 6px; background: var(--surface); box-shadow: var(--paper-shadow); color: var(--muted); }
+  .pdf-app .pa-ph .icon svg { width: 40px; height: 40px; }
+  .pa-empty-title { font-size: 1.15rem; font-weight: 650; }
+  .pa-empty-hint { max-width: 36ch; font-size: 0.85rem; color: var(--muted); }
+  .pdf-app.pa-over .pa-main { box-shadow: inset 0 0 0 3px var(--accent); }
+
+  .pa-busy {
+    position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
+    background: color-mix(in srgb, var(--stage) 80%, transparent); backdrop-filter: blur(2px); text-align: center;
+  }
+  .pa-busy p { margin: 0; font-weight: 600; }
+
+  /* Results drawer along the bottom of the view */
+  .pa-results { flex: none; max-height: 45%; overflow-y: auto; padding: 0.5rem 0.75rem 0.75rem; background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -6px 20px rgb(0 0 0 / 0.08); }
+  .pa-results header { display: flex; align-items: center; justify-content: space-between; }
+  .pa-results ul { list-style: none; display: grid; gap: 0.35rem; margin: 0.25rem 0 0; padding: 0; }
+  .pa-results li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; padding: 0.4rem 0.4rem 0.4rem 0.75rem; border-radius: 10px; background: var(--surface-2); }
+  .pa-res-body { flex: 1; min-width: 12rem; }
+  .pa-res-body p { margin: 0; font-size: 0.85rem; }
+  .pa-res-name { font-weight: 650; word-break: break-all; }
+  .pa-res-meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pa-res-meta[data-warn] { color: var(--cloud); }
+  .pa-res-note { color: var(--muted); }
+  .pa-results .btn { padding: 0.35rem 0.75rem; font-size: 0.85rem; }
+  .pa-res-actions { display: flex; gap: 0.35rem; }
+
+  /* Inspector */
+  .pa-insp { display: grid; align-content: start; gap: 0.9rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 1rem; border-left: 1px solid var(--border); font-size: 0.9rem; }
+  .pa-insp section { display: grid; gap: 0.6rem; }
+  .pdf-app:not([data-mode='organize']) [data-panel='organize'], .pdf-app:not([data-mode='merge']) [data-panel='merge'],
+  .pdf-app:not([data-mode='split']) [data-panel='split'], .pdf-app:not([data-mode='from-images']) [data-panel='from-images'],
+  .pdf-app:not([data-mode='compress']) [data-panel='compress'] { display: none; }
+  .pdf-app[data-empty] .pa-insp :is([data-panel='organize'], [data-panel='merge'], .pa-actions, [data-use-selection]) { display: none; }
+  .pa-doc-line { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+  .pa-doc-line:empty { display: none; }
+  .pa-note { margin: 0; font-size: 0.84rem; color: var(--muted); }
+  .pa-note:empty { display: none; }
+  .pa-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+  .pa-actions .btn { justify-content: flex-start; padding: 0.45rem 0.6rem; font-size: 0.84rem; }
+  .pa-actions .btn .icon svg { width: 16px; height: 16px; }
+  .pa-form { display: grid; gap: 0.75rem; }
+  .pa-form .btn { padding: 0.45rem 0.6rem; font-size: 0.84rem; }
+  .pa-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .pa-form legend, .pa-form .field > span { padding: 0; margin-bottom: 0.35rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .pa-form .field { gap: 0; }
+  .pa-seg { display: flex; }
+  .pa-seg label { flex: 1; text-align: center; }
+  .pa-seg span { padding: 0.3rem 0.4rem; font-size: 0.84rem; }
+  .pa-dl { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0; padding: 0.5rem 0.7rem; border-radius: 10px; background: var(--surface-2); font-variant-numeric: tabular-nums; }
+  .pa-dl:empty { display: none; }
+  .pa-dl dt { color: var(--muted); }
+  .pa-dl dd { margin: 0; text-align: right; font-weight: 600; }
+  .pa-insp .warn-box { margin: 0; }
+  .pa-limits { margin: 0; font-size: 0.8rem; color: var(--muted); }
+  .pdf-app[data-mode='organize'] .pa-limits:not([data-limits='organize']), .pdf-app[data-mode='merge'] .pa-limits:not([data-limits='merge']),
+  .pdf-app[data-mode='split'] .pa-limits:not([data-limits='split']), .pdf-app[data-mode='from-images'] .pa-limits:not([data-limits='from-images']),
+  .pdf-app[data-mode='compress'] .pa-limits:not([data-limits='compress']) { display: none; }
+
+  @media (max-width: 1360px) { .pa-modes span .icon { display: none; } }
+  @media (max-width: 1180px) {
+    .pa-body { grid-template-columns: 180px minmax(0, 1fr) 260px; }
+    .pdf-app[data-empty] .pa-body { grid-template-columns: minmax(0, 1fr) 260px; }
+    .pa-thumb-box { width: 104px; }
+  }
+  @media (max-width: 860px) {
+    .pdf-app { height: auto; }
+    .pa-body, .pdf-app[data-empty] .pa-body { grid-template-columns: minmax(0, 1fr); align-content: start; }
+    .pa-main { order: 1; height: clamp(320px, 62dvh, 640px); }
+    .pdf-app[data-empty] .pa-main { height: clamp(300px, 50dvh, 480px); }
+    .pa-side { order: 2; max-height: 260px; border-right: 0; border-top: 1px solid var(--border); }
+    .pa-side .pa-list { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+    .pa-thumb-box { width: 72px; }
+    .pa-hint { display: none; }
+    .pa-insp { order: 3; border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
+    .pa-modes { order: 9; flex-basis: 100%; overflow-x: auto; }
+    .pa-modes span .icon { display: inline-flex; }
+    .pa-tool-label { display: none; }
+  }
+  @media (max-width: 480px) {
+    .pdf-app { --pa-w: calc(100vw - 1rem); border-radius: 10px; }
+    .pa-title .mode { display: none; }
+    .pa-tb { gap: 0.3rem; }
+    .pa-pageno input { width: 3.2rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { .pa-art, .pa-doc-toggle .icon { transition: none; } }
+
+  /* Embedded in the home hub: the app is the whole frame, edge to edge. */
+  :root[data-embed] main#main:has(.pdf-app) { width: 100%; padding: 0; }
+  :root[data-embed] .tool-shell:has(.pdf-app) > :not(.pdf-app) { display: none; }
+  :root[data-embed] .pdf-app { width: 100%; height: 100dvh; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+  @media (max-width: 860px) { :root[data-embed] .pdf-app { height: auto; min-height: 100dvh; } }
+</style>
+
+<script>
+  import { initPdfApp } from '../../lib/pdf-app';
+
+  initPdfApp();
+</script>

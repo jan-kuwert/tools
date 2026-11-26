@@ -6,7 +6,7 @@ interface Props { mode: Mode; /** Show the short text label next to the icon. */
 const { mode, label = false } = Astro.props;
 const info =
   mode === 'local'
-    ? { icon: 'device' as const, name: 'On your device', tip: 'Runs in your browser. Your files never leave your device.' }
+    ? { icon: 'device' as const, name: 'On your device', tip: 'Runs in your browser; nothing is uploaded.' }
     : { icon: 'cloud' as const, name: 'Cloud · EU', tip: 'Uploads your file to our server in Belgium (EU) for processing, only after you confirm. Nothing is stored.' };
 ---
 <span class="mode" data-tip={info.tip} role="img" aria-label={`${info.name}. ${info.tip}`}>

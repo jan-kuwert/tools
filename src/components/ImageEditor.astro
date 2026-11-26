@@ -1,6 +1,7 @@
 ---
 // Image editor markup. Behaviour: initImageEditor() in src/lib/editor.ts. Include at most once per page.
 import Icon from './Icon.astro';
+import ModeBadge from './ModeBadge.astro';
 import ProgressDial from './ProgressDial.astro';
 import { choiceLabel, RATIOS, SCALES, SIZES } from '../lib/editor';
 
@@ -12,6 +13,9 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   <form class="ie-body" data-form>
     <div class="ie-main">
       <div class="ie-tb" role="toolbar" aria-label="Image tools">
+        <div class="ie-tb-group ie-title">
+          <Icon name="images" /><h2>Images</h2><ModeBadge mode="local" />
+        </div>
         <div class="ie-tb-group">
           <label class="ie-tool" title="Add images">
             <Icon name="plus" /><span class="ie-tool-label">Add</span>
@@ -191,6 +195,12 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .ie-tb-group { display: flex; align-items: center; gap: 0.15rem; padding: 0 0.45rem; }
   .ie-tb-group + .ie-tb-group { border-left: 1px solid var(--stage-line); }
   .ie-tb-end { margin-left: auto; }
+  /* Own title only when embedded in the hub; the standalone page has its h1. */
+  :root:not([data-embed]) .ie-title { display: none; }
+  :root:not([data-embed]) .ie-title + .ie-tb-group { border-left: 0; }
+  .ie-title { gap: 0.45rem; padding-left: 0.35rem; padding-right: 0.75rem; }
+  .ie-title h2 { margin: 0; font-size: 0.98rem; font-weight: 650; white-space: nowrap; }
+  .ie-title .mode::after { left: -6px; right: auto; }
   .ie-tool {
     display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-width: 34px; height: 34px; padding: 0 0.5rem;
     border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer; white-space: nowrap;

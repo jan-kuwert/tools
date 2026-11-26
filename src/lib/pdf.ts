@@ -13,7 +13,7 @@ export async function loadPdf(file: Blob & { name?: string }): Promise<LoadedPdf
   const { PDFDocument, PDFName, PDFNumber, PDFDict, PDFSignature } = await import('@cantoo/pdf-lib');
   let doc: PDFDocument;
   try {
-    doc = await PDFDocument.load(await file.arrayBuffer(), { updateMetadata: false });
+    doc = await PDFDocument.load(await file.arrayBuffer(), { updateMetadata: false, ignoreEncryption: true });
   } catch {
     throw new UserError(`${label} could not be read. It may be damaged.`);
   }

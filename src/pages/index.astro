@@ -2,37 +2,26 @@
 import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import ModeBadge from '../components/ModeBadge.astro';
-import { categories, href, toolBySlug, type Category, type Tool } from '../tools';
+import { categories, href, tools, type Category, type Tool } from '../tools';
 
 type Dir = 'n' | 'e' | 's' | 'w';
-type Screen = Category | 'centre';
-// Navigation graph: from any screen, the edges lead to all other screens one move away, never to an empty one.
-const graph: Record<Screen, Partial<Record<Dir, Screen>>> = {
-  centre: { n: 'files', e: 'pdf', s: 'images', w: 'audio' },
-  audio: { n: 'files', e: 'centre', s: 'images' },
-  pdf: { n: 'files', s: 'images', w: 'centre' },
-  images: { n: 'centre', e: 'pdf', w: 'audio' },
-  files: { e: 'pdf', s: 'centre', w: 'audio' },
-};
-const labelOf = (s: Screen) => (s === 'centre' ? 'Start' : categories.find((x) => x.id === s)!.label);
-const iconOf = (s: Screen) => (s === 'centre' ? 'home' : s);
-const toolIcon = (t: Tool) => (t.slug.startsWith('text/') ? 'code' : t.category);
-const tabKey = (slug: string) => slug.split('/')[1];
+// Each category screen sits one move away from the start screen; from a category the only way is back to the start.
+const placement: Record<Category, Dir> = { files: 'n', pdf: 'e', images: 's', audio: 'w' };
+const OPPOSITE: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' };
 const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left' } as const;
-const dirFromCentre = (c: Category) => (Object.entries(graph.centre) as [Dir, Screen][]).find(([, to]) => to === c)![0];
-const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
+const toolIcon = (t: Tool) => (t.slug.startsWith('text/') ? 'code' : t.category);
+const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
 ---
 <Base title="Tools · fast, private file tools" wide>
 <div class="home" data-at="centre">
   <div class="hub" data-hub tabindex="-1" role="region" aria-label="Tools. Press question mark for keyboard shortcuts.">
-    <section class="screen screen-centre" data-screen="centre" {...Object.fromEntries(edgesOf('centre').map(([d, to]) => [`data-${d}`, to]))} aria-label="Start">
+    <section class="screen screen-centre" data-screen="centre" {...Object.fromEntries(categories.map((c) => [`data-${placement[c.id]}`, c.id]))} aria-label="Start">
       <div class="cell-scroll">
         <div class="cell-inner centre-inner">
-          <h1>Quick file tools that respect your privacy.</h1>
-          <p class="lede">Almost everything runs right here in your browser. Your files never leave your device.</p>
+          <h1>A collection of tools that respect your privacy.</h1>
           <nav class="jump" aria-label="Categories">
             {categories.map((c) => (
-              <a class="jump-chip" href={`#${c.id}`} data-go={c.id} data-dir={dirFromCentre(c.id)}><Icon name={c.id} />{c.label}</a>
+              <a class="jump-chip" href={`#${c.id}`} data-go={c.id} data-dir={placement[c.id]}><Icon name={c.id} />{c.label}</a>
             ))}
           </nav>
           <label class="drop hero-drop" data-hero-drop>
@@ -48,51 +37,24 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
           </div>
         </div>
       </div>
-      {edgesOf('centre').map(([dir, to]) => (
-        <a class={`edge ea-${dir}`} href={`#${to}`} data-go={to} data-dir={dir} aria-label={`Go to ${labelOf(to)}`} data-tip={labelOf(to)}>
-          <span class="edge-circle"><Icon name={iconOf(to)} /></span>
-          <span class="edge-chev"><Icon name={ARROW[dir]} /></span>
+      {categories.map((c) => (
+        <a class={`edge-pill ep-${placement[c.id]}`} href={`#${c.id}`} data-go={c.id} data-dir={placement[c.id]} aria-label={`Go to ${c.label}`}>
+          <Icon name={ARROW[placement[c.id]]} class="ep-chev" />
+          <Icon name={c.id} class="ep-icon" />
+          <span class="ep-label">{c.label}</span>
         </a>
       ))}
     </section>
 
     {categories.map((c) => {
-      const list = c.tabs.map(toolBySlug);
+      const back = OPPOSITE[placement[c.id]];
       return (
-        <section class="screen screen-cat" data-screen={c.id} {...Object.fromEntries(edgesOf(c.id).map(([d, to]) => [`data-${d}`, to]))} aria-labelledby={`hub-${c.id}`}>
-          <header class="cat-bar">
-            <div class="cat-title">
-              <span class="tile"><Icon name={c.id} /></span>
-              <h2 id={`hub-${c.id}`} tabindex="-1">{c.label}</h2>
-              {list.length === 1 && (
-                <span class="cat-single" data-slug={list[0].slug} data-tab={tabKey(list[0].slug)} data-url={href(list[0].slug)} data-title={list[0].title}>{list[0].short}</span>
-              )}
-            </div>
-            {list.length > 1 && (
-              <div class="tabs" role="tablist" aria-label={`${c.label} tools`}>
-                {list.map((t, i) => (
-                  <button
-                    class="tab" type="button" role="tab" id={`tab-${c.id}-${tabKey(t.slug)}`}
-                    aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? 0 : -1} aria-controls={`panel-${c.id}`}
-                    data-slug={t.slug} data-tab={tabKey(t.slug)} data-url={href(t.slug)} data-title={t.title}
-                  >
-                    <span>{t.short}</span>
-                    <Icon name={t.mode === 'cloud' ? 'cloud' : 'device'} class="tab-mode" />
-                    {t.mode === 'cloud' && <span class="visually-hidden">(uploads to our EU server after you confirm)</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            <nav class="cat-nav" aria-label="Other screens">
-              {edgesOf(c.id).map(([dir, to]) => (
-                <a class={`edge ea-${dir}`} href={to === 'centre' ? href() : `#${to}`} data-go={to} data-dir={dir} aria-label={`Go to ${labelOf(to)}`} data-tip={labelOf(to)}>
-                  <span class="edge-circle"><Icon name={iconOf(to)} /></span>
-                  <span class="edge-chev"><Icon name={ARROW[dir]} /></span>
-                </a>
-              ))}
-            </nav>
-          </header>
-          <div class="cat-body" id={`panel-${c.id}`} role={list.length > 1 ? 'tabpanel' : undefined} aria-labelledby={list.length > 1 ? `tab-${c.id}-${tabKey(list[0].slug)}` : `hub-${c.id}`} data-panel></div>
+        <section class="screen screen-cat" data-screen={c.id} data-app={href(c.app)} {...{ [`data-${back}`]: 'centre' }} data-back={back} aria-label={c.label}>
+          <div class="cat-body" data-panel></div>
+          <button class={`back-bar bb-${back}`} type="button" data-go="centre" data-dir={back} aria-label="Back to start">
+            <Icon name={ARROW[back]} class="bb-chev" />
+            <span class="bb-label" aria-hidden="true"><Icon name="home" />Back to start</span>
+          </button>
         </section>
       );
     })}
@@ -114,8 +76,8 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
         <section data-picker-group>
           <h3><Icon name={c.id} />{c.label}</h3>
           <ul>
-            {c.tabs.map(toolBySlug).map((t) => (
-              <li data-keywords={`${t.title} ${t.short} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
+            {toolsIn(c.id).map((t) => (
+              <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
                 <a href={href(t.slug)} data-open-screen={c.id} data-open-slug={t.slug}>
                   <span class="tile"><Icon name={toolIcon(t)} /></span>
                   <span class="pk-text"><strong>{t.title}</strong><small>{t.summary}</small></span>
@@ -129,7 +91,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
       <p class="muted pk-empty" data-picker-empty hidden>No tool matches that search.</p>
     </div>
     <dl class="picker-legend">
-      <div><dt><Icon name="device" />On your device</dt><dd>Runs in your browser. Your files never leave your device.</dd></div>
+      <div><dt><Icon name="device" />On your device</dt><dd>Runs in your browser; nothing is uploaded.</dd></div>
       <div><dt><Icon name="cloud" />Cloud · EU</dt><dd>Uploaded to our server in Belgium only after you confirm. Nothing is stored.</dd></div>
     </dl>
   </dialog>
@@ -140,10 +102,9 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
       <button class="icon-btn" type="button" data-dialog-close aria-label="Close"><Icon name="xmark" /></button>
     </div>
     <dl class="keys">
-      <div><dt><kbd>←</kbd><kbd>↓</kbd><kbd>↑</kbd><kbd>→</kbd> <span>or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>Move to the screen in that direction</dd></div>
-      <div><dt><kbd>Alt</kbd> + <span>arrow or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>Move, even from inside a field</dd></div>
-      <div><dt><kbd>Esc</kbd> <span>or</span> <kbd>0</kbd></dt><dd>Back to Start</dd></div>
-      <div><dt><kbd>1</kbd> <span>–</span> <kbd>9</kbd></dt><dd>Switch tool on a category screen</dd></div>
+      <div><dt><kbd>←</kbd><kbd>↓</kbd><kbd>↑</kbd><kbd>→</kbd> <span>or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>From the start: open the category in that direction. In a category: the direction back to the start.</dd></div>
+      <div><dt><kbd>Alt</kbd> + <span>arrow or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>The same, even from inside a field</dd></div>
+      <div><dt><kbd>Esc</kbd> <span>or</span> <kbd>0</kbd></dt><dd>Back to the start</dd></div>
       <div><dt><kbd>/</kbd></dt><dd>Search all tools</dd></div>
       <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
     </dl>
@@ -153,7 +114,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
 </Base>
 
 <style is:global>
-  /* Home only. Neutral surfaces; --accent only on the primary button, focus, drop hover and arrow chevrons. */
+  /* Home only. Neutral surfaces; --accent only on the primary button, focus, hover and direction arrows. */
   main.wide { width: 100%; padding: 0; }
   .home { position: relative; }
   .home .tile {
@@ -162,18 +123,20 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   }
 
   /* Hub: screens stacked in one full-viewport stage; JS slides them in and out (transform/opacity only).
-     Site chrome (title, theme, privacy, settings) floats in the four corners (Base.astro, wide). */
-  /* clip, not hidden: focus moving into a tool frame must not scroll the stage. */
+     Site chrome (title, theme, privacy, settings) floats in the corners of the start screen (Base.astro, wide).
+     clip, not hidden: focus moving into a tool frame must not scroll the stage. */
   .hub { position: relative; isolation: isolate; overflow: clip; touch-action: none; height: 100dvh; }
   .hub:focus { outline: none; }
   .hub.dragging { user-select: none; }
+  /* While a gesture runs or its momentum drains, the frames must not receive the wheel. */
+  .hub.wheeling .tool-frame { pointer-events: none; }
   .screen { position: absolute; inset: 0; overflow: clip; background: var(--bg); visibility: hidden; }
   .screen[data-active], .screen.leaving, .screen.peek { visibility: visible; }
   .screen[data-active] { z-index: 1; }
 
   /* Start screen */
   .screen-centre::before {
-    --edge: color-mix(in srgb, var(--accent) 7%, transparent);
+    --edge: color-mix(in srgb, var(--accent) 6%, transparent);
     content: ''; position: absolute; inset: 0; pointer-events: none;
     background:
       linear-gradient(var(--edge), transparent 5rem), linear-gradient(to top, var(--edge), transparent 5rem),
@@ -181,15 +144,14 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   }
   .cell-scroll {
     position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: none;
-    display: flex; flex-direction: column; padding: 5.25rem 5.5rem; scrollbar-width: thin;
+    display: flex; flex-direction: column; padding: 5.25rem clamp(5.5rem, 12vw, 10rem); scrollbar-width: thin;
   }
   /* Tall content (small screens) scrolls natively; horizontal swipes still reach the hub. */
   .scrolls > .cell-scroll { touch-action: pan-y; }
   /* Auto margins centre short content but keep tall content scrollable from its top. */
   .cell-inner { margin: auto; width: min(100%, 46rem); text-align: center; }
-  @media (max-width: 600px) { .cell-scroll { padding: 4.75rem 3.5rem; } }
-  .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.7rem); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 0.6rem; }
-  .lede { color: var(--muted); margin: 0 auto 1.25rem; max-width: 40ch; }
+  @media (max-width: 600px) { .cell-scroll { padding: 4.75rem 3.75rem; } }
+  .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.03em; margin: 0 auto 1.25rem; max-width: 22ch; }
   .jump { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.45rem; margin-bottom: 1rem; }
   .jump-chip {
     display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.8rem 0.3rem 0.55rem;
@@ -201,7 +163,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   .jump-chip:active { transform: scale(0.97); }
   .jump-chip .icon svg { width: 16px; height: 16px; color: var(--muted); }
   .home .hero-drop {
-    min-height: clamp(11rem, 28vh, 17rem); align-content: center; gap: 0.8rem;
+    min-height: clamp(11rem, 30vh, 17rem); align-content: center; gap: 0.8rem;
     padding: 1.75rem 1rem; border-radius: 24px; border: 2px dashed var(--border);
     background: var(--surface); box-shadow: var(--shadow);
     transition: transform 0.12s ease-out, box-shadow 0.12s, border-color 0.12s;
@@ -219,97 +181,81 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   .all-tools .icon svg { width: 18px; height: 18px; color: var(--muted); }
   .keys-btn { width: 2.6rem; padding-inline: 0; border-radius: 999px; font-weight: 700; }
 
-  /* Edge buttons: destination icon in a round button with a small accent arrow toward the edge. */
-  .edge { position: absolute; z-index: 2; display: grid; place-items: center; color: var(--fg); text-decoration: none; }
-  .edge-circle {
-    display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%;
-    border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 90%, transparent);
-    backdrop-filter: blur(8px); box-shadow: var(--shadow); color: var(--muted);
-    transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s, color 0.1s, opacity 0.12s;
+  /* Edge pills on the start screen: icon, name and an arrow toward the edge they lead to. */
+  .edge-pill {
+    position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.5rem 0.95rem; border-radius: 999px; border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); box-shadow: var(--shadow);
+    color: var(--fg); font-size: 0.92rem; font-weight: 600; text-decoration: none; white-space: nowrap;
+    transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s;
   }
-  .edge-circle .icon svg { width: 26px; height: 26px; }
-  .edge-chev {
-    position: absolute; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
-    background: var(--accent); color: var(--accent-fg);
-  }
-  .edge-chev .icon svg { width: 14px; height: 14px; stroke-width: 2.4; }
-  .edge:hover .edge-circle, .edge:focus-visible .edge-circle { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); opacity: 1; }
-  .edge:active .edge-circle { scale: 0.94; }
-  .edge:focus-visible { outline: none; }
-  .edge:focus-visible .edge-circle { outline: 3px solid var(--accent); outline-offset: 2px; }
-  .ea-n { top: 1.4rem; left: 50%; translate: -50% 0; }
-  .ea-s { bottom: 1.4rem; left: 50%; translate: -50% 0; }
-  .ea-e { right: 1.4rem; top: 50%; translate: 0 -50%; }
-  .ea-w { left: 1.4rem; top: 50%; translate: 0 -50%; }
-  .ea-n .edge-chev { top: -8px; }
-  .ea-s .edge-chev { bottom: -8px; }
-  .ea-e .edge-chev { right: -8px; }
-  .ea-w .edge-chev { left: -8px; }
-  .ea-n:hover .edge-circle { transform: translateY(-2px); }
-  .ea-s:hover .edge-circle { transform: translateY(2px); }
-  .ea-e:hover .edge-circle { transform: translateX(2px); }
-  .ea-w:hover .edge-circle { transform: translateX(-2px); }
-  .edge::after {
-    content: attr(data-tip); position: absolute; z-index: 3; width: max-content; padding: 0.35rem 0.6rem; border-radius: 8px;
-    background: var(--fg); color: var(--bg); font-size: 0.8rem; font-weight: 600; pointer-events: none;
-    opacity: 0; transition: opacity 0.1s;
-  }
-  .edge:hover::after, .edge:focus-visible::after { opacity: 1; }
-  .ea-n::after { top: calc(100% + 8px); }
-  .ea-s::after { bottom: calc(100% + 8px); }
-  .ea-e::after { right: calc(100% + 12px); }
-  .ea-w::after { left: calc(100% + 12px); }
+  .ep-icon svg { width: 18px; height: 18px; color: var(--muted); transition: color 0.1s; }
+  .ep-chev svg { width: 16px; height: 16px; color: var(--accent); stroke-width: 2.2; }
+  .ep-n .ep-chev, .ep-w .ep-chev { order: -1; }
+  .ep-s .ep-chev, .ep-e .ep-chev { order: 1; }
+  .edge-pill:hover, .edge-pill:focus-visible { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+  .edge-pill:hover .ep-icon svg, .edge-pill:focus-visible .ep-icon svg { color: var(--fg); }
+  .edge-pill:active { scale: 0.96; }
+  .ep-n { top: 1.25rem; left: 50%; translate: -50% 0; }
+  .ep-s { bottom: 1.25rem; left: 50%; translate: -50% 0; }
+  .ep-e { right: 1.25rem; top: 50%; translate: 0 -50%; }
+  .ep-w { left: 1.25rem; top: 50%; translate: 0 -50%; }
+  .ep-n:hover { transform: translateY(-2px); }
+  .ep-s:hover { transform: translateY(2px); }
+  .ep-e:hover { transform: translateX(2px); }
+  .ep-w:hover { transform: translateX(-2px); }
   @media (max-width: 600px) {
-    .screen-centre .edge-circle { width: 44px; height: 44px; }
-    .screen-centre .edge-circle .icon svg { width: 22px; height: 22px; }
-    .screen-centre .ea-n { top: 1rem; } .screen-centre .ea-s { bottom: 1rem; }
-    .screen-centre .ea-e { right: 0.6rem; } .screen-centre .ea-w { left: 0.6rem; }
+    .edge-pill { padding: 0.45rem 0.75rem; font-size: 0.88rem; }
+    /* Side pills keep only their icons here; the accessible name stays "Go to …". */
+    .ep-e .ep-label, .ep-w .ep-label { display: none; }
+    .ep-e, .ep-w { flex-direction: column; gap: 0.3rem; padding: 0.6rem 0.45rem; }
+    .ep-e { right: 0.6rem; } .ep-w { left: 0.6rem; }
+    .ep-n { top: 0.9rem; } .ep-s { bottom: 0.9rem; }
   }
 
-  /* Category screens: slim top bar (title, tabs, navigation), the tool fills the rest edge to edge.
-     Navigation lives in the bar so it never covers tool controls; site chrome is hidden off the start screen. */
-  .screen-cat { display: grid; grid-template-rows: auto minmax(0, 1fr); }
-  .cat-bar {
-    display: flex; align-items: center; gap: 1rem; min-width: 0; min-height: 56px;
-    padding: 0.5rem 1rem; border-bottom: 1px solid var(--border);
-  }
-  .cat-title { display: flex; align-items: center; gap: 0.6rem; flex: none; }
-  .cat-title .tile { width: 2rem; height: 2rem; border-radius: 9px; }
-  .cat-title .icon svg { width: 18px; height: 18px; }
-  .cat-title h2 { margin: 0; font-size: 1.05rem; white-space: nowrap; }
-  .cat-title h2:focus { outline: none; }
-  .cat-single { color: var(--muted); font-weight: 550; white-space: nowrap; }
-  .cat-single::before { content: '·'; margin-right: 0.6rem; }
-  .tabs {
-    display: flex; gap: 2px; padding: 3px; min-width: 0; overflow-x: auto; scrollbar-width: none;
-    border-radius: 12px; background: var(--surface-2);
-  }
-  .tab {
-    display: inline-flex; align-items: center; gap: 0.35rem; flex: none; padding: 0.35rem 0.75rem;
-    border: 0; border-radius: 9px; background: none; color: var(--muted);
-    font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap;
-    transition: background 0.1s, color 0.1s;
-  }
-  .tab:hover { color: var(--fg); }
-  .tab[aria-selected='true'] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }
-  .tab:focus-visible { outline-offset: -2px; }
-  .tab-mode svg { width: 15px; height: 15px; opacity: 0.7; }
-  .cat-body { position: relative; min-height: 0; overflow: clip; }
+  /* Category screens: the app fills the screen; a slim back bar on the side facing the start screen. */
+  .screen-cat { --bb: 16px; }
+  @media (pointer: coarse) { .screen-cat { --bb: 22px; } }
+  .cat-body { position: absolute; inset: 0; overflow: clip; }
+  [data-back='n'] > .cat-body { top: var(--bb); }
+  [data-back='s'] > .cat-body { bottom: var(--bb); }
+  [data-back='w'] > .cat-body { left: var(--bb); }
+  [data-back='e'] > .cat-body { right: var(--bb); }
   .tool-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); color-scheme: normal; }
-  .cat-nav { display: flex; gap: 0.55rem; margin-left: auto; }
-  .cat-nav .edge { position: relative; inset: auto; translate: none; }
-  /* In the row the arrow badge sits on the corner, so it never overlaps the neighbouring button. */
-  .cat-nav .edge-chev { inset: auto -4px -4px auto; width: 16px; height: 16px; }
-  .cat-nav .edge-chev .icon svg { width: 11px; height: 11px; }
-  .screen-cat .edge-circle { width: 36px; height: 36px; }
-  .screen-cat .edge-circle .icon svg { width: 19px; height: 19px; }
-  @media (max-width: 760px) {
-    .cat-bar { flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0.75rem; }
-    .cat-title { order: 1; }
-    .cat-nav { order: 2; }
-    .tabs { order: 3; flex-basis: 100%; }
-    .cat-title .tile { display: none; }
+  .back-bar {
+    position: absolute; z-index: 3; isolation: isolate; display: grid; place-items: center;
+    margin: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer;
   }
+  /* The strip's surface grows a little on hover/focus (transform only) without moving the app. */
+  .back-bar::before {
+    content: ''; position: absolute; inset: 0; z-index: -1; background: var(--surface-2);
+    transition: transform 0.12s ease-out, background 0.12s;
+  }
+  .bb-n { top: 0; left: 0; right: 0; height: var(--bb); }
+  .bb-s { bottom: 0; left: 0; right: 0; height: var(--bb); }
+  .bb-w { left: 0; top: 0; bottom: 0; width: var(--bb); }
+  .bb-e { right: 0; top: 0; bottom: 0; width: var(--bb); }
+  .bb-n::before { border-bottom: 1px solid var(--border); transform-origin: top; }
+  .bb-s::before { border-top: 1px solid var(--border); transform-origin: bottom; }
+  .bb-w::before { border-right: 1px solid var(--border); transform-origin: left; }
+  .bb-e::before { border-left: 1px solid var(--border); transform-origin: right; }
+  .back-bar:hover, .back-bar:focus-visible { color: var(--accent); outline: none; }
+  .back-bar:hover::before, .back-bar:focus-visible::before { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+  .bb-n:is(:hover, :focus-visible)::before, .bb-s:is(:hover, :focus-visible)::before { transform: scaleY(1.6); }
+  .bb-w:is(:hover, :focus-visible)::before, .bb-e:is(:hover, :focus-visible)::before { transform: scaleX(1.6); }
+  .back-bar:focus-visible::before { box-shadow: inset 0 0 0 2px var(--accent); }
+  .bb-chev svg { width: 13px; height: 13px; stroke-width: 2.4; }
+  .bb-label {
+    position: absolute; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; border-radius: 999px;
+    background: var(--fg); color: var(--bg); font-size: 0.82rem; font-weight: 600; white-space: nowrap;
+    opacity: 0; pointer-events: none; transition: opacity 0.12s, transform 0.12s ease-out;
+  }
+  .bb-label .icon svg { width: 15px; height: 15px; }
+  .bb-n .bb-label { top: calc(100% + 10px); transform: translateY(-4px); }
+  .bb-s .bb-label { bottom: calc(100% + 10px); transform: translateY(4px); }
+  .bb-w .bb-label { left: calc(100% + 10px); transform: translateX(-4px); }
+  .bb-e .bb-label { right: calc(100% + 10px); transform: translateX(4px); }
+  .back-bar:is(:hover, :focus-visible) .bb-label { opacity: 1; transform: none; }
 
   /* Dialogs: all tools and keyboard shortcuts */
   dialog.picker { width: min(94vw, 40rem); max-width: none; max-height: min(86dvh, 46rem); padding: 0; overflow: hidden; }
@@ -371,6 +317,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
 
 <script>
   import { el, sniff } from '../lib/tool';
+  import { categories, tools } from '../tools';
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -420,7 +367,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
       (next < 0 ? pickSearch : links[next])?.focus();
     }
   });
-  // Picking a tool opens it in the hub; modified clicks still open the standalone page.
+  // Picking a tool opens its category app in that mode; modified clicks still open the standalone page.
   picker.addEventListener('click', (e) => {
     const a = (e.target as Element).closest<HTMLAnchorElement>('a[data-open-slug]');
     if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -429,9 +376,9 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     openTool(a.dataset.openScreen!, a.dataset.openSlug!);
   });
 
-  // ---------- Hub: screens, tabs and frames ----------
+  // ---------- Hub: screens and app frames ----------
   type Dir = 'n' | 'e' | 's' | 'w';
-  type Frame = { slug: string; el: HTMLIFrameElement; loaded: boolean };
+  type Frame = { src: string; el: HTMLIFrameElement; loaded: boolean };
   const home = $('.home');
   const hub = $('[data-hub]');
   const screens = new Map([...hub.querySelectorAll<HTMLElement>('[data-screen]')].map((s) => [s.dataset.screen!, s]));
@@ -444,29 +391,32 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   let leaving: HTMLElement | undefined;
   let peeking: HTMLElement | undefined;
   const frames = new Map<string, Frame>();
+  // The tool each category screen shows (decides the app mode); none = the app's default.
   const selected = new Map<string, string>();
-  // Files from the last drop, in memory only, and the category they were routed to.
+  // Files from the last drop, in memory only, and the screen they were routed to.
   let held: { screen: string; files: File[] } | undefined;
 
   const neighbour = (from: string, dir: Dir) => screens.get(from)?.dataset[dir];
   const dirTo = (from: string, to: string) => DIRS.find((d) => neighbour(from, d) === to);
-  const toolsOf = (id: string) => [...screens.get(id)!.querySelectorAll<HTMLElement>('[data-slug]')];
-  const toolEl = (id: string, slug: string) => toolsOf(id).find((t) => t.dataset.slug === slug);
-  const slugOf = (id: string) => selected.get(id) ?? toolsOf(id)[0].dataset.slug!;
+  const toolBySlug = (slug: string) => tools.find((t) => t.slug === slug);
   const tf = (xPct: number, yPct: number, x = 0, y = 0) => `translate(calc(${xPct}% + ${x}px), calc(${yPct}% + ${y}px))`;
 
-  /** `#pdf` or `#pdf/split` → screen and tool slug. */
+  function frameSrc(id: string) {
+    const mode = toolBySlug(selected.get(id) ?? '')?.appMode;
+    return `${screens.get(id)!.dataset.app}?${mode ? `mode=${encodeURIComponent(mode)}&` : ''}embed`;
+  }
+  /** `#pdf` or `#pdf/split` (a tool slug's last segment) → screen and tool. */
   function fromHash(): { screen: string; slug?: string } {
-    const [screen, tab] = location.hash.slice(1).split('/');
-    if (!screen || !screens.has(screen) || screen === 'centre') return { screen: 'centre' };
-    return { screen, slug: toolsOf(screen).find((t) => t.dataset.tab === tab)?.dataset.slug };
+    const [screen, key] = location.hash.slice(1).split('/');
+    if (!screen || screen === 'centre' || !screens.has(screen)) return { screen: 'centre' };
+    return { screen, slug: key ? tools.find((t) => t.category === screen && t.slug.split('/')[1] === key)?.slug : undefined };
   }
   function hashFor(id: string) {
     if (id === 'centre') return '';
-    const slug = slugOf(id);
-    return slug === toolsOf(id)[0].dataset.slug ? `#${id}` : `#${id}/${toolEl(id, slug)!.dataset.tab}`;
+    const tool = toolBySlug(selected.get(id) ?? '');
+    return tool?.appMode ? `#${id}/${tool.slug.split('/')[1]}` : `#${id}`;
   }
-  /** Keep the URL shareable without adding history entries for moves and tab changes. */
+  /** Keep the URL shareable without adding history entries for moves and mode changes. */
   function syncUrl() {
     const want = hashFor(active);
     if (location.hash !== want) history.replaceState(history.state, '', want || location.pathname + location.search);
@@ -493,7 +443,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     for (const s of screens.values()) s.style.transform = '';
   }
 
-  /** Show `to`, sliding it in from the `dir` edge; screens that aren't neighbours cross-fade. (x, y): current drag offset in px. */
+  /** Show `to`, sliding it in from the `dir` edge; otherwise cross-fade. (x, y): current gesture offset in px. */
   function navigate(to: string, dir = dirTo(active, to), x = 0, y = 0) {
     if (to === active) return;
     const from = screens.get(active)!;
@@ -519,37 +469,25 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     running[0].onfinish = () => leaving === from && settle();
   }
 
-  /** Navigate and, when focus is inside the hub (or in a tool frame), carry it along so it isn't lost in an inert screen. */
+  /** Navigate and, when focus is inside the hub (or a frame), carry it along so it isn't lost in an inert screen. */
   function go(to: string, dir?: Dir) {
     const focusInside = hub.contains(document.activeElement) && document.activeElement !== hub;
     navigate(to, dir);
-    if (focusInside) focusScreen(to);
+    if (focusInside) (to === 'centre' ? hub : frames.get(to)?.el ?? hub).focus({ preventScroll: true });
   }
-  const focusScreen = (id: string) => (id === 'centre' ? hub : screens.get(id)!.querySelector<HTMLElement>('h2[tabindex]')!).focus({ preventScroll: true });
   const move = (dir: Dir) => {
     const next = neighbour(active, dir);
     if (next) go(next, dir);
   };
 
-  function markTab(id: string, slug: string) {
-    selected.set(id, slug);
-    const panel = screens.get(id)!.querySelector<HTMLElement>('[data-panel]')!;
-    for (const t of screens.get(id)!.querySelectorAll<HTMLElement>('[role="tab"]')) {
-      const on = t.dataset.slug === slug;
-      t.setAttribute('aria-selected', String(on));
-      t.tabIndex = on ? 0 : -1;
-      if (on) panel.setAttribute('aria-labelledby', t.id);
-    }
-  }
-
-  /** Create the selected tool's frame for a screen if it isn't there yet (one frame per screen). */
+  /** Create the app frame for a screen in its selected mode, unless it already shows exactly that. */
   function ensureFrame(id: string) {
     if (id === 'centre') return;
-    const slug = slugOf(id);
-    if (frames.get(id)?.slug === slug) return;
-    const t = toolEl(id, slug)!;
+    const src = frameSrc(id);
+    if (frames.get(id)?.src === src) return;
     frames.get(id)?.el.remove();
-    const rec: Frame = { slug, loaded: false, el: el('iframe', { src: `${t.dataset.url}?embed`, title: t.dataset.title!, className: 'tool-frame' }) };
+    const title = categories.find((c) => c.id === id)!.label;
+    const rec: Frame = { src, loaded: false, el: el('iframe', { src, title: `${title} tools`, className: 'tool-frame' }) };
     frames.set(id, rec);
     rec.el.addEventListener('load', () => {
       rec.loaded = true;
@@ -558,19 +496,20 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     screens.get(id)!.querySelector('[data-panel]')!.append(rec.el);
   }
 
-  /** Select a screen's tool (loading its frame), handing over dropped files that fit it. */
-  function openTool(id: string, slug: string, push = false) {
-    markTab(id, slug);
+  /** Open a screen with a tool's app mode, handing over dropped files. `push`: one history entry (drops only). */
+  function openTool(id: string, slug?: string, push = false) {
+    if (slug && toolBySlug(slug)?.appMode) selected.set(id, slug);
+    else selected.delete(id);
     const rec = frames.get(id);
-    if (rec?.slug === slug) {
+    if (rec?.src === frameSrc(id)) {
       if (rec.loaded) inject(id, rec);
-    } else if (id === active || push || rec) ensureFrame(id);
+    } else ensureFrame(id);
     if (push) history.pushState({ drop: true }, '', hashFor(id) || location.pathname + location.search);
     if (active !== id) go(id);
     else syncUrl();
   }
 
-  // ---------- Tool frames ----------
+  // ---------- App frames ----------
   const accepts = (accept: string, f: File) =>
     !accept ||
     accept.split(',').some((a) => {
@@ -578,12 +517,12 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
       return t.startsWith('.') ? f.name.toLowerCase().endsWith(t) : t.endsWith('/*') ? f.type.startsWith(t.slice(0, -1)) : f.type === t;
     });
 
-  /** Put the held files into the tool's file input, if they belong to this screen and the tool takes them. */
+  /** Put the held files into the app's file input, if they belong to this screen and the input takes them. */
   function inject(id: string, rec: Frame) {
     const win = rec.el.contentWindow as (Window & typeof globalThis) | null;
     const doc = rec.el.contentDocument;
     if (!held || held.screen !== id || !win || !doc) return;
-    // ToolShell pages and the image editor take files through [data-input]; text tools through [data-file].
+    // Apps and tool pages take files through [data-input]; text tools through [data-file].
     const target = doc.querySelector<HTMLInputElement>('[data-input], [data-file]');
     if (!target) return;
     const list = held.files.filter((f) => accepts(target.accept, f));
@@ -619,7 +558,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
       e.preventDefault();
       location.href = a.href;
     });
-    // Files dropped outside the tool's own drop zone are routed like drops on the hub (and never open in the frame).
+    // Files dropped outside the app's own drop zone are routed like drops on the hub (and never open in the frame).
     doc.addEventListener('dragover', (e) => hasFiles(e) && e.preventDefault());
     doc.addEventListener('drop', (e) => {
       if (!hasFiles(e) || e.defaultPrevented) return;
@@ -628,34 +567,15 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     });
   }
 
-  // Prefetch a screen's tool when the pointer or focus reaches the button that leads there.
+  // Prefetch a category's app when the pointer or focus reaches a control that leads there.
   for (const type of ['pointerover', 'focusin'] as const) {
     hub.addEventListener(type, (e) => {
-      const a = (e.target as Element).closest?.<HTMLElement>('.edge, .jump-chip');
+      const a = (e.target as Element).closest?.<HTMLElement>('[data-go]');
       if (a?.dataset.go) ensureFrame(a.dataset.go);
     });
   }
 
-  // Tabs: roving tabindex; arrow keys move focus, Enter/Space or click selects (frames are too heavy to load per arrow press).
-  for (const list of hub.querySelectorAll<HTMLElement>('[role="tablist"]')) {
-    const id = list.closest<HTMLElement>('[data-screen]')!.dataset.screen!;
-    const tabs = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
-    list.addEventListener('click', (e) => {
-      const t = (e.target as Element).closest<HTMLElement>('[role="tab"]');
-      if (t) openTool(id, t.dataset.slug!);
-    });
-    list.addEventListener('keydown', (e) => {
-      const i = tabs.indexOf(document.activeElement as HTMLElement);
-      const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
-      if (next === undefined || e.altKey) return;
-      e.preventDefault();
-      const t = tabs[(next + tabs.length) % tabs.length];
-      tabs.forEach((x) => (x.tabIndex = x === t ? 0 : -1));
-      t.focus();
-    });
-  }
-
-  // ---------- Keyboard shortcuts (hub document and every tool frame) ----------
+  // ---------- Keyboard shortcuts (hub document and every app frame) ----------
   const KEY_DIR: Record<string, Dir> = { ArrowUp: 'n', KeyK: 'n', ArrowDown: 's', KeyJ: 's', ArrowLeft: 'w', KeyH: 'w', ArrowRight: 'e', KeyL: 'e' };
   // Controls that use these keys themselves: fields, sliders, radio groups, tabs, the image-editor stage and the waveform.
   const BUSY = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="radiogroup"], [role="application"], canvas[tabindex]';
@@ -665,7 +585,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     if (picker.open || help.open || doc.querySelector('dialog[open]')) return;
     const dir = KEY_DIR[e.code];
     if (e.altKey) {
-      if (dir && !e.shiftKey) {
+      if (dir && !e.shiftKey && neighbour(active, dir)) {
         e.preventDefault();
         move(dir);
       }
@@ -674,11 +594,14 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     const target = e.target as Element;
     if (target.closest?.(BUSY) || (dir && e.code.startsWith('Arrow') && target.closest?.('[role="tab"]'))) return;
     if (dir && !e.shiftKey) {
-      e.preventDefault();
       // A tall start screen (small viewports) scrolls before moving on.
       if (active === 'centre' && (dir === 'n' || dir === 's') && canScroll(dir)) {
+        e.preventDefault();
         return centreScroll.scrollBy({ top: (dir === 's' ? 1 : -1) * centreScroll.clientHeight * 0.8, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
       }
+      // In an app, keys that lead nowhere keep their normal meaning (e.g. scrolling the page).
+      if (!neighbour(active, dir)) return;
+      e.preventDefault();
       return move(dir);
     }
     if (e.key === 'Escape' || e.key === '0') {
@@ -694,28 +617,20 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
       e.preventDefault();
       return openHelp();
     }
-    if (/^[1-9]$/.test(e.key) && active !== 'centre') {
-      const t = toolsOf(active)[Number(e.key) - 1];
-      if (!t) return;
-      e.preventDefault();
-      openTool(active, t.dataset.slug!);
-      // The old frame (which may have held focus) is gone; continue from the selected tab.
-      if (t.getAttribute('role') === 'tab') t.focus();
-    }
   }
   document.addEventListener('keydown', (e) => onShortcut(e));
 
   // ---------- Start screen: wheel, trackpad and touch move between screens ----------
   let hubW = innerWidth;
   let hubH = innerHeight;
+  const centre = screens.get('centre')!;
+  const markTall = () => centre.classList.toggle('scrolls', centreScroll.scrollHeight > centreScroll.clientHeight + 1);
   new ResizeObserver(([entry]) => {
     hubW = entry.contentRect.width;
     hubH = entry.contentRect.height;
-    hub.querySelector('.screen-centre')!.classList.toggle('scrolls', centreScroll.scrollHeight > centreScroll.clientHeight + 1);
+    markTall();
   }).observe(hub);
-  new ResizeObserver(() => hub.querySelector('.screen-centre')!.classList.toggle('scrolls', centreScroll.scrollHeight > centreScroll.clientHeight + 1)).observe(
-    centreScroll.firstElementChild!,
-  );
+  new ResizeObserver(markTall).observe(centreScroll.firstElementChild!);
 
   /** True when the start screen's content can still scroll toward `dir` (only vertical content scrolls). */
   function canScroll(dir: Dir) {
@@ -724,7 +639,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     return false;
   }
 
-  /** A gesture in progress: `d` is the on-screen offset along `axis`; `dir` the direction of travel it points to. */
+  /** A pull in progress: `d` is the on-screen offset along `axis`; `dir` the direction of travel it points to. */
   type Pull = { axis: 'x' | 'y'; d: number; dir?: Dir; next?: string };
   let paintFrame = 0;
   let pending: Pull | undefined;
@@ -751,7 +666,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     });
   }
 
-  /** Finish a pull: commit to the neighbour from the current offset, or spring back. */
+  /** Finish a pull: commit to the neighbour from the current offset, or spring back from it. */
   function release(p: Pull, commit: boolean) {
     cancelAnimationFrame(paintFrame);
     paintFrame = 0;
@@ -761,7 +676,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     const peek = p.next ? screens.get(p.next) : undefined;
     settle();
     if (reduceMotion.matches || !p.d) return;
-    const opts: KeyframeAnimationOptions = { duration: 220, easing: EASE };
+    const opts: KeyframeAnimationOptions = { duration: 240, easing: EASE };
     running = [cur.animate([{ transform: tf(0, 0, x, y) }, { transform: 'none' }], opts)];
     if (peek && p.dir) {
       const [vx, vy] = VEC[p.dir];
@@ -775,75 +690,117 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   const travel = (axis: 'x' | 'y', offset: number): Dir => (axis === 'x' ? (offset < 0 ? 'e' : 'w') : offset < 0 ? 's' : 'n');
   const rubber = (d: number) => d * 0.3;
 
-  // Wheel. A mouse notch moves one screen at once. A trackpad drags the screens along with the fingers and snaps when
-  // the gesture ends (idle or momentum decaying); after that, input is ignored until the wheel has been idle for 180 ms.
-  // vmax: the fastest the fingers moved toward the current offset; a flick releases at that speed into momentum.
-  type Wheel = Pull & { offset: number; v: number; vmax: number; t: number; peak: number; last: number; falling: number };
-  let wheel: Wheel | undefined;
-  let wheelLocked = false;
-  let wheelScrolled = false;
-  let wheelIdle = 0;
-  let wheelEnd = 0;
-  const isNotch = (e: WheelEvent) =>
-    e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || [e.deltaX, e.deltaY].some((d) => Math.abs(d) >= 50 && Number.isInteger(d)) && (e.deltaX === 0 || e.deltaY === 0);
+  // Wheel input on the start screen.
+  // - Mouse notch: one screen at once.
+  // - Trackpad: the screens follow the fingers 1:1 (light resistance) from the first event; the axis locks after 8 px.
+  //   The gesture ends on 120 ms of silence or when momentum starts decaying, then snaps (commit past 20% or on a
+  //   flick, else spring back from the current offset).
+  // - After a notch or a snap, wheel input is swallowed until 180 ms of silence or until deltas grow again after
+  //   decaying (a new swipe during momentum), so momentum can never trigger a second move.
+  type Gesture = Pull & { sx: number; sy: number; locked: boolean; offset: number; v: number; vmax: number; t: number; peak: number; last: number; falling: number };
+  let gesture: Gesture | undefined;
+  let cooling: { last: number; decayed: number; axis: 'x' | 'y'; sign: number } | undefined;
+  let scrolledContent = false;
+  let silence = 0;
+  let gestureEnd = 0;
+  type LegacyWheel = WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number };
 
-  function endWheel() {
-    clearTimeout(wheelEnd);
-    const g = wheel;
+  /** Mouse wheels report line/page units or legacy wheelDelta in multiples of 120 that aren't 3× the pixel delta (trackpads are). */
+  function isNotch(e: LegacyWheel, axis: 'x' | 'y') {
+    if (e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return true;
+    const legacy = axis === 'x' ? e.wheelDeltaX : e.wheelDeltaY;
+    const delta = axis === 'x' ? e.deltaX : e.deltaY;
+    return !!legacy && legacy % 120 === 0 && legacy !== -3 * delta;
+  }
+
+  function endGesture() {
+    clearTimeout(gestureEnd);
+    const g = gesture;
     if (!g) return;
-    wheel = undefined;
-    wheelLocked = true;
+    gesture = undefined;
     const size = g.axis === 'x' ? hubW : hubH;
-    release(g, Math.abs(g.offset) > size * 0.25 || (g.vmax > 1 && Math.abs(g.offset) > 30));
+    const commit = !!g.next && (Math.abs(g.offset) > size * 0.2 || (g.vmax > 0.8 && Math.abs(g.offset) > 24));
+    // Only a move needs its momentum swallowed; after a spring-back the next swipe must start right away.
+    if (commit) cooling = { last: g.last, decayed: g.falling, axis: g.axis, sign: -Math.sign(g.offset) };
+    release(g, commit);
   }
 
   hub.addEventListener(
     'wheel',
-    (e) => {
-      if (active !== 'centre' || e.ctrlKey) return; // tool frames get their own wheel; ctrl = pinch zoom
-      clearTimeout(wheelIdle);
-      wheelIdle = window.setTimeout(() => (wheelLocked = wheelScrolled = false), 180);
-      if (wheelLocked) return e.preventDefault();
-      const axis = wheel?.axis ?? (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? 'x' : 'y');
+    (e: LegacyWheel) => {
+      if (e.ctrlKey) return; // pinch zoom
+      clearTimeout(silence);
+      silence = window.setTimeout(() => {
+        cooling = undefined;
+        scrolledContent = false;
+        hub.classList.remove('wheeling');
+      }, 180);
       const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? hubH : 1;
-      const delta = (axis === 'x' ? e.deltaX : e.deltaY) * unit;
-      if (!delta) return;
-      if (!wheel && axis === 'y' && canScroll(delta > 0 ? 's' : 'n')) {
-        wheelScrolled = true;
-        return;
+      const dx = e.deltaX * unit;
+      const dy = e.deltaY * unit;
+      const mag = Math.hypot(dx, dy);
+      if (cooling) {
+        // A fresh swipe during the tail of momentum: deltas grow clearly after having decayed, or reverse direction.
+        const along = cooling.axis === 'x' ? dx : dy;
+        const reversed = along !== 0 && Math.sign(along) === -cooling.sign;
+        const fresh = reversed || (cooling.decayed >= 2 && mag > cooling.last * 1.5 && mag > cooling.last + 4);
+        cooling.decayed = mag < cooling.last ? cooling.decayed + 1 : cooling.decayed;
+        cooling.last = mag;
+        if (!fresh) return e.preventDefault();
+        cooling = undefined;
+        hub.classList.remove('wheeling');
+      }
+      if (active !== 'centre' || !mag) return; // app frames own their wheel
+      if (!gesture) {
+        const axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        const delta = axis === 'x' ? dx : dy;
+        if (axis === 'y' && canScroll(delta > 0 ? 's' : 'n')) {
+          scrolledContent = true;
+          return;
+        }
+        e.preventDefault();
+        // Content that just scrolled to its edge needs a fresh gesture to move on.
+        if (scrolledContent) return;
+        hub.classList.add('wheeling');
+        if (isNotch(e, axis)) {
+          cooling = { last: mag, decayed: 0, axis, sign: Math.sign(delta) };
+          return move(travel(axis, -delta));
+        }
+        settle();
+        gesture = { axis, d: 0, sx: 0, sy: 0, locked: false, offset: 0, v: 0, vmax: 0, t: e.timeStamp, peak: 0, last: 0, falling: 0 };
       }
       e.preventDefault();
-      // Content that just scrolled to its edge needs a fresh gesture to move on.
-      if (wheelScrolled) return;
-      if (!wheel && isNotch(e)) {
-        wheelLocked = true;
-        return move(travel(axis, -delta));
+      const g = gesture;
+      g.sx -= dx;
+      g.sy -= dy;
+      // Provisional axis follows the larger travel until 8 px, then stays locked for the gesture.
+      if (!g.locked) {
+        g.axis = Math.abs(g.sx) > Math.abs(g.sy) ? 'x' : 'y';
+        g.locked = Math.hypot(g.sx, g.sy) >= 8;
       }
-      if (!wheel) {
-        settle();
-        wheel = { axis, d: 0, offset: 0, v: 0, vmax: 0, t: e.timeStamp, peak: 0, last: 0, falling: 0 };
-      }
-      const g = wheel;
+      const delta = g.axis === 'x' ? dx : dy;
+      const along = Math.abs(delta);
       const dt = e.timeStamp - g.t;
-      const mag = Math.abs(delta);
       g.t = e.timeStamp;
-      g.offset -= delta;
+      g.offset = g.axis === 'x' ? g.sx : g.sy;
       // The first event has no interval to measure speed against.
       if (dt > 0) {
         g.v = 0.7 * (-delta / dt) + 0.3 * g.v;
         if (Math.sign(g.v) === Math.sign(g.offset)) g.vmax = Math.max(g.vmax, Math.abs(g.v));
       }
       // Momentum (fingers lifted) shows up as deltas that keep shrinking after the peak.
-      if (mag > g.peak) g.peak = mag;
-      g.falling = mag < g.last && mag < g.peak * 0.6 ? g.falling + 1 : 0;
-      g.last = mag;
-      g.dir = travel(axis, g.offset);
+      if (along > g.peak) g.peak = along;
+      g.falling = along < g.last && along < g.peak * 0.6 ? g.falling + 1 : 0;
+      g.last = along;
+      g.dir = travel(g.axis, g.offset);
       g.next = neighbour(active, g.dir);
-      g.d = g.next ? g.offset * 0.85 : rubber(g.offset);
+      if (g.next) ensureFrame(g.next);
+      const size = g.axis === 'x' ? hubW : hubH;
+      g.d = g.next ? Math.max(-size, Math.min(size, g.offset * 0.9)) : rubber(g.offset);
       paint(g);
-      clearTimeout(wheelEnd);
-      if (g.falling >= 3) return endWheel();
-      wheelEnd = window.setTimeout(endWheel, 100);
+      clearTimeout(gestureEnd);
+      if (g.locked && g.falling >= 3) return endGesture();
+      gestureEnd = window.setTimeout(endGesture, 120);
     },
     { passive: false },
   );
@@ -851,6 +808,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   // Touch/pen swipes on the start screen: the screen follows the finger (rubber-banded where there is nothing to go to).
   type Drag = Pull & { id: number; x0: number; y0: number; v: number; t: number; raw: number };
   let drag: Drag | undefined;
+  let dragAxis: 'x' | 'y' | undefined;
   let suppressClick = false;
   let swiped = false;
 
@@ -860,7 +818,6 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     settle();
     drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: 'x', d: 0, raw: 0, v: 0, t: e.timeStamp };
   });
-  let dragAxis: 'x' | 'y' | undefined;
   hub.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     const dx = e.clientX - drag.x0;
@@ -878,6 +835,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     drag.raw = raw;
     drag.dir = travel(drag.axis, raw);
     drag.next = neighbour(active, drag.dir);
+    if (drag.next) ensureFrame(drag.next);
     drag.d = drag.next ? raw : rubber(raw);
     paint(drag);
   });
@@ -912,7 +870,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     'touchstart',
     (e) => {
       touch = undefined;
-      if (active !== 'centre' || !screens.get('centre')!.classList.contains('scrolls') || e.touches.length > 1) return;
+      if (active !== 'centre' || !centre.classList.contains('scrolls') || e.touches.length > 1) return;
       touch = { y: e.touches[0].clientY, top: !canScroll('n'), bottom: !canScroll('s') };
     },
     { passive: true },
@@ -929,18 +887,21 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     { passive: true },
   );
 
-  // Edge buttons, category chips and the title link move the hub instead of navigating.
+  // Edge pills, category chips, back bars and the title link move the hub instead of navigating.
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const a = (e.target as Element).closest<HTMLAnchorElement>('a[href]');
-    if (!a || picker.contains(a)) return;
-    const id = a.dataset.go ?? (a.pathname === location.pathname && a.search === location.search ? a.hash.slice(1) || 'centre' : undefined);
+    const target = e.target as Element;
+    const control = target.closest<HTMLElement>('[data-go]');
+    const a = target.closest<HTMLAnchorElement>('a[href]');
+    if (picker.contains(target)) return;
+    const id = control?.dataset.go ?? (a && a.pathname === location.pathname && a.search === location.search ? a.hash.slice(1) || 'centre' : undefined);
     if (!id || !screens.has(id)) return;
     e.preventDefault();
-    go(id, a.dataset.dir as Dir | undefined);
+    if (id === 'centre' || !control) go(id, control?.dataset.dir as Dir | undefined);
+    else openTool(id, selected.get(id));
   });
 
-  // ---------- Drops: route files to the matching screen and tool ----------
+  // ---------- Drops: route files to the matching app and mode ----------
   // Files are handed over in memory only: nothing is persisted or uploaded.
   type Kind = 'image' | 'pdf' | 'audio' | 'json' | 'js' | 'gzip' | 'other';
   const drop = $('[data-hero-drop]');
@@ -966,7 +927,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     return 'other';
   }
 
-  /** Drop → screen + tool, as one history entry (Back returns to where the files were dropped). */
+  /** Drop → app + mode, as one history entry (Back returns to where the files were dropped). */
   async function handle(list: File[]) {
     if (!list.length) return;
     picker.close();
@@ -1028,7 +989,10 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   // Back/forward (and #links typed into the address bar) move the hub; drops are the only pushed entries.
   function applyHash() {
     const { screen, slug } = fromHash();
-    if (slug && screen !== 'centre') markTab(screen, slug);
+    if (screen !== 'centre') {
+      if (slug) selected.set(screen, slug);
+      else selected.delete(screen);
+    }
     if (screen !== active) navigate(screen);
     else ensureFrame(screen);
   }
@@ -1037,7 +1001,7 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   if (history.state) history.replaceState(null, '');
   {
     const { screen, slug } = fromHash();
-    if (slug) markTab(screen, slug);
+    if (slug) selected.set(screen, slug);
     setActive(screen);
   }
 </script>
