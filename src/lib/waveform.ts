@@ -1,4 +1,4 @@
-// Waveform selection editor for audio/convert: peaks, canvas drawing, handles, zoom and Web Audio playback.
+// Waveform selection editor for audio/convert: peaks, canvas drawing, handles, zoom, readouts and Web Audio playback.
 // Markup and styles live in src/pages/audio/convert.astro (data-* hooks).
 
 const RULER = 18; // CSS px reserved for the time ruler above the waveform.
@@ -6,6 +6,7 @@ const NUDGE = 0.01;
 const BIG_NUDGE = 1;
 const MAX_ZOOM = 1024;
 const RULER_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800];
+const NO_TIME = '-:--.---';
 
 /** Min/max per column across all channels, interleaved [min0, max0, min1, max1, …]. */
 function computePeaks(channels: Float32Array[], columns: number): Float32Array {
@@ -52,13 +53,17 @@ const rulerLabel = (t: number, step: number) => {
 };
 
 export interface WaveformEditor {
-  load(channels: Float32Array[], sampleRate: number): void;
+  /** `editable: false` shows and plays the whole file without trim handles (batch mode). */
+  load(channels: Float32Array[], sampleRate: number, editable?: boolean): void;
   clear(): void;
   stop(): void;
   readonly selection: { start: number; end: number; duration: number };
 }
 
-/** `onChange(committed)`: committed is false only for intermediate drag positions. */
+/**
+ * `onChange(committed)`: committed is false only for intermediate drag positions.
+ * Optional hooks inside `root`: `[data-readout=start|end|sel|pos]` time readouts and a `[data-led=play]` lamp.
+ */
 export function createWaveform(root: HTMLElement, onChange: (committed: boolean) => void): WaveformEditor {
   const q = <T extends Element>(sel: string) => root.querySelector<T>(sel)!;
   const scroll = q<HTMLElement>('[data-scroll]');
@@ -75,6 +80,9 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
   const playAllBtn = q<HTMLButtonElement>('[data-play-all]');
   const zoomIn = q<HTMLButtonElement>('[data-zoom=in]');
   const zoomOut = q<HTMLButtonElement>('[data-zoom=out]');
+  const readout = (key: string) => root.querySelector<HTMLElement>(`[data-readout=${key}]`);
+  const readouts = { start: readout('start'), end: readout('end'), sel: readout('sel'), pos: readout('pos') };
+  const playLed = root.querySelector<HTMLElement>('[data-led=play]');
 
   let channels: Float32Array[] | undefined;
   let rate = 1;
@@ -82,11 +90,13 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
   let start = 0;
   let end = 0;
   let zoom = 1;
+  let editable = true;
   // Keyed by column count, so it covers zoom levels; cleared on resize and load.
   const peaks = new Map<number, Float32Array>();
 
   const pct = (t: number) => `${(t / duration) * 100}%`;
   const minLen = () => Math.min(NUDGE, duration / 2);
+  const show = (el: HTMLElement | null, t?: number) => el && (el.textContent = t === undefined ? NO_TIME : formatTime(t));
 
   const paint = () => {
     dimStart.style.width = pct(start);
@@ -100,7 +110,9 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
       h.ariaValueText = formatTime(t);
       inputs[key].value = formatTime(t);
       inputs[key].setCustomValidity('');
+      show(readouts[key], t);
     }
+    show(readouts.sel, end - start);
   };
 
   const setSel = (s: number, e: number, committed = true) => {
@@ -143,13 +155,13 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     const pxPerSec = (w * zoom) / duration;
     const step = RULER_STEPS.find((s) => s * pxPerSec >= 70) ?? RULER_STEPS.at(-1)!;
     g.fillStyle = getComputedStyle(scroll).color;
-    g.font = `${11 * dpr}px system-ui, sans-serif`;
+    g.font = `${10 * dpr}px ui-monospace, Menlo, Consolas, monospace`;
     g.textBaseline = 'top';
     const first = Math.ceil(scroll.scrollLeft / pxPerSec / step);
     for (let k = first; k * step <= Math.min(duration, (scroll.scrollLeft + w) / pxPerSec); k++) {
       const x = Math.round((k * step * pxPerSec - scroll.scrollLeft) * dpr);
       g.fillRect(x, top - 5 * dpr, dpr, 5 * dpr);
-      g.fillText(rulerLabel(k * step, step), x + 3 * dpr, 2 * dpr);
+      g.fillText(rulerLabel(k * step, step), x + 3 * dpr, 3 * dpr);
     }
   };
   let drawQueued = false;
@@ -195,7 +207,7 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
   let drag: { kind: 'new' | 'start' | 'end'; anchor: number; x: number; moved: boolean } | undefined;
   let tap: number | undefined;
   track.addEventListener('pointerdown', (e) => {
-    if (!channels || e.button !== 0) return;
+    if (!channels || !editable || e.button !== 0) return;
     const handle = (e.target as Element).closest<HTMLElement>('[data-handle]');
     if (!handle && e.pointerType === 'touch') {
       tap = e.pointerId;
@@ -271,9 +283,13 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     pausedAt = undefined;
     playhead.hidden = true;
     pauseBtn.disabled = true;
+    playLed?.removeAttribute('data-on');
+    show(readouts.pos);
   };
   const follow = () => {
-    playhead.style.left = pct(position());
+    const t = position();
+    playhead.style.left = pct(t);
+    show(readouts.pos, t);
     raf = requestAnimationFrame(follow);
   };
   const play = (from: number, to: number) => {
@@ -293,6 +309,7 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     playhead.hidden = false;
     follow();
     pauseBtn.disabled = false;
+    playLed?.setAttribute('data-on', '');
   };
   const pause = () => {
     if (!source) return;
@@ -301,31 +318,44 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     pausedAt = at;
     playhead.style.left = pct(at);
     playhead.hidden = false;
+    show(readouts.pos, at);
   };
   const playSelection = () => play(pausedAt !== undefined && pausedAt >= start && pausedAt < end ? pausedAt : start, end);
   playBtn.onclick = playSelection;
   pauseBtn.onclick = pause;
   playAllBtn.onclick = () => play(0, duration);
   root.addEventListener('keydown', (e) => {
-    if (e.key !== ' ' || !channels || (e.target as Element).closest('input, button, select, textarea, a')) return;
+    if (e.key !== ' ' || !channels || (e.target as Element).closest('input, button, select, textarea, a, label')) return;
     e.preventDefault();
     if (source) pause();
     else playSelection();
   });
 
+  const setTransport = (on: boolean) => {
+    playBtn.disabled = playAllBtn.disabled = !on;
+    if (!on) zoomIn.disabled = zoomOut.disabled = true;
+  };
   const clear = () => {
     stop();
     channels = buffer = undefined;
     peaks.clear();
+    setTransport(false);
+    for (const el of Object.values(readouts)) show(el);
+    inputs.start.value = inputs.end.value = '';
+    draw();
   };
+  setTransport(false);
 
   return {
-    load(next, sampleRate) {
+    load(next, sampleRate, canEdit = true) {
       clear();
       channels = next;
       rate = sampleRate;
+      editable = canEdit;
       duration = next[0].length / sampleRate;
       [start, end] = [0, duration];
+      for (const el of [handles.start, handles.end, dimStart, dimEnd]) el.hidden = !editable;
+      setTransport(true);
       scroll.scrollLeft = 0;
       setZoom(1);
       paint();

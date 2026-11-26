@@ -1,156 +1,541 @@
 ---
+// Audio editor/converter as one console: display (waveform), transport, edit, local output, cloud export, output tray.
+import Base from '../../layouts/Base.astro';
 import Icon from '../../components/Icon.astro';
 import ModeBadge from '../../components/ModeBadge.astro';
 import ProgressDial from '../../components/ProgressDial.astro';
-import ToolShell from '../../components/ToolShell.astro';
+import { href, toolBySlug } from '../../tools';
 
+const tool = toolBySlug('audio/convert');
 const configured = Boolean(import.meta.env.PUBLIC_API_URL);
+const accept = 'audio/*,.m4a,.aac,.mp3,.wav,.ogg,.oga,.opus,.flac,.webm';
+
+// Fader detents from bottom to top: [value, engraved label].
+const localFaders = [
+  { id: 'mp3', label: 'MP3 bitrate', cap: 'Bitrate', value: 0, steps: [['match', 'Match'], ['96', '96'], ['128', '128'], ['160', '160'], ['192', '192'], ['256', '256'], ['320', '320']] },
+  { id: 'ogg', label: 'OGG quality', cap: 'Quality', value: 0, steps: [['match', 'Match'], ['3', 'Q3'], ['5', 'Q5'], ['8', 'Q8']] },
+];
+const cloudFader = { id: 'cloud', label: 'Cloud bitrate', cap: 'Bitrate', value: 4, steps: ['64', '96', '128', '160', '192', '256', '320'].map((k) => [k, k]) };
+
+// Faint, deterministic waveform behind the empty display.
+const ghost = Array.from({ length: 180 }, (_, i) => {
+  const env = 0.25 + 0.6 * Math.abs(Math.sin(i * 0.045 + 0.6) * Math.sin(i * 0.013 + 1.9));
+  const noise = (Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1) * 0.45 + 0.55;
+  const a = Math.min(0.95, env * noise) * 44;
+  return `M${i * 2 + 1} ${(50 - a).toFixed(1)}V${(50 + a).toFixed(1)}`;
+}).join('');
 ---
-<ToolShell slug="audio/convert" multiple optionalCloud action="Convert" accept="audio/*,.m4a,.aac,.mp3,.wav,.ogg,.oga,.opus,.flac,.webm">
-  <p class="muted" data-multi-note hidden>Trimming and fades work when a single file is selected. With several files, each file is converted in full.</p>
-  <section class="wave-editor" data-editor hidden aria-labelledby="edit-title">
-    <h2 id="edit-title">Trim and cut</h2>
-    <p class="status" data-wave-status role="status"></p>
-    <div class="wave-ui" data-wave-ui hidden>
-      <div class="wave-scroll" data-scroll>
-        <div class="wave-track" data-track>
-          <canvas role="img" aria-label="Waveform with time ruler. Drag to select a range."></canvas>
-          <div class="wave-dim" data-dim="start"></div>
-          <div class="wave-dim" data-dim="end"></div>
-          <div class="wave-playhead" data-playhead hidden></div>
-          <div class="wave-handle" data-handle="start" role="slider" tabindex="0" aria-label="Selection start" aria-describedby="wave-hint"></div>
-          <div class="wave-handle" data-handle="end" role="slider" tabindex="0" aria-label="Selection end" aria-describedby="wave-hint"></div>
-        </div>
-      </div>
-      <div class="wave-bar">
-        <button class="btn" type="button" data-play>Play selection</button>
-        <button class="btn" type="button" data-pause disabled>Pause</button>
-        <button class="btn" type="button" data-play-all>Play from start</button>
-        <span class="wave-zoom">
-          <button class="icon-btn" type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out" disabled>−</button>
-          <button class="icon-btn" type="button" data-zoom="in" aria-label="Zoom in" title="Zoom in">+</button>
-        </span>
-      </div>
-      <p class="muted wave-hint" id="wave-hint">Drag on the waveform or the handles to select. On a handle, ←/→ move 10 ms, Shift+←/→ 1 s. Space plays or pauses.</p>
-      <div class="row">
-        <label class="field"><span>Start</span><input class="time" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-time="start" aria-describedby="time-format" /></label>
-        <label class="field"><span>End</span><input class="time" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" data-time="end" aria-describedby="time-format" /></label>
-        <label class="field"><span>Fade in (s)</span><input class="fade" type="number" min="0" max="5" step="0.1" value="0" data-fade="in" /></label>
-        <label class="field"><span>Fade out (s)</span><input class="fade" type="number" min="0" max="5" step="0.1" value="0" data-fade="out" /></label>
-      </div>
-      <p class="muted wave-hint" id="time-format">Times as m:ss.mmm (e.g. 0:01.500) or in seconds.</p>
-      <fieldset>
-        <legend>Edit</legend>
-        <div class="segmented">
-          <label><input type="radio" name="edit" value="keep" checked /><span>Keep selection</span></label>
-          <label><input type="radio" name="edit" value="remove" /><span>Remove selection</span></label>
-        </div>
-      </fieldset>
-      <p class="muted wave-hint" data-length></p>
-    </div>
-  </section>
-  <fieldset>
-    <legend>Output format</legend>
-    <div class="segmented">
-      <label><input type="radio" name="format" value="mp3" checked /><span>MP3</span></label>
-      <label><input type="radio" name="format" value="wav" /><span>WAV</span></label>
-      <label><input type="radio" name="format" value="ogg" /><span>OGG</span></label>
-    </div>
-  </fieldset>
-  <label class="field" data-for="mp3">
-    <span>Bitrate</span>
-    <select name="bitrate">
-      <option value="match" selected>Match source</option>
-      <option value="128">128 kbps · smaller</option>
-      <option value="192">192 kbps · good</option>
-      <option value="256">256 kbps · high</option>
-      <option value="320">320 kbps · highest</option>
-    </select>
-  </label>
-  <label class="field" data-for="ogg" hidden>
-    <span>Quality</span>
-    <select name="quality">
-      <option value="match" selected>Match source</option>
-      <option value="3">Standard (~112 kbps)</option>
-      <option value="5">High (~160 kbps)</option>
-      <option value="8">Very high (~256 kbps)</option>
-    </select>
-  </label>
-  <p class="muted" data-for="wav" hidden>Uncompressed 16-bit PCM: large files, no quality loss.</p>
-  <p class="muted">Output keeps the source sample rate. Match source picks a bitrate close to the source’s, so lossy files don’t grow; lossless sources get 192 kbps MP3 or high-quality OGG.</p>
-  <ul class="audio-info" data-info aria-live="polite" hidden></ul>
-
-  <section slot="after" class="panel cloud-export" data-cloud aria-labelledby="cloud-title">
+<Base title={`${tool.title} · Tools`} description={tool.summary}>
+  <div class="tool-shell" data-wide>
+    <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#audio'}>Audio</a></div>
     <div class="tool-head">
-      <h2 id="cloud-title">Cloud export</h2>
-      <ModeBadge mode="cloud" />
+      <h1>{tool.title}</h1>
+      <ModeBadge mode={tool.mode} />
     </div>
-    <p class="cloud-intro">Uploads the original file to our server in the EU (Belgium) for M4A, FLAC or Opus output. Tags and cover art are kept, your selection and fades are applied there, and nothing is stored.</p>
-    {!configured && <p class="warn-box" role="note">The cloud service is not configured for this site, so cloud export is unavailable. Nothing will be uploaded.</p>}
-    <form class="options" data-cloud-form>
-      <fieldset disabled={!configured}>
-        <legend>Cloud format</legend>
-        <div class="segmented">
-          <label><input type="radio" name="format" value="m4a" checked /><span>M4A (AAC)</span></label>
-          <label><input type="radio" name="format" value="flac" /><span>FLAC</span></label>
-          <label><input type="radio" name="format" value="opus" /><span>Opus</span></label>
-          <label><input type="radio" name="format" value="mp3" /><span>MP3 (with tags)</span></label>
+    <div class="privacy-note privacy-local" role="note">
+      <Icon name="lock" />
+      <p><strong>Stays on this device.</strong> Only the optional <strong>cloud export</strong> uploads the original file, and it asks first every time. <a href={href('privacy')}>How we check</a></p>
+    </div>
+
+    <section class="deck" data-deck data-empty aria-label="Audio editor">
+      <div class="dk-display" data-screen-state="empty">
+        <div class="dk-head">
+          <span class="lamps" aria-hidden="true">
+            <span class="lamp" data-on><i></i>Local</span>
+            <span class="lamp" data-led="play"><i></i>Play</span>
+            <span class="lamp lamp-amber" data-led="cloud"><i></i>Cloud</span>
+          </span>
+          <span class="dk-source" data-source></span>
         </div>
-      </fieldset>
-      <label class="field" data-cloud-bitrate>
-        <span>Bitrate</span>
-        <select name="bitrate" disabled={!configured}>
-          <option value="64">64 kbps</option>
-          <option value="96">96 kbps</option>
-          <option value="128">128 kbps</option>
-          <option value="160">160 kbps</option>
-          <option value="192" selected>192 kbps</option>
-          <option value="256">256 kbps</option>
-          <option value="320">320 kbps</option>
-        </select>
-      </label>
-    </form>
-    <p class="muted cloud-hint" data-cloud-hint hidden></p>
-    <div class="actions">
-      <button class="btn cloud-btn" type="button" data-cloud-run disabled><Icon name="upload" />Export via cloud</button>
-      <button class="btn" type="button" data-cloud-cancel hidden>Cancel</button>
-    </div>
-    <div class="status-row">
-      <ProgressDial data-cloud-progress />
-      <p class="status" data-cloud-status role="status" aria-live="polite"></p>
-    </div>
-  </section>
-</ToolShell>
 
-<style>
-  .audio-info { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; font-size: 0.88rem; }
-  .audio-info :global(li) { padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; }
-  .audio-info :global(strong) { display: block; }
-  .audio-info :global(span) { color: var(--muted); display: block; }
+        <div class="screen">
+          <dl class="readouts">
+            <div><dt>Start</dt><dd class="seg" data-readout="start">-:--.---</dd></div>
+            <div><dt>End</dt><dd class="seg" data-readout="end">-:--.---</dd></div>
+            <div><dt>Sel</dt><dd class="seg" data-readout="sel">-:--.---</dd></div>
+            <div><dt>Out</dt><dd class="seg" data-readout="out">-:--.---</dd></div>
+            <div><dt>Pos</dt><dd class="seg" data-readout="pos">-:--.---</dd></div>
+          </dl>
+          <div class="wave-scroll" data-scroll>
+            <div class="wave-track" data-track>
+              <canvas role="img" aria-label="Waveform with time ruler. Drag to select a range."></canvas>
+              <div class="wave-dim" data-dim="start"></div>
+              <div class="wave-dim" data-dim="end"></div>
+              <div class="wave-playhead" data-playhead hidden></div>
+              <div class="wave-handle" data-handle="start" role="slider" tabindex="0" aria-label="Selection start" aria-describedby="dk-hint"></div>
+              <div class="wave-handle" data-handle="end" role="slider" tabindex="0" aria-label="Selection end" aria-describedby="dk-hint"></div>
+            </div>
+          </div>
+          <label class="screen-empty">
+            <svg class="screen-ghost" viewBox="0 0 360 100" preserveAspectRatio="none" aria-hidden="true"><path d={ghost} /></svg>
+            <span class="screen-title">Drop audio or choose a file</span>
+            <span class="key key-dark"><Icon name="upload" />Choose files</span>
+            <span class="screen-hint">{tool.limits}. You can also paste from the clipboard.</span>
+            <input class="visually-hidden" type="file" accept={accept} multiple data-input />
+          </label>
+          <p class="screen-msg" data-screen-msg role="status"></p>
+        </div>
 
-  .wave-editor, .wave-ui { display: grid; gap: 0.75rem; min-width: 0; }
-  .wave-editor h2, .wave-editor .status, .wave-hint { margin: 0; }
-  .wave-editor .status:empty { display: none; }
-  .wave-hint { font-size: 0.85rem; }
-  .wave-scroll { overflow-x: auto; overflow-y: hidden; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
-  .wave-track { position: relative; height: 150px; min-width: 100%; user-select: none; -webkit-user-select: none; cursor: crosshair; }
-  .wave-track canvas { position: sticky; left: 0; display: block; height: 100%; color: var(--accent); }
-  .wave-dim { position: absolute; top: 18px; bottom: 0; left: 0; right: 0; background: color-mix(in srgb, var(--surface) 70%, transparent); pointer-events: none; }
+        <div class="transport" role="group" aria-label="Transport">
+          <button class="key" type="button" data-play-all disabled><Icon name="skip-prev" /><span>From start</span></button>
+          <button class="key" type="button" data-play disabled><Icon name="play" /><span>Play selection</span></button>
+          <button class="key" type="button" data-pause disabled><Icon name="pause" /><span>Pause</span></button>
+          <span class="transport-zoom">
+            <span class="cap" aria-hidden="true">Zoom</span>
+            <button class="key key-sq" type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out" disabled><Icon name="zoom-out" /></button>
+            <button class="key key-sq" type="button" data-zoom="in" aria-label="Zoom in" title="Zoom in" disabled><Icon name="zoom-in" /></button>
+          </span>
+        </div>
+
+        <div class="tracks" data-tracks hidden>
+          <ol class="track-list" data-track-list aria-label="Loaded files"></ol>
+          <label class="key key-sm" title="Add more audio files"><Icon name="plus" /><span>Add</span><input class="visually-hidden" type="file" accept={accept} multiple data-add aria-label="Add audio files" /></label>
+          <button class="key key-sm" type="button" data-eject title="Remove all files"><Icon name="xmark" /><span>Eject</span></button>
+        </div>
+      </div>
+
+      <section class="mod mod-edit" aria-labelledby="edit-title">
+        <h2 class="mod-title" id="edit-title">Edit</h2>
+        <fieldset class="mod-body" data-edit disabled>
+          <legend class="visually-hidden">Trim, cut and fades</legend>
+          <div class="lcd-fields">
+            <label class="lcd-field"><span class="cap">Start</span><input class="lcd" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="-:--.---" data-time="start" aria-describedby="dk-time" /></label>
+            <label class="lcd-field"><span class="cap">End</span><input class="lcd" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="-:--.---" data-time="end" aria-describedby="dk-time" /></label>
+          </div>
+          <div class="edit-row">
+            {[['in', 'Fade in'], ['out', 'Fade out']].map(([id, label]) => (
+              <div class="knob-unit">
+                <div class="knob" role="slider" tabindex="0" data-knob={id} aria-label={label} aria-valuemin="0" aria-valuemax="5" aria-valuenow="0" aria-valuetext="0.0 seconds" aria-describedby="dk-knob"><span class="knob-cap"></span></div>
+                <output class="lcd lcd-xs" data-knob-out={id} aria-hidden="true">0.0 s</output>
+                <span class="cap" aria-hidden="true">{label}</span>
+              </div>
+            ))}
+            <div class="toggle">
+              <span class="cap" id="dk-mode">Selection</span>
+              <div class="toggle-row" role="radiogroup" aria-labelledby="dk-mode">
+                <label><input type="radio" name="edit" value="keep" checked /><span>Keep</span></label>
+                <span class="toggle-slot" data-toggle-lever aria-hidden="true"><span class="toggle-lever"></span></span>
+                <label><input type="radio" name="edit" value="remove" /><span>Remove</span></label>
+              </div>
+            </div>
+          </div>
+          <p class="mod-note" id="dk-time">Times as m:ss.mmm (e.g. 0:01.500) or seconds.</p>
+          <p class="mod-note" id="dk-hint">On the display, drag to select or drag a handle. On a handle, ←/→ move 10 ms, Shift+←/→ 1 s. Space plays or pauses.</p>
+          <p class="visually-hidden" id="dk-knob">Arrow keys change by 0.1 s, Shift or Page Up/Down by 1 s. Drag up or down.</p>
+          <p class="mod-note mod-warn" data-multi-note hidden>Trim, cut and fades work when a single file is loaded. With several files, Convert processes each file in full.</p>
+        </fieldset>
+      </section>
+
+      <section class="mod mod-out" aria-labelledby="out-title">
+        <header class="mod-head">
+          <h2 class="mod-title" id="out-title">Output</h2>
+          <span class="lamp" data-on aria-hidden="true"><i></i>On device</span>
+        </header>
+        <fieldset class="pbs">
+          <legend class="visually-hidden">Output format</legend>
+          <label class="pb"><input type="radio" name="format" value="mp3" checked /><span>MP3</span></label>
+          <label class="pb"><input type="radio" name="format" value="wav" /><span>WAV</span></label>
+          <label class="pb"><input type="radio" name="format" value="ogg" /><span>OGG</span></label>
+        </fieldset>
+        <div class="out-grid">
+          <div class="fader-bay">
+            {localFaders.map((f) => (
+              <div class="fader" data-fader={f.id} data-for={f.id} hidden={f.id !== 'mp3'}>
+                <div class="fader-body">
+                  <ol class="fader-scale" aria-hidden="true">{f.steps.map(([v, label]) => <li data-v={v}>{label}</li>)}</ol>
+                  <input class="fader-input" type="range" min="0" max={f.steps.length - 1} step="1" value={f.value} aria-label={f.label} />
+                </div>
+                <span class="cap" aria-hidden="true">{f.cap}</span>
+              </div>
+            ))}
+            <p class="fader-none" data-for="wav" hidden>16-bit PCM<br />no loss<br />large files</p>
+          </div>
+          <div class="out-side">
+            <dl class="lcd lcd-info">
+              <div><dt>Out</dt><dd data-plan>–</dd></div>
+              <div><dt>Size</dt><dd data-est>–</dd></div>
+            </dl>
+            <button class="key key-go" type="button" data-run disabled><span class="go-lamp" aria-hidden="true"></span><span data-run-label>Convert</span></button>
+            <button class="key" type="button" data-cancel hidden>Cancel</button>
+            <div class="status-row">
+              <ProgressDial data-progress />
+              <p class="status" data-status role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+        <p class="mod-note">Keeps the source sample rate. Match picks a bitrate close to the source’s, so lossy files don’t grow. Tags and cover art are not copied.</p>
+      </section>
+
+      <section class="mod mod-cloud" data-cloud aria-labelledby="cloud-title">
+        <header class="mod-head">
+          <Icon name="cloud" />
+          <h2 class="mod-title" id="cloud-title">Cloud export</h2>
+          <span class="lamp lamp-amber" data-led="cloud" aria-hidden="true"><i></i>Upload</span>
+        </header>
+        <p class="mod-note mod-lead">Uploads the original file to our EU server (Belgium) for M4A, FLAC or Opus. Tags and cover art are kept, your selection and fades are applied there, nothing is stored. Asks every time.</p>
+        {!configured && <p class="warn-box" role="note">The cloud service is not configured for this site, so cloud export is unavailable. Nothing will be uploaded.</p>}
+        <fieldset class="pbs pbs-amber" disabled={!configured}>
+          <legend class="visually-hidden">Cloud format</legend>
+          <label class="pb"><input type="radio" name="cloud-format" value="m4a" checked /><span>M4A</span></label>
+          <label class="pb"><input type="radio" name="cloud-format" value="flac" /><span>FLAC</span></label>
+          <label class="pb"><input type="radio" name="cloud-format" value="opus" /><span>Opus</span></label>
+          <label class="pb"><input type="radio" name="cloud-format" value="mp3" /><span>MP3 + tags</span></label>
+        </fieldset>
+        <div class="out-grid">
+          <div class="fader-bay">
+            <div class="fader" data-fader={cloudFader.id}>
+              <div class="fader-body">
+                <ol class="fader-scale" aria-hidden="true">{cloudFader.steps.map(([v, label]) => <li data-v={v}>{label}</li>)}</ol>
+                <input class="fader-input" type="range" min="0" max={cloudFader.steps.length - 1} step="1" value={cloudFader.value} aria-label={cloudFader.label} disabled={!configured} />
+              </div>
+              <span class="cap" aria-hidden="true">{cloudFader.cap}</span>
+            </div>
+          </div>
+          <div class="out-side">
+            <p class="lcd lcd-info" data-cloud-plan>–</p>
+            <button class="key key-go key-cloud" type="button" data-cloud-run disabled><span class="go-lamp" aria-hidden="true"></span><Icon name="upload" />Export via cloud</button>
+            <button class="key" type="button" data-cloud-cancel hidden>Cancel</button>
+            <p class="mod-note mod-warn" data-cloud-hint hidden></p>
+            <div class="status-row">
+              <ProgressDial data-cloud-progress />
+              <p class="status" data-cloud-status role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mod tray" data-tray hidden aria-labelledby="tray-title">
+        <h2 class="mod-title" id="tray-title">Output tray</h2>
+        <ul class="tray-list" data-tray-list></ul>
+      </section>
+    </section>
+
+    <dialog data-consent aria-labelledby="consent-title">
+      <h2 id="consent-title"><Icon name="cloud" /> Upload to process?</h2>
+      <p>This uploads the original audio file for processing in Belgium (EU). Files are not intentionally retained after processing. Operational request metadata (time, size, IP address) may be logged.</p>
+      <p class="muted">Your answer is not remembered; we ask every time.</p>
+      <form method="dialog">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn btn-primary" value="upload" autofocus>Upload &amp; process</button>
+      </form>
+    </dialog>
+    <!-- Icons for markup built in the script. -->
+    <template data-icon="xmark"><Icon name="xmark" /></template>
+    <template data-icon="download"><Icon name="download" /></template>
+  </div>
+</Base>
+
+<style is:global>
+  .deck {
+    --deck-w: min(100vw - 2rem, 1320px);
+    --chassis: light-dark(#e2e2dd, #18191c);
+    --face: light-dark(#ecece8, #202125);
+    --face-hi: light-dark(#f6f6f3, #26272b);
+    --edge: light-dark(#c3c3bc, #0b0c0e);
+    --bevel: light-dark(rgb(255 255 255 / 0.85), rgb(255 255 255 / 0.06));
+    --engrave: light-dark(#5a5d63, #9b9ea6);
+    --glass: light-dark(#141816, #0a0c0c);
+    --phos: light-dark(#86e6b9, #74e2b2);
+    --phos-dim: color-mix(in srgb, var(--phos) 52%, transparent);
+    --phos-glow: color-mix(in srgb, var(--phos) 45%, transparent);
+    --led-g: #43d68c;
+    --led-a: #ffb23e;
+    --key: light-dark(#e9e9e5, #2b2c30);
+    --key-hi: light-dark(#fbfbf9, #35363b);
+    --key-edge: light-dark(#a9a9a2, #08090a);
+    --key-fg: light-dark(#26282c, #dcdde1);
+    --key-dark: light-dark(#2b2d31, #3a3c41);
+    --key-dark-hi: light-dark(#3d4045, #4a4c52);
+    width: var(--deck-w);
+    margin: 1.25rem calc((100% - var(--deck-w)) / 2) 0;
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
+    grid-template-areas: 'display display display' 'edit out cloud' 'tray tray tray';
+    background: repeating-linear-gradient(0deg, transparent 0 2px, light-dark(rgb(0 0 0 / 0.018), rgb(255 255 255 / 0.012)) 2px 3px), var(--chassis);
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    color: var(--fg);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .deck.over { outline: 3px solid var(--led-g); outline-offset: -3px; }
+  .deck .icon svg { width: 16px; height: 16px; }
+  .deck .cap { font: 650 0.62rem/1.2 var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--engrave); }
+
+  /* Modules */
+  .dk-display, .mod {
+    position: relative; min-width: 0; padding: 12px 14px 14px; border-radius: 10px;
+    background: linear-gradient(var(--face-hi), var(--face)); border: 1px solid var(--edge);
+    box-shadow: inset 0 1px 0 var(--bevel), 0 1px 2px rgb(0 0 0 / 0.16);
+  }
+  .mod-edit { grid-area: edit; }
+  .mod-out { grid-area: out; }
+  .mod-cloud { grid-area: cloud; }
+  .mod-title { margin: 0 0 10px; font: 700 0.7rem/1 var(--font); letter-spacing: 0.16em; text-transform: uppercase; color: var(--engrave); }
+  .mod-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 10px; color: var(--engrave); }
+  .mod-head .mod-title { margin: 0; }
+  .mod-head .lamp { margin-left: auto; }
+  .mod-body { display: grid; gap: 12px; margin: 0; padding: 0; border: 0; min-width: 0; }
+  .mod-note { margin: 10px 0 0; font-size: 0.76rem; line-height: 1.4; color: var(--muted); }
+  .mod-body .mod-note { margin: 0; }
+  .mod-warn { color: color-mix(in srgb, var(--cloud) 70%, var(--fg)); }
+  .mod-lead { margin: 0 0 10px; }
+  .mod .warn-box { margin: 0 0 10px; font-size: 0.8rem; }
+  /* Rack unit: screws in the corners and an amber edge mark the cloud module. */
+  .mod-cloud {
+    background:
+      radial-gradient(circle at 9px 9px, var(--edge) 0 2.5px, transparent 3px),
+      radial-gradient(circle at calc(100% - 9px) 9px, var(--edge) 0 2.5px, transparent 3px),
+      radial-gradient(circle at 9px calc(100% - 9px), var(--edge) 0 2.5px, transparent 3px),
+      radial-gradient(circle at calc(100% - 9px) calc(100% - 9px), var(--edge) 0 2.5px, transparent 3px),
+      linear-gradient(var(--face-hi), var(--face));
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--led-a) 75%, transparent), inset 0 1px 0 var(--bevel), 0 1px 2px rgb(0 0 0 / 0.16);
+    padding-left: 18px;
+  }
+  .mod-cloud .mod-head { color: color-mix(in srgb, var(--cloud) 80%, var(--fg)); }
+
+  /* Lamps (LEDs) */
+  .lamps { display: flex; gap: 12px; }
+  .lamp { --lamp: var(--led-g); display: inline-flex; align-items: center; gap: 5px; font: 650 0.6rem/1 var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--engrave); white-space: nowrap; }
+  .lamp i { width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--lamp) 18%, #26282b); box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.55); }
+  .lamp[data-on] i { background: var(--lamp); box-shadow: 0 0 7px var(--lamp), inset 0 -1px 1px rgb(0 0 0 / 0.2); }
+  .lamp-amber { --lamp: var(--led-a); }
+  .lamp-amber[data-on] i { animation: lamp-blink 1s steps(2, jump-none) infinite; }
+  @keyframes lamp-blink { 50% { opacity: 0.45; } }
+
+  /* Display */
+  .dk-display { grid-area: display; display: flex; flex-direction: column; gap: 10px; }
+  .dk-head { display: flex; align-items: center; gap: 14px; min-height: 18px; }
+  .dk-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.74rem/1.2 var(--mono); color: var(--engrave); }
+  .screen {
+    position: relative; display: flex; flex-direction: column; height: 270px; overflow: hidden; border-radius: 8px;
+    background: radial-gradient(130% 120% at 50% 0%, color-mix(in srgb, var(--phos) 7%, var(--glass)), var(--glass) 65%);
+    border: 1px solid #000; color: var(--phos);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.04), inset 0 10px 30px rgb(0 0 0 / 0.55), 0 1px 0 var(--bevel);
+  }
+  .screen::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+    background: repeating-linear-gradient(to bottom, rgb(255 255 255 / 0.028) 0 1px, transparent 1px 3px), linear-gradient(165deg, rgb(255 255 255 / 0.06), transparent 38%);
+  }
+  .readouts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; padding: 8px 12px 6px; border-bottom: 1px solid color-mix(in srgb, var(--phos) 14%, transparent); }
+  .readouts div { display: flex; align-items: baseline; gap: 7px; }
+  .readouts dt { font: 600 0.58rem/1 var(--font); letter-spacing: 0.14em; text-transform: uppercase; color: var(--phos-dim); }
+  .seg { position: relative; margin: 0; font: 500 1rem/1.1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; text-shadow: 0 0 8px var(--phos-glow); }
+  .deck[data-empty] .seg { color: var(--phos-dim); text-shadow: none; }
+  .wave-scroll { position: relative; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; color: var(--phos-dim); scrollbar-color: var(--phos-dim) transparent; }
+  .wave-track { position: relative; height: 100%; min-width: 100%; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+  .wave-track canvas { position: sticky; left: 0; display: block; height: 100%; color: var(--phos); filter: drop-shadow(0 0 2px var(--phos-glow)); }
+  .wave-dim { position: absolute; top: 18px; bottom: 0; left: 0; right: 0; background: color-mix(in srgb, var(--glass) 66%, transparent); pointer-events: none; }
   .wave-dim[data-dim='start'] { right: auto; }
-  .wave-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--error); pointer-events: none; }
+  .wave-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #f4f6f2; box-shadow: 0 0 6px rgb(255 255 255 / 0.6); pointer-events: none; }
   .wave-handle { position: absolute; top: 0; bottom: 0; width: 24px; margin-left: -12px; cursor: ew-resize; touch-action: none; }
-  .wave-handle::before { content: ''; position: absolute; top: 18px; bottom: 0; left: 11px; width: 2px; background: var(--fg); }
-  .wave-handle::after { content: ''; position: absolute; top: 2px; left: 6px; width: 12px; height: 16px; border-radius: 4px; background: var(--fg); }
-  .wave-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-  .wave-zoom { margin-left: auto; display: flex; gap: 0.25rem; }
-  .wave-zoom .icon-btn { width: 40px; height: 40px; font-size: 1.2rem; border-color: var(--border); }
-  .time { width: 8.5em; font-variant-numeric: tabular-nums; }
-  .fade { width: 6em; }
+  .wave-handle::before { content: ''; position: absolute; top: 18px; bottom: 0; left: 11px; width: 2px; background: var(--led-a); box-shadow: 0 0 6px color-mix(in srgb, var(--led-a) 60%, transparent); }
+  .wave-handle::after { content: ''; position: absolute; top: 1px; left: 7px; width: 10px; height: 15px; border-radius: 2px; background: var(--led-a); }
+  .wave-handle:focus-visible { outline: none; }
+  .wave-handle:focus-visible::after { outline: 3px solid #fff; outline-offset: 2px; }
+  .deck[data-empty] .wave-scroll { display: none; }
 
-  .cloud-export .tool-head h2 { margin: 0; }
-  .cloud-intro { margin: 0.5rem 0 1rem; font-size: 0.93rem; }
-  .cloud-export .warn-box { margin: 0 0 1rem; }
-  .cloud-hint { margin: 0.75rem 0 0; font-size: 0.9rem; }
+  .screen-empty {
+    position: relative; flex: 1; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 0.7rem;
+    padding: 1rem; text-align: center; cursor: pointer;
+  }
+  .deck[data-empty] .screen-empty { display: flex; }
+  .screen-ghost { position: absolute; inset: 10px 0; width: 100%; height: calc(100% - 20px); fill: none; stroke: var(--phos); stroke-width: 1.1; opacity: 0.1; }
+  .screen-empty > :not(svg, input) { position: relative; }
+  .screen-title { font: 600 1.15rem/1.2 var(--font); letter-spacing: 0.02em; text-shadow: 0 0 10px var(--phos-glow); }
+  .screen-hint { max-width: 46ch; font-size: 0.78rem; color: var(--phos-dim); }
+  .screen-empty:focus-within .key, .screen-empty:hover .key { box-shadow: 0 0 0 3px var(--phos-dim), 0 2px 0 var(--key-edge); }
+  .screen-empty:has(input:focus-visible) .key { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .deck.over .screen-empty { background: color-mix(in srgb, var(--phos) 8%, transparent); }
+  .screen-msg { position: absolute; inset: auto 0 40%; margin: 0; padding: 0 1rem; text-align: center; font: 0.9rem/1.4 var(--mono); text-shadow: 0 0 8px var(--phos-glow); pointer-events: none; }
+  .screen-msg:empty { display: none; }
+  .dk-display[data-screen-state='error'] .screen-msg { color: var(--led-a); }
+
+  /* Keys */
+  .deck .key {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; min-height: 40px; padding: 0 0.85rem;
+    border: 1px solid var(--key-edge); border-radius: 7px; background: linear-gradient(var(--key-hi), var(--key)); color: var(--key-fg);
+    font: 700 0.68rem/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; text-decoration: none; cursor: pointer;
+    box-shadow: 0 2px 0 var(--key-edge), 0 3px 5px rgb(0 0 0 / 0.16), inset 0 1px 0 var(--bevel);
+    transition: translate 0.05s, box-shadow 0.05s;
+  }
+  .deck .key:active:not(:disabled) { translate: 0 2px; box-shadow: 0 0 0 var(--key-edge), inset 0 1px 3px rgb(0 0 0 / 0.3); }
+  .deck .key:disabled { opacity: 0.42; cursor: default; }
+  .deck .key:focus-visible, .deck label.key:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .deck .key[hidden] { display: none; }
+  .deck .key-dark { background: linear-gradient(var(--key-dark-hi), var(--key-dark)); color: #eef0f2; }
+  .deck .key-sq { min-width: 40px; padding: 0; font-size: 1.1rem; }
+  .deck .key-sm { min-height: 32px; padding: 0 0.65rem; font-size: 0.62rem; }
+  .deck .key-go { min-height: 50px; font-size: 0.8rem; background: linear-gradient(var(--key-dark-hi), var(--key-dark)); color: #eef0f2; }
+  .go-lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--led-g); box-shadow: 0 0 7px var(--led-g); }
+  .key-go:disabled .go-lamp { background: #555; box-shadow: none; }
+  .key-cloud .go-lamp { background: var(--led-a); box-shadow: 0 0 7px var(--led-a); }
+
+  .transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .transport-zoom { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+  /* Track list ("cassettes") */
+  .tracks { display: flex; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--edge); }
+  .tracks[hidden] { display: none; }
+  .track-list { display: flex; gap: 6px; flex: 1; min-width: 0; margin: 0; padding: 2px 2px 4px; list-style: none; overflow-x: auto; }
+  .track-list li { display: flex; flex: none; max-width: 260px; border-radius: 6px; border: 1px solid var(--edge); background: light-dark(#f4f2ea, #2a2b2f); box-shadow: inset 0 1px 0 var(--bevel); }
+  .track-list li:has([aria-current='true']) { border-color: var(--led-g); box-shadow: 0 0 0 1px var(--led-g), inset 0 1px 0 var(--bevel); }
+  .track { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 6px 4px 6px 10px; border: 0; background: none; color: var(--fg); font: 0.78rem/1.2 var(--mono); cursor: pointer; text-align: left; }
+  .track-no { color: var(--engrave); font-weight: 700; }
+  .track-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track-size { color: var(--engrave); font-size: 0.7rem; white-space: nowrap; }
+  .track-x { flex: none; width: 30px; border: 0; background: none; color: var(--engrave); cursor: pointer; font-size: 0.8rem; }
+  .track:focus-visible, .track-x:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 6px; }
+
+  /* LCD fields and readouts */
+  .deck .lcd {
+    margin: 0; padding: 0.38rem 0.55rem; border: 1px solid #000; border-radius: 5px; background: var(--glass); color: var(--phos);
+    font: 500 0.95rem/1.25 var(--mono); font-variant-numeric: tabular-nums; text-shadow: 0 0 7px var(--phos-glow);
+    box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.7), 0 1px 0 var(--bevel);
+  }
+  .deck input.lcd { width: 100%; min-width: 0; }
+  .deck input.lcd:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .deck input.lcd::placeholder { color: var(--phos-dim); opacity: 1; }
+  .deck input.lcd:disabled { color: var(--phos-dim); text-shadow: none; }
+  .deck .lcd-xs { padding: 0.18rem 0.4rem; font-size: 0.72rem; text-align: center; }
+  .lcd-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .lcd-field { display: grid; gap: 5px; }
+  .deck .lcd-info { display: grid; gap: 3px; font-size: 0.74rem; overflow-wrap: anywhere; }
+  .lcd-info div { display: flex; gap: 8px; }
+  .lcd-info dt { flex: none; width: 3.2em; color: var(--phos-dim); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.9; }
+  .lcd-info dd { margin: 0; }
+
+  /* Knobs */
+  .edit-row { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: flex-start; }
+  .knob-unit { display: grid; justify-items: center; gap: 6px; }
+  .knob {
+    --v: 0; position: relative; width: 60px; height: 60px; border-radius: 50%; cursor: ns-resize; touch-action: none;
+    background: conic-gradient(from 225deg, var(--led-g) calc(var(--v) * 270deg), color-mix(in srgb, var(--engrave) 30%, transparent) 0 270deg, transparent 0);
+  }
+  .knob-cap {
+    position: absolute; inset: 6px; border-radius: 50%; rotate: calc(-135deg + var(--v) * 270deg);
+    background: repeating-conic-gradient(rgb(0 0 0 / 0.07) 0 6deg, transparent 6deg 12deg), radial-gradient(circle at 38% 30%, var(--key-hi), var(--key) 70%);
+    border: 1px solid var(--key-edge); box-shadow: 0 3px 5px rgb(0 0 0 / 0.3), inset 0 1px 0 var(--bevel);
+  }
+  .knob-cap::after { content: ''; position: absolute; left: 50%; top: 4px; width: 3px; height: 32%; margin-left: -1.5px; border-radius: 2px; background: var(--key-fg); }
+  .knob:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .mod-body:disabled .knob { opacity: 0.42; cursor: default; }
+
+  /* Two-position toggle */
+  .toggle { display: grid; gap: 8px; }
+  .toggle-row { display: flex; align-items: center; gap: 8px; min-height: 60px; }
+  .toggle-row label { position: relative; }
+  .toggle-row input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .toggle-row label span { font: 700 0.66rem/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; color: var(--engrave); }
+  .toggle-row input:checked + span { color: var(--fg); }
+  .toggle-row input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+  .toggle-slot { position: relative; width: 46px; height: 24px; border-radius: 12px; background: var(--glass); box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7), 0 1px 0 var(--bevel); cursor: pointer; }
+  .toggle-lever { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 40% 30%, var(--key-hi), var(--key) 75%); box-shadow: 0 2px 3px rgb(0 0 0 / 0.4); transition: translate 0.12s; }
+  .toggle-row:has([value='remove']:checked) .toggle-lever { translate: 22px 0; background: radial-gradient(circle at 40% 30%, #ffd08a, var(--led-a) 75%); }
+  .mod-body:disabled .toggle-row { opacity: 0.42; }
+  .mod-body:disabled .toggle-slot { cursor: default; }
+
+  /* Illuminated push buttons */
+  .pbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+  .pb { position: relative; flex: 1 1 0; min-width: 0; }
+  .pb input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .pb span {
+    display: flex; flex-direction: column; align-items: center; gap: 5px; height: 100%; padding: 7px 6px 8px; border: 1px solid var(--key-edge); border-radius: 6px;
+    background: linear-gradient(var(--key-hi), var(--key)); color: var(--key-fg); font: 700 0.68rem/1.15 var(--font); letter-spacing: 0.08em; text-transform: uppercase; text-align: center;
+    box-shadow: 0 2px 0 var(--key-edge), inset 0 1px 0 var(--bevel);
+  }
+  .pb span::before { content: ''; width: 20px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--led-g) 15%, #3a3c40); }
+  .pb input:checked + span { translate: 0 2px; box-shadow: 0 0 0 var(--key-edge), inset 0 1px 3px rgb(0 0 0 / 0.25); }
+  .pb input:checked + span::before { background: var(--led-g); box-shadow: 0 0 6px var(--led-g); }
+  .pbs-amber .pb span::before { background: color-mix(in srgb, var(--led-a) 15%, #3a3c40); }
+  .pbs-amber .pb input:checked + span::before { background: var(--led-a); box-shadow: 0 0 6px var(--led-a); }
+  .pb input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .pbs:disabled .pb span { opacity: 0.42; }
+
+  /* Vertical faders */
+  .out-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
+  .fader-bay { display: grid; justify-items: center; min-width: 92px; }
+  .fader { display: grid; justify-items: center; gap: 6px; }
+  .fader[hidden], .fader-none[hidden] { display: none; }
+  .fader-body { display: flex; gap: 4px; height: 156px; }
+  .fader-scale { display: flex; flex-direction: column-reverse; justify-content: space-between; margin: 0; padding: 9px 0; list-style: none; }
+  .fader-scale li { display: flex; align-items: center; justify-content: flex-end; gap: 4px; height: 0; font: 600 0.6rem/1 var(--mono); color: var(--engrave); cursor: pointer; white-space: nowrap; }
+  .fader-scale li::after { content: ''; width: 6px; height: 1px; background: currentColor; }
+  .fader-scale li[data-on] { color: var(--fg); }
+  .fader-input {
+    -webkit-appearance: none; appearance: none; writing-mode: vertical-lr; direction: rtl; width: 30px; height: 100%; margin: 0; padding: 0;
+    background: linear-gradient(90deg, transparent 13px, #0a0b0c 13px 17px, transparent 17px); border-radius: 3px; cursor: ns-resize;
+  }
+  .fader-input::-webkit-slider-runnable-track { background: transparent; }
+  .fader-input::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 30px; height: 18px; border-radius: 3px; border: 1px solid var(--key-edge);
+    background: linear-gradient(var(--key-hi), var(--key) 42%, #111 42% 58%, var(--key) 58%, var(--key-hi)); box-shadow: 0 3px 4px rgb(0 0 0 / 0.35);
+  }
+  .fader-input::-moz-range-track { background: transparent; }
+  .fader-input::-moz-range-thumb {
+    width: 28px; height: 16px; border-radius: 3px; border: 1px solid var(--key-edge);
+    background: linear-gradient(var(--key-hi), var(--key) 42%, #111 42% 58%, var(--key) 58%, var(--key-hi)); box-shadow: 0 3px 4px rgb(0 0 0 / 0.35);
+  }
+  .fader-input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .fader-input:disabled { opacity: 0.4; cursor: default; }
+  .fader-none { margin: 0; padding: 0.6rem 0.4rem; font: 0.7rem/1.6 var(--mono); color: var(--engrave); text-align: center; text-transform: uppercase; letter-spacing: 0.06em; }
+  .out-side { display: grid; gap: 10px; align-content: start; min-width: 0; }
+  .out-side .status-row { margin: 0; gap: 10px; }
+  .out-side .status { font-size: 0.8rem; min-height: 0; }
+  .deck .dial { width: 44px; height: 44px; }
+  .deck .dial-track { stroke: var(--glass); }
+  .deck .dial-arc { stroke: var(--led-g); filter: drop-shadow(0 0 3px var(--led-g)); }
+  .mod-cloud .dial-arc { stroke: var(--led-a); filter: drop-shadow(0 0 3px var(--led-a)); }
+  .deck .dial-value { font: 700 0.62rem/1 var(--mono); }
+
+  /* Output tray */
+  .tray { grid-area: tray; }
+  .tray[hidden] { display: none; }
+  .tray-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .tray-item {
+    display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(220px, 1fr) auto; gap: 8px 14px; align-items: center; padding: 8px 10px;
+    border-radius: 7px; border: 1px solid var(--edge); background: light-dark(#f4f2ea, #2a2b2f); box-shadow: inset 0 1px 0 var(--bevel);
+  }
+  .tray-item p { margin: 0; }
+  .tray-name { font: 600 0.85rem/1.3 var(--mono); overflow-wrap: anywhere; }
+  .tray-meta { font-size: 0.78rem; color: var(--engrave); }
+  .tray-note { font-size: 0.74rem; color: var(--muted); }
+  .tray-item audio { width: 100%; height: 36px; }
+
+  @media (max-width: 1120px) {
+    .deck { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'display display' 'edit edit' 'out cloud' 'tray tray'; }
+  }
+  @media (max-width: 760px) {
+    .deck { --deck-w: calc(100vw - 1rem); grid-template-columns: minmax(0, 1fr); grid-template-areas: 'display' 'edit' 'out' 'cloud' 'tray'; padding: 8px; gap: 8px; }
+    .screen { height: 230px; }
+    .deck[data-empty] .screen { height: auto; min-height: 260px; }
+    .readouts { gap: 2px 14px; padding: 6px 10px 4px; }
+    .seg { font-size: 0.85rem; }
+    .tracks { flex-wrap: wrap; }
+    .track-list { flex-basis: 100%; }
+    .transport .key { flex: 1 1 auto; padding: 0 0.6rem; }
+    .transport-zoom { margin-left: 0; }
+    .tray-item { grid-template-columns: minmax(0, 1fr); }
+    .tray-item .key { justify-self: start; }
+    .lamps { gap: 9px; }
+    .dk-head { flex-wrap: wrap; gap: 6px 12px; }
+  }
+
+  /* Embedded in the home hub: the console is the whole frame, edge to edge. */
+  :root[data-embed] main#main:has(.deck) { width: 100%; padding: 0; }
+  :root[data-embed] .tool-shell:has(.deck) > :not(.deck, dialog) { display: none; }
+  /* Fixed frame height on wide screens: the display takes what's left, so a loaded waveform never pushes the
+     modules out of view; extra content (tray) scrolls inside the deck. */
+  :root[data-embed] .deck { width: 100%; height: 100dvh; overflow-y: auto; margin: 0; border: 0; border-radius: 0; box-shadow: none; grid-template-rows: minmax(220px, 1fr) auto auto; }
+  :root[data-embed] .dk-display { min-height: 0; }
+  :root[data-embed] .screen { flex: 1; height: auto; min-height: 180px; }
+  @media (max-width: 1120px) { :root[data-embed] .deck { height: auto; min-height: 100dvh; overflow: visible; grid-template-rows: auto; } :root[data-embed] .screen { flex: none; height: 270px; } }
+  @media (max-width: 760px) {
+    :root[data-embed] .screen { height: 230px; }
+    :root[data-embed] .deck[data-empty] .screen { height: auto; min-height: 260px; }
+  }
 </style>
 
 <script>
@@ -158,34 +543,46 @@ const configured = Boolean(import.meta.env.PUBLIC_API_URL);
   import oggWasm from 'wasm-media-encoders/wasm/ogg?url';
   import { API_URL, uploadForResult } from '../../lib/api';
   import { applyEdit, decodeAudio, encodeLossy, encodeWav, growthReason, MAX_SECONDS, planOutput, probeAudio, sourceKbps, TOO_LONG, type AudioInfo, type Edit, type Format, type Plan } from '../../lib/audio';
-  import { confirmUpload, createTool, el, formatBytes, setDial, throwIfAborted, UserError } from '../../lib/tool';
+  import { confirmUpload, el, formatBytes, setDial, throwIfAborted, UserError } from '../../lib/tool';
   import { createWaveform, formatTime } from '../../lib/waveform';
+
+  interface Result {
+    name: string;
+    blob: Blob;
+    inputSize: number;
+    note: string;
+  }
+  type Status = 'idle' | 'working' | 'done' | 'error';
 
   const MAX_FILE = 200 * 1024 * 1024;
   // Cloud Run caps HTTP/1 request bodies at 32 MiB.
   const MAX_CLOUD = 30 * 1024 * 1024;
-  const form = document.querySelector<HTMLFormElement>('[data-options]')!;
-  const infoList = form.querySelector<HTMLUListElement>('[data-info]')!;
-  const matchOptions = form.querySelectorAll<HTMLOptionElement>('option[value="match"]');
-  const editor = form.querySelector<HTMLElement>('[data-editor]')!;
-  const multiNote = form.querySelector<HTMLElement>('[data-multi-note]')!;
-  const waveStatus = editor.querySelector<HTMLElement>('[data-wave-status]')!;
-  const waveUi = editor.querySelector<HTMLElement>('[data-wave-ui]')!;
-  const lengthOut = editor.querySelector<HTMLElement>('[data-length]')!;
-  const fadeIn = editor.querySelector<HTMLInputElement>('[data-fade=in]')!;
-  const fadeOut = editor.querySelector<HTMLInputElement>('[data-fade=out]')!;
+  const VORBIS_KBPS: Record<string, number> = { 3: 112, 5: 160, 8: 256 };
+  const deck = document.querySelector<HTMLElement>('[data-deck]')!;
+  const $ = <T extends HTMLElement = HTMLElement>(sel: string) => deck.querySelector<T>(sel)!;
+  const display = $('.dk-display');
+  const screenMsg = $('[data-screen-msg]');
+  const sourceOut = $('[data-source]');
+  const outReadout = $('[data-readout=out]');
+  const tracks = $('[data-tracks]');
+  const trackList = $('[data-track-list]');
+  const editSet = $<HTMLFieldSetElement>('[data-edit]');
+  const multiNote = $('[data-multi-note]');
+  const planOut = $('[data-plan]');
+  const estOut = $('[data-est]');
+  const runBtn = $<HTMLButtonElement>('[data-run]');
+  const runLabel = $('[data-run-label]');
+  const cancelBtn = $<HTMLButtonElement>('[data-cancel]');
+  const dial = $('[data-progress]');
+  const status = $('[data-status]');
+  const tray = $('[data-tray]');
+  const trayList = $('[data-tray-list]');
+  const icon = (name: string) => document.querySelector<HTMLTemplateElement>(`template[data-icon=${name}]`)!.content.firstElementChild!.cloneNode(true);
 
   const probes = new WeakMap<File, Promise<AudioInfo>>();
   const probe = (f: File) => {
     if (!probes.has(f)) probes.set(f, probeAudio(f));
     return probes.get(f)!;
-  };
-
-  const settings = () => {
-    const data = new FormData(form);
-    const format = String(data.get('format')) as Format;
-    const raw = String(data.get(format === 'ogg' ? 'quality' : 'bitrate'));
-    return { format, choice: raw === 'match' ? ('match' as const) : Number(raw) };
   };
 
   const khz = (rate: number) => `${+(rate / 1000).toFixed(3)} kHz`;
@@ -194,98 +591,345 @@ const configured = Boolean(import.meta.env.PUBLIC_API_URL);
   const outLabel = (p: Plan) =>
     p.format === 'wav' ? `WAV · ${khz(p.sampleRate)} · 16-bit` : `${p.format.toUpperCase()} · ${khz(p.sampleRate)} · ${p.format === 'ogg' ? '≈' : ''}${p.kbps} kbps`;
   const outName = (name: string, ext: string, edited: boolean) => name.replace(/\.[^./]*$/, '') + (edited ? '-edit.' : '.') + ext;
+  const errorText = (err: unknown) => (err instanceof UserError ? err.message : `Something went wrong: ${(err as Error).message ?? err}`);
+  const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError';
+
+  /** Rotary knob (role=slider): arrows ±0.1, Shift/PageUp/PageDown ±1, Home/End, vertical drag, double-click resets. */
+  function knob(node: HTMLElement, onChange: () => void) {
+    const max = Number(node.ariaValueMax);
+    const out = $(`[data-knob-out=${node.dataset.knob}]`);
+    const off = () => editSet.disabled;
+    let value = 0;
+    const set = (v: number, notify = true) => {
+      value = Math.round(Math.min(max, Math.max(0, v)) * 10) / 10;
+      node.style.setProperty('--v', String(value / max));
+      node.ariaValueNow = String(value);
+      node.ariaValueText = `${value.toFixed(1)} seconds`;
+      out.textContent = `${value.toFixed(1)} s`;
+      if (notify) onChange();
+    };
+    node.addEventListener('keydown', (e) => {
+      const big = e.shiftKey ? 1 : 0.1;
+      const next = { ArrowUp: value + big, ArrowRight: value + big, ArrowDown: value - big, ArrowLeft: value - big, PageUp: value + 1, PageDown: value - 1, Home: 0, End: max }[e.key];
+      if (next === undefined || off()) return;
+      e.preventDefault();
+      set(next);
+    });
+    let drag: { y: number; v: number } | undefined;
+    node.addEventListener('pointerdown', (e) => {
+      if (off() || e.button !== 0) return;
+      e.preventDefault();
+      node.focus();
+      node.setPointerCapture(e.pointerId);
+      drag = { y: e.clientY, v: value };
+    });
+    // 150 px of travel covers the whole range.
+    node.addEventListener('pointermove', (e) => drag && set(drag.v + ((drag.y - e.clientY) / 150) * max));
+    node.addEventListener('pointerup', () => (drag = undefined));
+    node.addEventListener('pointercancel', () => (drag = undefined));
+    node.addEventListener('dblclick', () => !off() && set(0));
+    return {
+      get value() {
+        return value;
+      },
+      set,
+    };
+  }
+
+  /** Vertical fader over a native range input (index into the engraved detents); labels are clickable. */
+  function fader(id: string, describe: (v: string) => string, onChange: () => void) {
+    const root = $(`[data-fader=${id}]`);
+    const input = root.querySelector<HTMLInputElement>('input')!;
+    const marks = [...root.querySelectorAll<HTMLElement>('li')];
+    const sync = () => {
+      input.ariaValueText = describe(marks[+input.value].dataset.v!);
+      input.title = input.ariaValueText;
+      marks.forEach((m, i) => m.toggleAttribute('data-on', i === +input.value));
+    };
+    input.addEventListener('input', () => {
+      sync();
+      onChange();
+    });
+    marks.forEach((m, i) =>
+      m.addEventListener('click', () => {
+        if (input.disabled) return;
+        input.value = String(i);
+        input.focus();
+        sync();
+        onChange();
+      }),
+    );
+    sync();
+    return {
+      input,
+      sync,
+      get value() {
+        return marks[+input.value].dataset.v!;
+      },
+    };
+  }
 
   let files: File[] = [];
-  // PCM of the single selected file at its source rate, shared by the waveform and local export.
+  let cur = 0;
+  // PCM of the file on the display at its source rate, shared by the waveform and local export.
   let decoded: { file: File; rate: number; channels: Float32Array[] } | undefined;
-  const wave = createWaveform(editor, (committed) => (committed ? refresh() : showLength()));
+  let job: AbortController | undefined;
+  let cloudJob: AbortController | undefined;
+  let urls: string[] = [];
+  const matched: Record<'mp3' | 'ogg', number | undefined> = { mp3: undefined, ogg: undefined };
 
-  /** The edit for the single decoded file, or undefined when it would not change anything. */
+  const checked = (name: string) => $<HTMLInputElement>(`[name=${name}]:checked`).value;
+  const wave = createWaveform(deck, (committed) => (committed ? refresh() : showLength()));
+  const fades = { in: knob($('[data-knob=in]'), refresh), out: knob($('[data-knob=out]'), refresh) };
+  const faders = {
+    mp3: fader('mp3', (v) => (v === 'match' ? `Match source${matched.mp3 ? ` (${matched.mp3} kbps)` : ''}` : `${v} kbps`), refresh),
+    ogg: fader('ogg', (v) => (v === 'match' ? `Match source${matched.ogg ? ` (~${matched.ogg} kbps)` : ''}` : `Quality ${v} (~${VORBIS_KBPS[v]} kbps)`), refresh),
+    cloud: fader('cloud', (v) => (cloudFormat() === 'flac' ? 'Lossless, no bitrate' : `${v} kbps`), refresh),
+  };
+
+  const settings = () => {
+    const format = checked('format') as Format;
+    const raw = format === 'wav' ? 'match' : faders[format].value;
+    return { format, choice: raw === 'match' ? ('match' as const) : Number(raw) };
+  };
+
+  /** The edit for the single loaded file, or undefined when it would not change anything. */
   function currentEdit(): Edit | undefined {
-    if (!decoded) return;
+    if (!decoded || files.length !== 1) return;
     const { start, end, duration } = wave.selection;
-    const remove = new FormData(form).get('edit') === 'remove';
-    const fade = (i: HTMLInputElement) => Math.min(5, Math.max(0, Number(i.value) || 0));
-    const edit = { start, end, remove, fadeIn: fade(fadeIn), fadeOut: fade(fadeOut) };
-    return remove || start > 0 || end < duration || edit.fadeIn || edit.fadeOut ? edit : undefined;
+    const edit = { start, end, remove: checked('edit') === 'remove', fadeIn: fades.in.value, fadeOut: fades.out.value };
+    return edit.remove || start > 0 || end < duration || edit.fadeIn || edit.fadeOut ? edit : undefined;
   }
 
   function showLength() {
-    if (!decoded) return;
+    if (!decoded) {
+      outReadout.textContent = '-:--.---';
+      return;
+    }
     const { start, end, duration } = wave.selection;
-    const remove = new FormData(form).get('edit') === 'remove';
-    lengthOut.textContent = `Selection ${formatTime(end - start)} · Result ${formatTime(remove ? duration - (end - start) : end - start)}`;
+    const edit = currentEdit();
+    outReadout.textContent = formatTime(!edit ? duration : edit.remove ? duration - (end - start) : end - start);
   }
 
   let renderId = 0;
   async function render() {
     const id = ++renderId;
     const { format, choice } = settings();
-    form.querySelectorAll<HTMLElement>('[data-for]').forEach((e) => (e.hidden = e.dataset.for !== format));
     const infos = await Promise.all(files.map(probe));
     if (id !== renderId) return;
+    for (const f of ['mp3', 'ogg'] as const) {
+      // With one effective bitrate across files, show it on the Match detent.
+      const kbps = new Set(infos.map((info) => planOutput(info, f, 'match').kbps));
+      matched[f] = kbps.size === 1 ? [...kbps][0] : undefined;
+      faders[f].sync();
+    }
     const plans = infos.map((info) => planOutput(info, format, choice));
     const edit = currentEdit();
     if (edit && plans[0].bytes) {
       const { start, end, duration } = wave.selection;
       plans[0].bytes *= (edit.remove ? duration - (end - start) : end - start) / duration;
     }
-    // With one effective bitrate across files, show it on the Match option itself.
-    const matched = new Set(infos.map((info) => planOutput(info, format, 'match').kbps));
-    const only = matched.size === 1 ? [...matched][0] : undefined;
-    matchOptions.forEach((o) => (o.textContent = only ? `Match source (${format === 'ogg' ? '~' : ''}${only} kbps)` : 'Match source'));
-    infoList.replaceChildren(
+    planOut.textContent = !files.length ? '–' : files.length === 1 ? outLabel(plans[0]) : `${files.length} files · ${format.toUpperCase()}`;
+    const known = plans.every((p) => p.bytes);
+    estOut.textContent = files.length && known ? `≈${formatBytes(plans.reduce((n, p) => n + p.bytes!, 0))}` : '–';
+  }
+
+  const setScreen = (state: 'empty' | 'loading' | 'ready' | 'error', msg = '') => {
+    display.dataset.screenState = state;
+    screenMsg.textContent = msg;
+  };
+
+  function renderTracks() {
+    tracks.hidden = !files.length;
+    trackList.replaceChildren(
       ...files.map((f, i) => {
-        const info = infos[i];
-        const kbps = sourceKbps(info);
-        const src = [info.format, khz(info.sampleRate), chans(info.channels), kbps && `≈${Math.round(kbps)} kbps`, info.duration && time(info.duration)].filter(Boolean).join(' · ');
-        const est = plans[i].bytes ? ` · ≈${formatBytes(plans[i].bytes!)}` : '';
-        return el('li', {}, el('strong', { textContent: f.name }), el('span', { textContent: `Source: ${src}` }), el('span', { textContent: `Output: ${outLabel(plans[i])}${est}` }));
+        const pick = el(
+          'button',
+          { type: 'button', className: 'track', title: f.name },
+          el('span', { className: 'track-no', textContent: String(i + 1).padStart(2, '0') }),
+          el('span', { className: 'track-name', textContent: f.name }),
+          el('span', { className: 'track-size', textContent: formatBytes(f.size) }),
+        );
+        pick.setAttribute('aria-current', String(i === cur));
+        pick.onclick = () => {
+          if (i === cur) return;
+          cur = i;
+          renderTracks();
+          void loadTrack();
+        };
+        const remove = el('button', { type: 'button', className: 'track-x', ariaLabel: `Remove ${f.name}`, title: 'Remove' }, icon('xmark'));
+        remove.onclick = () => {
+          if (i < cur) cur--;
+          setFiles(files.filter((_, j) => j !== i));
+        };
+        return el('li', {}, pick, remove);
       }),
     );
-    infoList.hidden = files.length === 0;
   }
 
   let loadId = 0;
-  async function loadEditor() {
+  async function loadTrack() {
     const id = ++loadId;
     wave.clear();
     decoded = undefined;
-    const file = files.length === 1 ? files[0] : undefined;
-    editor.hidden = !file;
+    const file = files[cur];
+    const single = files.length === 1;
+    editSet.disabled = true;
     multiNote.hidden = files.length < 2;
-    waveUi.hidden = true;
-    if (!file) return;
-    fadeIn.value = fadeOut.value = '0';
-    form.querySelector<HTMLInputElement>('[name=edit][value=keep]')!.checked = true;
-    waveStatus.dataset.kind = 'working';
-    waveStatus.textContent = 'Loading waveform…';
+    fades.in.set(0, false);
+    fades.out.set(0, false);
+    $<HTMLInputElement>('[name=edit][value=keep]').checked = true;
+    sourceOut.textContent = '';
+    if (!file) {
+      setScreen('empty');
+      refresh();
+      return;
+    }
+    setScreen('loading', 'Loading waveform…');
     try {
       const info = await probe(file);
+      if (id !== loadId) return;
+      const kbps = sourceKbps(info);
+      sourceOut.textContent = [file.name, info.format, khz(info.sampleRate), chans(info.channels), kbps && `≈${Math.round(kbps)} kbps`, info.duration && time(info.duration)].filter(Boolean).join(' · ');
       if (info.duration && info.duration > MAX_SECONDS) throw new UserError(TOO_LONG);
       const channels = await decodeAudio(file, info.sampleRate);
       if (id !== loadId) return;
       decoded = { file, rate: info.sampleRate, channels };
-      waveUi.hidden = false;
-      wave.load(channels, info.sampleRate);
-      waveStatus.textContent = '';
+      setScreen('ready');
+      wave.load(channels, info.sampleRate, single);
+      editSet.disabled = !single;
     } catch (err) {
       if (id !== loadId) return;
-      waveStatus.dataset.kind = 'error';
-      waveStatus.textContent = `${err instanceof UserError ? err.message : "This file can't be shown as a waveform."} Trimming is unavailable${API_URL ? '; cloud export still works.' : '.'}`;
+      setScreen('error', `${err instanceof UserError ? err.message : "This file can't be shown as a waveform."} Trimming is unavailable${API_URL && single ? '; cloud export still works.' : '.'}`);
     }
     refresh();
   }
 
+  function setFiles(next: File[]) {
+    job?.abort();
+    cloudJob?.abort();
+    files = next;
+    cur = Math.min(cur, Math.max(0, files.length - 1));
+    clearResults();
+    setStatus('idle');
+    deck.toggleAttribute('data-empty', !files.length);
+    renderTracks();
+    void loadTrack();
+  }
+
+  function addFiles(incoming: File[]) {
+    const errors: string[] = [];
+    const ok = incoming.filter((f) => {
+      if (f.size > MAX_FILE) errors.push(`${f.name}: larger than 200 MB.`);
+      return f.size <= MAX_FILE;
+    });
+    if (ok.length) {
+      cur = files.length;
+      setFiles([...files, ...ok]);
+    }
+    if (errors.length) setStatus('error', errors.join('\n'));
+  }
+
+  const setStatus = (kind: Status, text = '', fraction?: number) => {
+    status.dataset.kind = kind;
+    status.textContent = text;
+    dial.hidden = kind !== 'working';
+    setDial(dial, fraction);
+  };
+
+  function clearResults() {
+    urls.forEach((u) => URL.revokeObjectURL(u));
+    urls = [];
+    trayList.replaceChildren();
+    tray.hidden = true;
+  }
+
+  function showResults(items: Result[]) {
+    clearResults();
+    trayList.replaceChildren(
+      ...items.map((r) => {
+        const url = URL.createObjectURL(r.blob);
+        urls.push(url);
+        const pct = Math.round((r.blob.size / r.inputSize - 1) * 100);
+        const delta = pct === 0 ? 'same size' : pct < 0 ? `${-pct}% smaller` : `${pct}% larger`;
+        return el(
+          'li',
+          { className: 'tray-item' },
+          el('div', {}, el('p', { className: 'tray-name', textContent: r.name }), el('p', { className: 'tray-meta', textContent: `${formatBytes(r.blob.size)} · ${delta}` }), el('p', { className: 'tray-note', textContent: r.note })),
+          el('audio', { src: url, controls: true, preload: 'metadata', ariaLabel: `Preview ${r.name}` }),
+          el('a', { className: 'key key-dark', href: url, download: r.name, ariaLabel: `Download ${r.name}` }, icon('download'), 'Download'),
+        );
+      }),
+    );
+    tray.hidden = false;
+    trayList.querySelector<HTMLElement>('a')?.focus();
+  }
+
+  async function convertAll(signal: AbortSignal, progress: (text: string, fraction: number) => void): Promise<Result[]> {
+    const { format, choice } = settings();
+    const edit = currentEdit();
+    const results: Result[] = [];
+    for (const [i, f] of files.entries()) {
+      throwIfAborted(signal);
+      const step = (text: string, frac: number) => progress(`${text} ${f.name}`, (i + frac) / files.length);
+      step('Decoding', 0);
+      const info = await probe(f);
+      const plan = planOutput(info, format, choice);
+      let channels = decoded?.file === f && decoded.rate === plan.sampleRate ? decoded.channels : await decodeAudio(f, plan.sampleRate);
+      const fullSeconds = channels[0].length / plan.sampleRate;
+      if (edit) channels = applyEdit(channels, plan.sampleRate, edit);
+      throwIfAborted(signal);
+      step('Encoding', 0);
+      plan.channels = channels.length as 1 | 2;
+      const blob =
+        format === 'wav' ? encodeWav(channels, plan.sampleRate) : await encodeLossy(channels, plan, format === 'mp3' ? mp3Wasm : oggWasm, signal, (frac) => step('Encoding', frac));
+      const seconds = channels[0].length / plan.sampleRate;
+      const actual = format === 'ogg' ? `OGG · ${khz(plan.sampleRate)} · ≈${Math.round((blob.size * 8) / seconds / 1000)} kbps` : outLabel(plan);
+      results.push({
+        name: outName(f.name, format, !!edit),
+        blob,
+        inputSize: f.size,
+        note: [actual + '.', growthReason({ ...info, duration: info.duration ?? fullSeconds }, plan, blob.size, f.size), 'Tags and cover art are not copied.'].filter(Boolean).join(' '),
+      });
+    }
+    return results;
+  }
+
+  runBtn.onclick = async () => {
+    if (!files.length || job) return;
+    wave.stop();
+    const controller = (job = new AbortController());
+    clearResults();
+    runBtn.disabled = true;
+    cancelBtn.hidden = false;
+    setStatus('working', 'Working…');
+    try {
+      const results = await convertAll(controller.signal, (text, fraction) => setStatus('working', text, fraction));
+      setStatus('done', 'Done. See the output tray.');
+      showResults(results);
+    } catch (err) {
+      if (isAbort(err)) setStatus('idle', 'Cancelled.');
+      else {
+        console.error(err);
+        setStatus('error', errorText(err));
+      }
+    } finally {
+      if (job === controller) job = undefined;
+      cancelBtn.hidden = true;
+      runBtn.disabled = !files.length;
+    }
+  };
+  cancelBtn.onclick = () => job?.abort();
+
   // Cloud export: optional, confirmed before every upload, sends the original file plus edit parameters.
-  const cloud = document.querySelector<HTMLElement>('[data-cloud]')!;
-  const cloudForm = cloud.querySelector<HTMLFormElement>('[data-cloud-form]')!;
-  const cloudBitrate = cloud.querySelector<HTMLElement>('[data-cloud-bitrate]')!;
+  const cloud = $('[data-cloud]');
+  const cloudPlan = cloud.querySelector<HTMLElement>('[data-cloud-plan]')!;
   const cloudHint = cloud.querySelector<HTMLElement>('[data-cloud-hint]')!;
   const cloudRun = cloud.querySelector<HTMLButtonElement>('[data-cloud-run]')!;
   const cloudCancel = cloud.querySelector<HTMLButtonElement>('[data-cloud-cancel]')!;
   const cloudDial = cloud.querySelector<HTMLElement>('[data-cloud-progress]')!;
   const cloudStatus = cloud.querySelector<HTMLElement>('[data-cloud-status]')!;
+  const cloudLeds = deck.querySelectorAll<HTMLElement>('[data-led=cloud]');
   const CLOUD_LABELS = { m4a: 'M4A (AAC)', flac: 'FLAC', opus: 'Opus', mp3: 'MP3' };
   const CLOUD_ERRORS = {
     413: 'The file is larger than 30 MB, the limit for cloud export.',
@@ -293,43 +937,46 @@ const configured = Boolean(import.meta.env.PUBLIC_API_URL);
     422: 'The server rejected these settings. The selection may lie outside the audio, or the audio is longer than 60 minutes.',
     504: 'Processing took too long. Try a shorter file or selection.',
   };
-  let cloudController: AbortController | undefined;
 
-  const cloudFormat = () => String(new FormData(cloudForm).get('format')) as keyof typeof CLOUD_LABELS;
+  function cloudFormat() {
+    return checked('cloud-format') as keyof typeof CLOUD_LABELS;
+  }
   function cloudBlocker(): string {
     if (files.length !== 1) return files.length ? 'Cloud export works on one file at a time.' : 'Choose an audio file first.';
-    if (files[0].size > MAX_CLOUD) return `This file is ${formatBytes(files[0].size)}, too large for cloud export (up to 30 MB). Local export above has no such limit.`;
+    if (files[0].size > MAX_CLOUD) return `This file is ${formatBytes(files[0].size)}, too large for cloud export (up to 30 MB). Local output has no such limit.`;
     const edit = currentEdit();
-    if (edit?.remove) return 'Remove selection is only available for local export. Switch to Keep selection to export via the cloud.';
+    if (edit?.remove) return 'Remove selection is only available for local output. Switch the selection to Keep to export via the cloud.';
     if (edit && edit.fadeIn + edit.fadeOut > edit.end - edit.start) return 'Fade in and fade out together are longer than the selection.';
     return '';
   }
   function syncCloud() {
-    cloudBitrate.hidden = cloudFormat() === 'flac';
+    const format = cloudFormat();
+    faders.cloud.input.disabled = !API_URL || format === 'flac';
+    faders.cloud.sync();
+    cloudPlan.textContent = `${CLOUD_LABELS[format]} · ${format === 'flac' ? 'lossless' : `${faders.cloud.value} kbps`}${format === 'opus' ? ' · 48 kHz' : ''}`;
     const why = API_URL ? cloudBlocker() : '';
     cloudHint.textContent = why;
     cloudHint.hidden = !why;
-    cloudRun.disabled = !API_URL || !!why || !!cloudController;
+    cloudRun.disabled = !API_URL || !!why || !!cloudJob;
   }
-  const setCloudStatus = (kind: 'idle' | 'working' | 'done' | 'error', text: string, fraction?: number) => {
+  const setCloudStatus = (kind: Status, text: string, fraction?: number) => {
     cloudStatus.dataset.kind = kind;
     cloudStatus.textContent = text;
     cloudDial.hidden = kind !== 'working';
     setDial(cloudDial, fraction);
+    cloudLeds.forEach((l) => l.toggleAttribute('data-on', kind === 'working'));
   };
-  cloudForm.addEventListener('change', syncCloud);
-  cloudForm.addEventListener('submit', (e) => e.preventDefault());
-  cloudCancel.onclick = () => cloudController?.abort();
+  cloudCancel.onclick = () => cloudJob?.abort();
 
   cloudRun.onclick = async () => {
     const file = files[0];
-    if (!file || cloudBlocker() || !(await confirmUpload())) return;
+    if (!file || cloudBlocker() || cloudJob || !(await confirmUpload())) return;
     wave.stop();
     const format = cloudFormat();
     const edit = currentEdit();
     const sec = (s: number) => String(Math.round(s * 1e6) / 1e6);
     const query = new URLSearchParams({ format });
-    if (format !== 'flac') query.set('bitrate', String(new FormData(cloudForm).get('bitrate')));
+    if (format !== 'flac') query.set('bitrate', faders.cloud.value);
     if (edit) {
       if (edit.start > 0) query.set('start', sec(edit.start));
       // Omit an end at (or within a millisecond of) the decoded end: the server's duration may differ by a few samples.
@@ -337,8 +984,8 @@ const configured = Boolean(import.meta.env.PUBLIC_API_URL);
       if (edit.fadeIn) query.set('fade_in', sec(edit.fadeIn));
       if (edit.fadeOut) query.set('fade_out', sec(edit.fadeOut));
     }
-    const controller = (cloudController = new AbortController());
-    tool.clearResults();
+    const controller = (cloudJob = new AbortController());
+    clearResults();
     cloudCancel.hidden = false;
     syncCloud();
     setCloudStatus('working', 'Uploading… 0%', 0);
@@ -348,68 +995,63 @@ const configured = Boolean(import.meta.env.PUBLIC_API_URL);
         onUploadProgress: (f) => (f < 1 ? setCloudStatus('working', `Uploading… ${Math.round(f * 100)}%`, f) : setCloudStatus('working', 'Processing on server…')),
         messages: CLOUD_ERRORS,
       });
-      setCloudStatus('done', 'Done.');
+      setCloudStatus('done', 'Done. See the output tray.');
       const kept = format === 'opus' ? 'Tags kept; Opus files carry no cover art here.' : 'Tags and cover art kept.';
-      tool.showResults([{ name: outName(file.name, format, !!edit), blob, inputSize: file.size, preview: true, note: `${CLOUD_LABELS[format]} · converted on our EU server. ${kept}` }]);
+      showResults([{ name: outName(file.name, format, !!edit), blob, inputSize: file.size, note: `${CLOUD_LABELS[format]} · converted on our EU server. ${kept}` }]);
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') setCloudStatus('idle', 'Cancelled.');
-      else setCloudStatus('error', err instanceof UserError ? err.message : `Something went wrong: ${(err as Error).message ?? err}`);
+      if (isAbort(err)) setCloudStatus('idle', 'Cancelled.');
+      else setCloudStatus('error', errorText(err));
     } finally {
-      if (cloudController === controller) cloudController = undefined;
+      if (cloudJob === controller) cloudJob = undefined;
       cloudCancel.hidden = true;
       syncCloud();
     }
   };
 
-  const tool = createTool({
-    validate: (f) => (f.size > MAX_FILE ? 'Larger than 200 MB.' : undefined),
-    onFilesChange(next) {
-      files = next;
-      cloudController?.abort();
-      loadEditor();
-      refresh();
-    },
-    async run(files, { signal, progress }) {
-      wave.stop();
-      const { format, choice } = settings();
-      const edit = files.length === 1 ? currentEdit() : undefined;
-      const results = [];
-      for (const [i, f] of files.entries()) {
-        throwIfAborted(signal);
-        const step = (text: string, frac: number) => progress(`${text} ${f.name}`, (i + frac) / files.length);
-        step('Decoding', 0);
-        const info = await probe(f);
-        const plan = planOutput(info, format, choice);
-        let channels = decoded?.file === f && decoded.rate === plan.sampleRate ? decoded.channels : await decodeAudio(f, plan.sampleRate);
-        const fullSeconds = channels[0].length / plan.sampleRate;
-        if (edit) channels = applyEdit(channels, plan.sampleRate, edit);
-        throwIfAborted(signal);
-        step('Encoding', 0);
-        plan.channels = channels.length as 1 | 2;
-        const blob =
-          format === 'wav'
-            ? encodeWav(channels, plan.sampleRate)
-            : await encodeLossy(channels, plan, format === 'mp3' ? mp3Wasm : oggWasm, signal, (frac) => step('Encoding', frac));
-        const seconds = channels[0].length / plan.sampleRate;
-        const actual = format === 'ogg' ? `${format.toUpperCase()} · ${khz(plan.sampleRate)} · ≈${Math.round((blob.size * 8) / seconds / 1000)} kbps` : outLabel(plan);
-        results.push({
-          name: outName(f.name, format, !!edit),
-          blob,
-          inputSize: f.size,
-          preview: true,
-          note: [actual + '.', growthReason({ ...info, duration: info.duration ?? fullSeconds }, plan, blob.size, f.size), 'Tags and cover art are not copied.'].filter(Boolean).join(' '),
-        });
-      }
-      return results;
-    },
-  });
-  document.querySelector('[data-cancel]')!.addEventListener('click', () => wave.stop());
-
   function refresh() {
+    const { format } = settings();
+    deck.querySelectorAll<HTMLElement>('[data-for]').forEach((e) => (e.hidden = e.dataset.for !== format));
+    runLabel.textContent = files.length > 1 ? `Convert ${files.length} files` : 'Convert';
+    if (!job) runBtn.disabled = !files.length;
     showLength();
     syncCloud();
-    render();
+    void render();
   }
-  form.addEventListener('change', refresh);
+
+  // Files: the empty display's picker, the Add key, drag and drop anywhere on the console, and paste.
+  deck.querySelectorAll<HTMLInputElement>('[data-input], [data-add]').forEach((input) =>
+    input.addEventListener('change', () => {
+      const picked = [...(input.files ?? [])];
+      input.value = '';
+      addFiles(picked);
+    }),
+  );
+  deck.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    deck.classList.add('over');
+  });
+  deck.addEventListener('dragleave', (e) => {
+    if (!deck.contains(e.relatedTarget as Node | null)) deck.classList.remove('over');
+  });
+  deck.addEventListener('drop', (e) => {
+    e.preventDefault();
+    deck.classList.remove('over');
+    addFiles([...(e.dataTransfer?.files ?? [])]);
+  });
+  document.addEventListener('paste', (e) => {
+    const pasted = [...(e.clipboardData?.files ?? [])];
+    if (pasted.length) addFiles(pasted);
+  });
+  $('[data-eject]').addEventListener('click', () => setFiles([]));
+  $('[data-toggle-lever]').addEventListener('click', () => {
+    if (editSet.disabled) return;
+    $<HTMLInputElement>('[name=edit]:not(:checked)').checked = true;
+    refresh();
+  });
+  deck.addEventListener('change', (e) => {
+    if ((e.target as HTMLInputElement).matches('[name=format], [name=edit], [name=cloud-format]')) refresh();
+  });
+
+  setStatus('idle');
   refresh();
 </script>
