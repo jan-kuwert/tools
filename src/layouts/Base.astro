@@ -20,9 +20,11 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
   <body class:list={{ 'is-wide': wide }}>
     <a class="visually-hidden" href="#main">Skip to content</a>
     <a class="corner corner-tl brand" href={href()}>Tools</a>
-    <button class="corner corner-tr icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Colour theme: switch between system, light and dark" title="Theme">
-      <Icon name="theme-system" class="t-system" /><Icon name="theme-light" class="t-light" /><Icon name="theme-dark" class="t-dark" />
-    </button>
+    {wide && (
+      <button class="corner corner-tr icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Colour theme: switch between system, light and dark" title="Theme">
+        <Icon name="theme-system" class="t-system" /><Icon name="theme-light" class="t-light" /><Icon name="theme-dark" class="t-dark" />
+      </button>
+    )}
     <main id="main" class={wide ? 'wide' : undefined}><slot /></main>
     {wide ? (
       <>
@@ -36,10 +38,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
             <div><dt><Icon name="device" /><span>On your device</span></dt><dd>Runs in your browser. Your files never leave your device.</dd></div>
             <div><dt><Icon name="cloud" /><span>Cloud · EU</span></dt><dd>Uploaded to our server in Belgium (EU) for processing, only after you confirm each time. Nothing is stored.</dd></div>
           </dl>
-          <div class="footer-corners">
-            <a class="corner-link" href={href('privacy')}><Icon name="shield" />Privacy</a>
-            <a class="corner-link" href={href('settings')}><Icon name="settings" />Settings</a>
-          </div>
+          <p class="footer-more">Details on the <a href={href('privacy')}>privacy page</a>.</p>
         </div>
       </footer>
     )}

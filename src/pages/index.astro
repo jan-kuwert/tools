@@ -93,7 +93,6 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
             </nav>
           </header>
           <div class="cat-body" id={`panel-${c.id}`} role={list.length > 1 ? 'tabpanel' : undefined} aria-labelledby={list.length > 1 ? `tab-${c.id}-${tabKey(list[0].slug)}` : `hub-${c.id}`} data-panel></div>
-          <div class="cat-foot" aria-hidden="true"></div>
         </section>
       );
     })}
@@ -267,11 +266,12 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
     .screen-centre .ea-e { right: 0.6rem; } .screen-centre .ea-w { left: 0.6rem; }
   }
 
-  /* Category screens: slim top bar, the tool fills the rest. The bottom strip keeps the corner links off the tool. */
-  .screen-cat { display: grid; grid-template-rows: auto minmax(0, 1fr) 44px; }
+  /* Category screens: slim top bar (title, tabs, navigation), the tool fills the rest edge to edge.
+     Navigation lives in the bar so it never covers tool controls; site chrome is hidden off the start screen. */
+  .screen-cat { display: grid; grid-template-rows: auto minmax(0, 1fr); }
   .cat-bar {
     display: flex; align-items: center; gap: 1rem; min-width: 0; min-height: 56px;
-    padding: 0.5rem 7.5rem 0.5rem 6rem; border-bottom: 1px solid var(--border);
+    padding: 0.5rem 1rem; border-bottom: 1px solid var(--border);
   }
   .cat-title { display: flex; align-items: center; gap: 0.6rem; flex: none; }
   .cat-title .tile { width: 2rem; height: 2rem; border-radius: 9px; }
@@ -296,26 +296,18 @@ const edgesOf = (s: Screen) => Object.entries(graph[s]) as [Dir, Screen][];
   .tab-mode svg { width: 15px; height: 15px; opacity: 0.7; }
   .cat-body { position: relative; min-height: 0; overflow: clip; }
   .tool-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); color-scheme: normal; }
-  .cat-foot { border-top: 1px solid var(--border); }
-  /* Desktop: the nav's buttons float on the screen edges, smaller and quieter than on the start screen. */
-  .cat-nav { display: contents; }
-  .screen-cat .edge-circle { width: 38px; height: 38px; opacity: 0.6; }
-  .screen-cat .edge-circle .icon svg { width: 20px; height: 20px; }
-  .screen-cat .edge-chev { width: 16px; height: 16px; }
-  .screen-cat .edge-chev .icon svg { width: 11px; height: 11px; }
-  .screen-cat .ea-n { top: 9px; left: auto; right: 4.25rem; translate: none; }
-  .screen-cat .ea-s { bottom: 3px; }
-  .screen-cat .ea-e { right: 0.6rem; }
-  .screen-cat .ea-w { left: 0.6rem; }
+  .cat-nav { display: flex; gap: 0.55rem; margin-left: auto; }
+  .cat-nav .edge { position: relative; inset: auto; translate: none; }
+  /* In the row the arrow badge sits on the corner, so it never overlaps the neighbouring button. */
+  .cat-nav .edge-chev { inset: auto -4px -4px auto; width: 16px; height: 16px; }
+  .cat-nav .edge-chev .icon svg { width: 11px; height: 11px; }
+  .screen-cat .edge-circle { width: 36px; height: 36px; }
+  .screen-cat .edge-circle .icon svg { width: 19px; height: 19px; }
   @media (max-width: 760px) {
     .cat-bar { flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0.75rem; }
-    .cat-title { order: 1; margin-left: 4.5rem; }
-    .cat-nav { order: 2; display: flex; gap: 0.55rem; margin: 0 3rem 0 auto; }
+    .cat-title { order: 1; }
+    .cat-nav { order: 2; }
     .tabs { order: 3; flex-basis: 100%; }
-    .cat-nav .edge { position: relative; inset: auto; translate: none; }
-    /* In the row the arrow badge sits on the corner, so it never overlaps the neighbouring button. */
-    .cat-nav .edge-chev { inset: auto -4px -4px auto; }
-    .screen-cat .edge-circle { width: 34px; height: 34px; opacity: 1; }
     .cat-title .tile { display: none; }
   }
 

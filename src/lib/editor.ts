@@ -1,76 +1,97 @@
-// Image editor: frame/crop, resize, rotate and convert, all on this device.
+// Image editor: crop, resize, rotate and convert on this device, plus optional cloud background removal.
 // Markup lives in src/components/ImageEditor.astro.
-// Pan state (cx, cy) and sizes are in full-resolution pixels of the rotated image ("source px");
-// the stage draws a ≤ PREVIEW px copy of it and export re-decodes the file at full resolution.
+// The crop rect is in full-resolution pixels of the rotated image ("source px"): inside the image when
+// cropping to the frame, around it with "Fit inside". The stage draws a ≤ PREVIEW px copy; export
+// re-decodes the file at full resolution.
 import { zipSync, type Zippable } from 'fflate';
+import { API_URL, uploadForResult } from './api';
 import { canvasOf, decodeImage, drawImage, encodeCanvas, EXT, inspectImage, keepMetadata, linkQuality, MAX_PIXELS, uniqueName, type ImageType, type Rect } from './image';
 import { loadPrefs } from './prefs';
-import { downloadBlob, el, formatBytes, UserError } from './tool';
+import { confirmUpload, downloadBlob, el, formatBytes, setDial, sniff, UserError } from './tool';
 
 export const RATIOS = ['original', 'free', '1:1', '4:5', '3:4', '2:3', '9:16', '16:9', '4:3', '3:2', '21:9', 'custom'] as const;
 /** Pixel sizes apply to the long side. */
 export const SIZES = ['original', '512', '720', '1080', '1280', '1920', '2048', '2560', '3840', 'custom'] as const;
+/** Percent of the crop's own pixels. */
+export const SCALES = [25, 50, 75, 100] as const;
 export type RatioId = (typeof RATIOS)[number];
 export type SizeId = (typeof SIZES)[number];
 export const choiceLabel = (id: string) => ({ original: 'Original', free: 'Free', custom: 'Custom' })[id] ?? id;
 
 const PREVIEW = 2048;
-const ZOOM = { fill: [1, 8], fit: [0.1, 1] } as const;
+const MIN_ZOOM = 0.1; // "Fit inside": image down to 10 % of the frame
+const MIN_CROP = 16; // source px
+const HIT = 12; // CSS px around a handle, so a 24 px target
+const BG_MAX_BYTES = 20 * 1024 * 1024;
 
 type Source = ImageBitmap | HTMLCanvasElement;
+type Handle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+type SizeMode = { kind: 'original' } | { kind: 'long'; n: number } | { kind: 'pct'; p: number } | { kind: 'px'; axis: 'w' | 'h'; v: number };
 
-interface Item {
+/** Decoded pixels of one file. */
+interface Pixels {
   file: File;
-  type: ImageType;
-  url: string; // thumbnail
   w: number; // decoded size before rotation
   h: number;
-  base: HTMLCanvasElement; // preview, unrotated
-  view: HTMLCanvasElement; // preview with rot/flip applied
+  base: HTMLCanvasElement; // ≤ PREVIEW px copy, unrotated
+  alpha: boolean; // has transparent pixels; detected in the background
+}
+
+interface Item extends Pixels {
+  origin: File; // as added: name, EXIF and size comparison
+  url: string; // thumbnail
+  view: HTMLCanvasElement; // base with rot/flip applied
   rot: number; // quarter turns clockwise, applied before flip
   flip: boolean;
-  zoom: number;
-  cx: number; // source point shown at the frame centre, relative to the image centre
-  cy: number;
-  alpha: boolean; // has transparent pixels; detected in the background
+  crop: Rect;
   gps: boolean;
+  before?: Pixels; // pixels before background removal, for undo
 }
 
 let root: HTMLElement | undefined;
 let ui: ReturnType<typeof bind>;
 let items: Item[] = [];
 let cur = 0;
-let full: { item: Item; rot: number; flip: boolean; src: Promise<Source> } | undefined;
+let size: SizeMode = { kind: 'original' };
+let full: { item: Item; file: File; rot: number; flip: boolean; src: Promise<Source> } | undefined;
 let raf = 0;
-let pxToWorld = 1;
+/** Stage transform of the last draw: canvas px = o + world · vs; `toWorld` is source px per CSS px. */
+let stage = { ox: 0, oy: 0, vs: 1, dpr: 1, toWorld: 1 };
 let estTimer = 0;
 let estGen = 0;
 let busy = false;
+let bgJob: AbortController | undefined;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const discard = (list: Item[]) =>
-  list.forEach((it) => {
-    it.base.width = 0;
-    it.view.width = 0;
-    URL.revokeObjectURL(it.url);
-  });
+const freePixels = (px: Pixels) => (px.base.width = 0);
+function discard(it: Item) {
+  if (it.view !== it.base) it.view.width = 0;
+  freePixels(it);
+  if (it.before) freePixels(it.before);
+  URL.revokeObjectURL(it.url);
+  if (full?.item === it) dropFull();
+}
 
 function bind(root: HTMLElement) {
   const q = <T extends Element = HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
-  const form = q<HTMLFormElement>('[data-form]');
   return {
-    form,
+    form: q<HTMLFormElement>('[data-form]'),
+    side: q<HTMLFieldSetElement>('[data-side]'),
     canvas: q<HTMLCanvasElement>('[data-canvas]'),
     name: q('[data-name]'),
     thumbs: q('[data-thumbs]'),
     crop: q('[data-crop]'),
-    zoomCtl: q('[data-zoom-controls]'),
+    needsImage: [...root.querySelectorAll<HTMLButtonElement | HTMLInputElement>('[data-needs-image]')],
+    removeBg: q<HTMLButtonElement>('[data-remove-bg]'),
+    undoBg: q<HTMLButtonElement>('[data-undo-bg]'),
+    busy: q('[data-busy]'),
+    busyText: q('[data-busy-text]'),
+    dial: q('[data-dial]'),
     fitSet: q('[data-fit-set]'),
     customRatio: q('[data-custom-ratio]'),
-    customSize: q('[data-custom-size]'),
     swap: q<HTMLButtonElement>('[data-swap]'),
     bgSet: q('[data-bg-set]'),
-    qualityOut: q('[data-quality-out]'),
+    qualityField: q('[data-quality-field]'),
     qualityNum: q<HTMLInputElement>('[data-quality-num]'),
     jpegWarn: q('[data-jpeg-warn]'),
     gpsHint: q('[data-gps-hint]'),
@@ -81,88 +102,128 @@ function bind(root: HTMLElement) {
     download: q<HTMLButtonElement>('[data-download]'),
     downloadAll: q<HTMLButtonElement>('[data-download-all]'),
     status: q('[data-status]'),
-    add: q<HTMLInputElement>('[data-add]'),
   };
 }
 
 const field = (name: string) => ui.form.elements.namedItem(name) as HTMLInputElement;
 const value = (name: string) => (ui.form.elements.namedItem(name) as RadioNodeList | HTMLInputElement).value;
+const radio = (name: string, v: string) => ui.form.querySelector<HTMLInputElement>(`[name=${name}][value="${v}"]`);
 const ratioId = () => value('ratio') as RatioId;
-const free = () => ratioId() === 'free';
-/** Which custom size field the user typed last; the other follows the ratio. */
-let sizeDriver: 'cw' | 'ch' = 'cw';
+/** Crop inside the image; otherwise ("Fit inside") the frame surrounds it. Free always crops. */
+const cropMode = () => ratioId() === 'free' || value('fit') === 'fill';
 const format = () => value('format') as ImageType;
 const quality = () => Number(field('quality').value) / 100;
 /** Colour behind transparent pixels and padding; JPEG has no alpha so it always gets one. */
 const background = () => (format() === 'image/jpeg' || value('bg') === 'colour' ? field('colour').value : undefined);
 
-const dims = (it: Item) => (it.rot % 2 ? [it.h, it.w] : [it.w, it.h]);
+const dims = (it: Item): [number, number] => (it.rot % 2 ? [it.h, it.w] : [it.w, it.h]);
 
-/** Width / height of the output; for Free and Original the image's own. NaN if the custom ratio is invalid. */
-function ratio(it: Item): number {
+/** Width / height the crop must have: undefined for Free, NaN if the custom ratio is invalid. */
+function targetRatio(it: Item): number | undefined {
   const id = ratioId();
+  if (id === 'free') return;
   const [W, H] = dims(it);
-  if (id === 'free' || id === 'original') return W / H;
+  if (id === 'original') return W / H;
   const [a, b] = id === 'custom' ? [Number(field('rw').value), Number(field('rh').value)] : id.split(':').map(Number);
   return a > 0 && b > 0 ? a / b : NaN;
 }
 
-function outSize(it: Item): [number, number] {
+/** Zoom-1 crop of ratio r: the largest inside the image, or with Fit the smallest around it. */
+function baseSize(it: Item, r: number): [number, number] {
   const [W, H] = dims(it);
-  const r = ratio(it);
-  const size = value('size') as SizeId;
-  const round = (n: number) => Math.max(1, Math.round(n));
-  if (size === 'custom') {
-    const v = Number(field(sizeDriver).value);
-    return sizeDriver === 'cw' ? [Math.round(v), round(v / r)] : [round(v * r), Math.round(v)];
-  }
-  // Largest frame of this ratio inside the source, so nothing is enlarged.
-  if (size === 'original') return W / H > r ? [round(H * r), H] : [W, round(W / r)];
-  const n = Number(size);
-  return r >= 1 ? [n, round(n / r)] : [round(n * r), n];
+  return W / H > r === cropMode() ? [H * r, H] : [W, W / r];
 }
 
-function geometry(it: Item) {
+const minCrop = (it: Item) => Math.min(...dims(it), Math.max(MIN_CROP, HIT * stage.toWorld));
+const zoomOf = (it: Item) => baseSize(it, it.crop.w / it.crop.h)[0] / it.crop.w;
+function zoomRange(it: Item): [number, number] {
+  if (!cropMode()) return [MIN_ZOOM, 1];
+  const [bw, bh] = baseSize(it, it.crop.w / it.crop.h);
+  return [1, Math.max(1, Math.min(bw, bh) / Math.min(MIN_CROP, ...dims(it)))];
+}
+
+/** Enforce the ratio, zoom range and bounds, keeping the crop's centre. */
+function clampCrop(it: Item) {
   const [W, H] = dims(it);
-  const [FW, FH] = outSize(it);
-  const noCrop = free();
-  const fill = value('fit') === 'fill';
-  const cover = fill ? Math.max(FW / W, FH / H) : Math.min(FW / W, FH / H);
-  return { W, H, FW, FH, noCrop, fill, s: noCrop ? cover : cover * it.zoom };
+  const r = targetRatio(it);
+  let { x, y, w, h } = it.crop;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  if (r && Number.isFinite(r) && Math.abs(w / h - r) > r * 1e-6) {
+    w = Math.sqrt(w * h * r);
+    h = w / r;
+  }
+  const [bw, bh] = baseSize(it, w / h);
+  const z = clamp(bw / w, ...zoomRange(it));
+  w = bw / z;
+  h = bh / z;
+  const fill = cropMode();
+  x = fill ? clamp(cx - w / 2, 0, W - w) : clamp(cx - w / 2, W - w, 0);
+  y = fill ? clamp(cy - h / 2, 0, H - h) : clamp(cy - h / 2, H - h, 0);
+  it.crop = { x, y, w, h };
+}
+
+/** Largest crop of the selected ratio (whole image for Free), centred. */
+function resetCrop(it: Item) {
+  const [W, H] = dims(it);
+  const r = targetRatio(it);
+  const [w, h] = r && Number.isFinite(r) ? baseSize(it, r) : [W, H];
+  it.crop = { x: (W - w) / 2, y: (H - h) / 2, w, h };
+}
+
+function setZoom(it: Item, z: number) {
+  const { x, y, w, h } = it.crop;
+  const [bw, bh] = baseSize(it, w / h);
+  z = clamp(z, ...zoomRange(it));
+  it.crop = { x: x + w / 2 - bw / z / 2, y: y + h / 2 - bh / z / 2, w: bw / z, h: bh / z };
+  clampCrop(it);
+}
+
+/** Drag a handle by (dx, dy) source px from the crop `c0`. Fixed ratios grow from the opposite corner or edge. */
+function resizeCrop(it: Item, hd: Handle, c0: Rect, dx: number, dy: number) {
+  const [W, H] = dims(it);
+  const m = minCrop(it);
+  const [west, east, north, south] = ['w', 'e', 'n', 's'].map((s) => hd.includes(s));
+  let [l, t, r, b] = [c0.x, c0.y, c0.x + c0.w, c0.y + c0.h];
+  if (west) l = clamp(l + dx, 0, r - m);
+  if (east) r = clamp(r + dx, l + m, W);
+  if (north) t = clamp(t + dy, 0, b - m);
+  if (south) b = clamp(b + dy, t + m, H);
+  const ratio = targetRatio(it);
+  if (!ratio || !Number.isFinite(ratio)) {
+    [l, t, r, b] = [l, t, r, b].map(Math.round);
+    it.crop = { x: l, y: t, w: r - l, h: b - t };
+    return;
+  }
+  let w = r - l;
+  const h = b - t;
+  // Corners follow whichever axis moved more; edges drive their own axis.
+  if ((west || east) && (north || south)) w = Math.abs(w - c0.w) >= Math.abs(h * ratio - c0.w) ? w : h * ratio;
+  else if (north || south) w = h * ratio;
+  const ax = west ? c0.x + c0.w : east ? c0.x : c0.x + c0.w / 2;
+  const ay = north ? c0.y + c0.h : south ? c0.y : c0.y + c0.h / 2;
+  const roomW = west ? ax : east ? W - ax : 2 * Math.min(ax, W - ax);
+  const roomH = north ? ay : south ? H - ay : 2 * Math.min(ay, H - ay);
+  w = clamp(w, Math.max(m, m * ratio), Math.min(roomW, roomH * ratio));
+  const nh = w / ratio;
+  it.crop = { x: west ? ax - w : east ? ax : ax - w / 2, y: north ? ay - nh : south ? ay : ay - nh / 2, w, h: nh };
+}
+
+/** Output px per crop px. */
+function scaleOf(it: Item): number {
+  const { w, h } = it.crop;
+  return size.kind === 'original' ? 1 : size.kind === 'pct' ? size.p / 100 : size.kind === 'long' ? size.n / Math.max(w, h) : size.v / (size.axis === 'w' ? w : h);
+}
+
+function outSize(it: Item): [number, number] {
+  const k = scaleOf(it);
+  return [Math.max(1, Math.round(it.crop.w * k)), Math.max(1, Math.round(it.crop.h * k))];
 }
 
 function problem(it: Item): string | undefined {
-  if (Number.isNaN(ratio(it))) return 'Enter an aspect ratio with both sides above 0.';
+  if (Number.isNaN(targetRatio(it))) return 'Enter an aspect ratio with both sides above 0.';
   const [w, h] = outSize(it);
-  if (!(w >= 1 && h >= 1)) return 'Enter an output width and height of at least 1 px.';
   if (w * h > MAX_PIXELS) return `${w} × ${h} px is above the 16.7 megapixel limit that works on every device, including iPhone and iPad.`;
-}
-
-/** Keep zoom in range and, with Fill, the frame inside the image; with Fit, the image inside the frame. */
-function clampView(it: Item) {
-  if (problem(it)) return;
-  const [lo, hi] = ZOOM[value('fit') === 'fill' ? 'fill' : 'fit'];
-  it.zoom = clamp(it.zoom, lo, hi);
-  const { W, H, FW, FH, fill, s } = geometry(it);
-  const limX = fill ? Math.max(0, W - FW / s) / 2 : Math.abs(W - FW / s) / 2;
-  const limY = fill ? Math.max(0, H - FH / s) / 2 : Math.abs(H - FH / s) / 2;
-  it.cx = clamp(it.cx, -limX, limX);
-  it.cy = clamp(it.cy, -limY, limY);
-}
-
-/** Rects in world units: source px with Fill (image fixed, frame moves), output px otherwise. */
-function layout(it: Item): { box: Rect; img: Rect; frame: Rect } {
-  const { W, H, FW, FH, noCrop, fill, s } = geometry(it);
-  if (noCrop) {
-    const r = { x: 0, y: 0, w: FW, h: FH };
-    return { box: r, img: r, frame: r };
-  }
-  if (fill) {
-    const img = { x: 0, y: 0, w: W, h: H };
-    return { box: img, img, frame: { x: W / 2 + it.cx - FW / s / 2, y: H / 2 + it.cy - FH / s / 2, w: FW / s, h: FH / s } };
-  }
-  const frame = { x: 0, y: 0, w: FW, h: FH };
-  return { box: frame, frame, img: { x: FW / 2 - (W / 2 + it.cx) * s, y: FH / 2 - (H / 2 + it.cy) * s, w: W * s, h: H * s } };
 }
 
 /** Rotate/flip losslessly; returns `src` itself when there is nothing to do. */
@@ -177,35 +238,33 @@ function orient<T extends Source>(src: T, rot: number, flip: boolean): T | HTMLC
   return c;
 }
 
-async function load(file: File): Promise<Item> {
-  const { bitmap, type } = await decodeImage(file);
+async function decodePixels(file: File): Promise<Pixels> {
+  const { bitmap } = await decodeImage(file);
   try {
     const k = Math.min(1, PREVIEW / Math.max(bitmap.width, bitmap.height));
     const base = drawImage(bitmap, Math.max(1, Math.round(bitmap.width * k)), Math.max(1, Math.round(bitmap.height * k)));
-    const { width: w, height: h } = bitmap;
-    const it: Item = { file, type, url: URL.createObjectURL(file), w, h, base, view: base, rot: 0, flip: false, zoom: 1, cx: 0, cy: 0, alpha: false, gps: false };
-    void inspectImage(file, base).then((info) => {
-      Object.assign(it, info);
-      if (items.includes(it)) syncHints();
-    });
-    return it;
+    return { file, w: bitmap.width, h: bitmap.height, base, alpha: false };
   } finally {
     bitmap.close();
   }
 }
 
-async function loadAll(files: File[]): Promise<{ loaded: Item[]; errors: string[] }> {
-  const loaded: Item[] = [];
-  const errors: string[] = [];
-  for (const f of files) {
-    try {
-      loaded.push(await load(f));
-    } catch (err) {
-      if (!(err instanceof UserError)) console.error(err);
-      errors.push(err instanceof UserError ? err.message : `${f.name} could not be opened.`);
-    }
-  }
-  return { loaded, errors };
+/** Fill in `alpha` (and GPS for the original file) once detected. */
+function inspect(it: Item, px: Pixels) {
+  void inspectImage(px.file, px.base).then((info) => {
+    px.alpha = info.alpha;
+    if (px.file === it.origin) it.gps = info.gps;
+    if (it.file === px.file) it.alpha = info.alpha;
+    if (items.includes(it)) syncHints();
+  });
+}
+
+async function load(file: File): Promise<Item> {
+  const px = await decodePixels(file);
+  const it: Item = { ...px, origin: file, url: URL.createObjectURL(file), view: px.base, rot: 0, flip: false, crop: { x: 0, y: 0, w: px.w, h: px.h }, gps: false };
+  resetCrop(it);
+  inspect(it, px);
+  return it;
 }
 
 function dropFull() {
@@ -215,40 +274,42 @@ function dropFull() {
 
 /** Full-resolution, rotated source. Only one is kept in memory. */
 function fullOf(it: Item): Promise<Source> {
-  if (full?.item === it && full.rot === it.rot && full.flip === it.flip) return full.src;
+  if (full?.item === it && full.file === it.file && full.rot === it.rot && full.flip === it.flip) return full.src;
   dropFull();
   const src = decodeImage(it.file).then(({ bitmap }) => {
     const out = orient(bitmap, it.rot, it.flip);
     if (out !== bitmap) bitmap.close();
     return out;
   });
-  full = { item: it, rot: it.rot, flip: it.flip, src };
+  full = { item: it, file: it.file, rot: it.rot, flip: it.flip, src };
   src.catch(() => full?.src === src && (full = undefined));
   return src;
 }
 
 function renderOutput(it: Item, src: Source): HTMLCanvasElement {
-  const { W, H, FW, FH, noCrop, s } = geometry(it);
-  const bg = background();
-  if (noCrop) return drawImage(src, FW, FH, bg);
+  const [W, H] = dims(it);
+  const [FW, FH] = outSize(it);
+  const c = it.crop;
+  const sx = FW / c.w;
+  const sy = FH / c.h;
   const out = canvasOf(FW, FH);
   const ctx = out.getContext('2d')!;
+  const bg = background();
   if (bg) {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, FW, FH);
   }
-  const x0 = FW / 2 - (W / 2 + it.cx) * s;
-  const y0 = FH / 2 - (H / 2 + it.cy) * s;
+  // Where the whole image lands in output px; scale only the visible part (high quality, never larger than the frame).
+  const x0 = -c.x * sx;
+  const y0 = -c.y * sy;
   const dx0 = Math.max(0, Math.round(x0));
   const dy0 = Math.max(0, Math.round(y0));
-  const dx1 = Math.min(FW, Math.round(x0 + W * s));
-  const dy1 = Math.min(FH, Math.round(y0 + H * s));
+  const dx1 = Math.min(FW, Math.round(x0 + W * sx));
+  const dy1 = Math.min(FH, Math.round(y0 + H * sy));
   if (dx1 > dx0 && dy1 > dy0) {
-    // Crop first, then scale only the visible part: high-quality and never larger than the frame.
-    const x = clamp((dx0 - x0) / s, 0, W);
-    const y = clamp((dy0 - y0) / s, 0, H);
-    const crop = { x, y, w: Math.min(W - x, (dx1 - dx0) / s), h: Math.min(H - y, (dy1 - dy0) / s) };
-    const piece = drawImage(src, dx1 - dx0, dy1 - dy0, undefined, crop);
+    const x = clamp((dx0 - x0) / sx, 0, W);
+    const y = clamp((dy0 - y0) / sy, 0, H);
+    const piece = drawImage(src, dx1 - dx0, dy1 - dy0, undefined, { x, y, w: Math.min(W - x, (dx1 - dx0) / sx), h: Math.min(H - y, (dy1 - dy0) / sy) });
     ctx.drawImage(piece, dx0, dy0);
     piece.width = 0;
   }
@@ -258,34 +319,57 @@ function renderOutput(it: Item, src: Source): HTMLCanvasElement {
 async function exportBlob(it: Item): Promise<{ blob: Blob; note?: string }> {
   const p = problem(it);
   if (p) throw new UserError(p);
-  clampView(it);
   const canvas = renderOutput(it, await fullOf(it));
   const type = format();
   const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : quality());
-  return field('strip').checked ? { blob } : keepMetadata(it.file, blob);
+  return field('strip').checked ? { blob } : keepMetadata(it.origin, blob);
 }
 
+const baseName = (it: Item) => it.origin.name.replace(/\.[^./]*$/, '') || 'image';
 const outName = (it: Item) => {
   const [w, h] = outSize(it);
-  return `${it.file.name.replace(/\.[^./]*$/, '') || 'image'}-${w}x${h}.${EXT[format()]}`;
+  return `${baseName(it)}${it.before ? '-no-background' : ''}-${w}x${h}.${EXT[format()]}`;
 };
 
 // ---- Stage ----
 
-let checker: { dpr: number; tile: HTMLCanvasElement } | undefined;
+/** Stage colours from the theme's CSS variables, resolved to values canvas accepts (light-dark() is not). */
+let palette = { a: '#34353a', b: '#44454b', dim: 'rgb(14 14 18 / 0.62)' };
+function refreshPalette() {
+  const probe = ui.canvas;
+  const resolve = (v: string) => {
+    probe.style.color = `var(${v})`;
+    return getComputedStyle(probe).color;
+  };
+  palette = { a: resolve('--stage-check-a'), b: resolve('--stage-check-b'), dim: resolve('--stage-dim') };
+  probe.style.color = '';
+  requestDraw();
+}
+
+let checker: { key: string; tile: HTMLCanvasElement } | undefined;
 function checkerPattern(ctx: CanvasRenderingContext2D, dpr: number) {
-  if (checker?.dpr !== dpr) {
+  const key = `${dpr} ${palette.a} ${palette.b}`;
+  if (checker?.key !== key) {
     const n = Math.round(8 * dpr);
     const tile = canvasOf(2 * n, 2 * n);
     const t = tile.getContext('2d')!;
-    t.fillStyle = '#3c3d42';
+    t.fillStyle = palette.a;
     t.fillRect(0, 0, 2 * n, 2 * n);
-    t.fillStyle = '#4d4e54';
+    t.fillStyle = palette.b;
     t.fillRect(0, 0, n, n);
     t.fillRect(n, n, n, n);
-    checker = { dpr, tile };
+    checker = { key, tile };
   }
   return ctx.createPattern(checker.tile, 'repeat')!;
+}
+
+/** Handle centres in canvas px for the current crop. */
+function handlePoints(): [Handle, number, number][] {
+  const c = items[cur].crop;
+  const { ox, oy, vs } = stage;
+  const [l, t, r, b] = [ox + c.x * vs, oy + c.y * vs, ox + (c.x + c.w) * vs, oy + (c.y + c.h) * vs];
+  const [mx, my] = [(l + r) / 2, (t + b) / 2];
+  return [['nw', l, t], ['ne', r, t], ['sw', l, b], ['se', r, b], ['n', mx, t], ['s', mx, b], ['w', l, my], ['e', r, my]];
 }
 
 function draw() {
@@ -298,29 +382,30 @@ function draw() {
   ctx.clearRect(0, 0, cw, ch);
   if (problem(it)) return;
   const dpr = cw / canvas.clientWidth;
-  const g = geometry(it);
-  const L = layout(it);
-  const pad = 20 * dpr;
-  const vs = Math.min((cw - 2 * pad) / L.box.w, (ch - 2 * pad) / L.box.h);
-  pxToWorld = dpr / vs;
-  const ox = (cw - L.box.w * vs) / 2 - L.box.x * vs;
-  const oy = (ch - L.box.h * vs) / 2 - L.box.y * vs;
+  const [W, H] = dims(it);
+  const fill = cropMode();
+  const c = it.crop;
+  const box = fill ? { x: 0, y: 0, w: W, h: H } : c;
+  const pad = 24 * dpr;
+  const vs = Math.min((cw - 2 * pad) / box.w, (ch - 2 * pad) / box.h);
+  const ox = (cw - box.w * vs) / 2 - box.x * vs;
+  const oy = (ch - box.h * vs) / 2 - box.y * vs;
+  stage = { ox, oy, vs, dpr, toWorld: dpr / vs };
   const d = (r: Rect): Rect => ({ x: ox + r.x * vs, y: oy + r.y * vs, w: r.w * vs, h: r.h * vs });
-  const img = d(L.img);
-  const frame = d(L.frame);
-  const back = g.fill && !g.noCrop ? img : frame;
+  const img = d({ x: 0, y: 0, w: W, h: H });
+  const frame = d(c);
+  const back = fill ? img : frame;
 
   ctx.fillStyle = background() ?? checkerPattern(ctx, dpr);
   ctx.fillRect(back.x, back.y, back.w, back.h);
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(it.view, img.x, img.y, img.w, img.h);
-  if (g.noCrop) return;
 
-  if (g.fill) {
+  if (fill) {
     ctx.beginPath();
     ctx.rect(img.x, img.y, img.w, img.h);
     ctx.rect(frame.x, frame.y, frame.w, frame.h);
-    ctx.fillStyle = 'rgb(14 14 18 / 0.62)';
+    ctx.fillStyle = palette.dim;
     ctx.fill('evenodd');
   }
   ctx.beginPath();
@@ -331,7 +416,7 @@ function draw() {
     ctx.lineTo(frame.x + frame.w, frame.y + frame.h * k);
   }
   ctx.lineWidth = dpr;
-  ctx.strokeStyle = 'rgb(255 255 255 / 0.28)';
+  ctx.strokeStyle = 'rgb(255 255 255 / 0.3)';
   ctx.stroke();
   ctx.lineWidth = 3 * dpr;
   ctx.strokeStyle = 'rgb(0 0 0 / 0.45)';
@@ -339,20 +424,52 @@ function draw() {
   ctx.lineWidth = 1.5 * dpr;
   ctx.strokeStyle = '#fff';
   ctx.strokeRect(frame.x, frame.y, frame.w, frame.h);
+  if (!fill) return;
+  const s = 9 * dpr;
+  for (const [, x, y] of handlePoints()) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    ctx.lineWidth = dpr;
+    ctx.strokeStyle = 'rgb(0 0 0 / 0.55)';
+    ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+  }
 }
 
 const requestDraw = () => (raf ||= requestAnimationFrame(draw));
 
-/** Move by CSS px on screen: with Fill the frame follows the pointer, with Fit the image does. */
-function moveBy(it: Item, from: { cx: number; cy: number }, dx: number, dy: number) {
-  const g = geometry(it);
-  const k = g.fill ? pxToWorld : -pxToWorld / g.s;
-  it.cx = from.cx + dx * k;
-  it.cy = from.cy + dy * k;
+/** What a pointer at client (x, y) would grab: a crop handle, or the crop/image to move. */
+function hitTest(x: number, y: number): Handle | 'move' {
+  if (!cropMode()) return 'move';
+  const rect = ui.canvas.getBoundingClientRect();
+  const px = (x - rect.left) * stage.dpr;
+  const py = (y - rect.top) * stage.dpr;
+  const reach = HIT * stage.dpr;
+  const pts = handlePoints();
+  for (const [hd, hx, hy] of pts.slice(0, 4)) if (Math.abs(px - hx) <= reach && Math.abs(py - hy) <= reach) return hd;
+  const [[, l, t], , , [, r, b]] = pts;
+  if (px > l && px < r) {
+    if (Math.abs(py - t) <= reach) return 'n';
+    if (Math.abs(py - b) <= reach) return 's';
+  }
+  if (py > t && py < b) {
+    if (Math.abs(px - l) <= reach) return 'w';
+    if (Math.abs(px - r) <= reach) return 'e';
+  }
+  return 'move';
 }
 
-function zoomBy(it: Item, factor: number) {
-  it.zoom *= factor;
+const CURSORS: Record<Handle | 'move', string> = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize', move: 'move' };
+
+/** Move by CSS px on screen: when cropping the frame follows the pointer, with Fit the image does. */
+function moveBy(it: Item, from: Rect, dx: number, dy: number) {
+  const k = (cropMode() ? 1 : -1) * stage.toWorld;
+  it.crop = { ...from, x: from.x + dx * k, y: from.y + dy * k };
+  clampCrop(it);
+}
+
+function zoomBy(it: Item | undefined, factor: number) {
+  if (!it) return;
+  setZoom(it, zoomOf(it) * factor);
   changed();
 }
 
@@ -360,63 +477,72 @@ function zoomBy(it: Item, factor: number) {
 
 function readouts() {
   const it = items[cur];
-  if (!it) return;
+  const has = !!it;
+  root!.toggleAttribute('data-empty', !has);
+  ui.side.disabled = !has;
+  for (const c of ui.needsImage) c.disabled = !has || busy;
+  ui.removeBg.disabled = !has || busy || !API_URL || !!it?.before;
+  ui.undoBg.hidden = !it?.before;
+  ui.undoBg.disabled = busy;
+  ui.download.disabled = ui.downloadAll.disabled = true;
+  ui.name.textContent = !it ? '' : items.length > 1 ? `${it.origin.name} (${cur + 1} of ${items.length})` : it.origin.name;
+  if (!it) {
+    ui.crop.textContent = '';
+    ui.dims.textContent = ui.estimate.textContent = '–';
+    ui.upscaleWarn.hidden = ui.problem.hidden = true;
+    return;
+  }
   const err = problem(it);
   const [W, H] = dims(it);
   const [FW, FH] = outSize(it);
-  const g = geometry(it);
-  ui.name.textContent = items.length > 1 ? `${it.file.name} (${cur + 1} of ${items.length})` : it.file.name;
   ui.dims.textContent = err ? '–' : `${FW} × ${FH} px`;
   ui.problem.textContent = err ?? '';
   ui.problem.hidden = !err;
   const zoom = field('zoom');
-  const [lo, hi] = ZOOM[g.fill ? 'fill' : 'fit'];
+  const [lo, hi] = zoomRange(it);
   zoom.min = String(lo);
-  zoom.max = String(hi);
-  zoom.value = String(it.zoom);
-  zoom.setAttribute('aria-valuetext', `${Math.round(g.s * 100)}% of original pixels`);
-  const pct = `${Math.round(g.s * 100)}%`;
+  zoom.max = String(Math.min(hi, 8));
+  zoom.value = String(zoomOf(it));
+  const s = FW / it.crop.w;
+  const pct = `${Math.round(s * 100)}%`;
+  zoom.setAttribute('aria-valuetext', `${pct} of original pixels`);
   // Enlarging invents pixels; tolerate rounding noise just above 100%.
-  const upscaled = !err && g.s > 1.01;
+  const upscaled = !err && s > 1.01;
   ui.upscaleWarn.hidden = !upscaled;
-  if (upscaled) ui.upscaleWarn.textContent = `Enlarged to ${pct} of the original pixels, so the result may look soft or blurry. Use a larger image or a smaller output size for a sharp result.`;
-  if (err) ui.crop.textContent = '';
-  else if (g.noCrop) ui.crop.textContent = `${W} × ${H} → ${FW} × ${FH} px`;
-  else {
-    const L = layout(it);
-    const r = g.fill ? L.frame : L.img;
-    const [x, y, w, h] = [r.x, r.y, r.w, r.h].map(Math.round);
-    ui.crop.textContent = g.fill ? `Crop ${w} × ${h} px from ${x}, ${y} · scaled to ${pct}` : `Image ${w} × ${h} px at ${x}, ${y} in frame · scaled to ${pct}`;
-  }
+  if (upscaled) ui.upscaleWarn.textContent = `Enlarged to ${pct} of the original pixels, so the result may look soft or blurry. Use a larger image, a bigger crop or a smaller output size for a sharp result.`;
+  const [x, y, w, h] = [it.crop.x, it.crop.y, it.crop.w, it.crop.h].map(Math.round);
+  ui.crop.textContent = err
+    ? ''
+    : cropMode()
+      ? `Crop ${w} × ${h} px from ${x}, ${y} of ${W} × ${H} · scaled to ${pct}`
+      : `Image ${W} × ${H} px at ${-x}, ${-y} in a ${w} × ${h} frame · scaled to ${pct}`;
   ui.download.disabled = ui.downloadAll.disabled = busy || !!err;
 }
 
 /** Show/hide and refill controls. `editing` is the field being typed in; it is left alone. */
 function syncControls(editing?: string) {
-  const noCrop = free();
+  const it = items[cur];
   const jpeg = format() === 'image/jpeg';
-  const png = format() === 'image/png';
   ui.customRatio.hidden = ratioId() !== 'custom';
-  ui.customSize.hidden = value('size') !== 'custom';
-  ui.swap.disabled = noCrop;
-  ui.fitSet.hidden = ui.zoomCtl.hidden = noCrop;
+  ui.fitSet.hidden = ratioId() === 'free';
   ui.bgSet.hidden = jpeg;
   field('colour').disabled = !jpeg && value('bg') !== 'colour';
-  field('quality').disabled = ui.qualityNum.disabled = png;
-  ui.qualityOut.textContent = png ? 'lossless' : '';
-  syncHints();
+  ui.qualityField.hidden = format() === 'image/png';
   ui.downloadAll.hidden = items.length < 2;
-  const it = items[cur];
-  if (it && !problem(it)) {
+  for (const r of ui.form.querySelectorAll<HTMLInputElement>('[name=size], [name=scale]'))
+    r.checked = r.name === 'size' ? (size.kind === 'original' ? r.value === 'original' : size.kind === 'long' && Number(r.value) === size.n) : size.kind === 'pct' && Number(r.value) === size.p;
+  if (it) {
     const [w, h] = outSize(it);
-    if (editing !== 'cw') field('cw').value = String(w);
-    if (editing !== 'ch') field('ch').value = String(h);
+    const vals = { cw: w, ch: h, pct: Math.round(scaleOf(it) * 1000) / 10 };
+    for (const [name, v] of Object.entries(vals)) if (name !== editing) field(name).value = String(v);
   }
+  syncHints();
   ui.thumbs.querySelectorAll<HTMLButtonElement>('button').forEach((b, i) => {
     b.ariaCurrent = i === cur ? 'true' : null;
     const t = items[i];
     b.querySelector('img')!.style.transform = `${t.flip ? 'scaleX(-1) ' : ''}rotate(${t.rot * 90}deg)`;
   });
+  readouts();
 }
 
 function syncHints() {
@@ -424,12 +550,10 @@ function syncHints() {
   ui.gpsHint.hidden = field('strip').checked || !items.some((it) => it.gps);
 }
 
-function changed() {
-  const it = items[cur];
+/** Refresh everything after a state change; `editing` is the field being typed in. */
+function changed(editing?: string) {
   if (ui.status.dataset.kind === 'done') setStatus('');
-  if (!it) return;
-  clampView(it);
-  readouts();
+  syncControls(editing);
   requestDraw();
   scheduleEstimate();
 }
@@ -438,14 +562,13 @@ function scheduleEstimate() {
   const it = items[cur];
   clearTimeout(estTimer);
   const gen = ++estGen;
-  const err = problem(it);
-  ui.estimate.textContent = err ? '–' : 'calculating…';
-  if (err) return;
+  if (!it || problem(it)) return;
+  ui.estimate.textContent = 'calculating…';
   estTimer = window.setTimeout(async () => {
     try {
       const { blob } = await exportBlob(it);
       if (gen !== estGen) return;
-      const pct = Math.round((blob.size / it.file.size - 1) * 100);
+      const pct = Math.round((blob.size / it.origin.size - 1) * 100);
       ui.estimate.textContent = `${formatBytes(blob.size)} · ${pct === 0 ? 'same as original' : pct < 0 ? `${-pct}% smaller` : `${pct}% larger`}`;
     } catch (err) {
       if (gen === estGen) ui.estimate.textContent = message(err);
@@ -464,18 +587,27 @@ function setStatus(text: string, kind: 'idle' | 'working' | 'error' | 'done' = '
   ui.status.dataset.kind = kind;
 }
 
+function reorient(it: Item) {
+  if (it.view !== it.base) it.view.width = 0;
+  it.view = orient(it.base, it.rot, it.flip);
+  clampCrop(it);
+  changed();
+}
+
 function rotate(d: 1 | -1) {
   const it = items[cur];
+  const [W, H] = dims(it);
+  const c = it.crop;
   // Rotation is applied before the flip, so a visual turn runs the other way while flipped.
   it.rot = (it.rot + (it.flip ? -d : d) + 4) % 4;
-  [it.cx, it.cy] = d > 0 ? [-it.cy, it.cx] : [it.cy, -it.cx];
+  it.crop = d > 0 ? { x: H - c.y - c.h, y: c.x, w: c.h, h: c.w } : { x: c.y, y: W - c.x - c.w, w: c.h, h: c.w };
   reorient(it);
 }
 
 function flip() {
   const it = items[cur];
   it.flip = !it.flip;
-  it.cx = -it.cx;
+  it.crop = { ...it.crop, x: dims(it)[0] - it.crop.x - it.crop.w };
   reorient(it);
 }
 
@@ -483,32 +615,111 @@ function flip() {
 function swap() {
   const it = items[cur];
   const id = ratioId();
-  if (!it || id === 'free') return;
-  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
-  const [W, H] = dims(it);
-  const [a, b] = id === 'custom' ? [field('rw').value, field('rh').value] : id === 'original' ? [W / gcd(W, H), H / gcd(W, H)] : id.split(':');
-  const next = `${b}:${a}`;
-  if ((RATIOS as readonly string[]).includes(next)) ui.form.querySelector<HTMLInputElement>(`[name=ratio][value="${next}"]`)!.checked = true;
-  else {
-    field('rw').value = String(b);
-    field('rh').value = String(a);
-    ui.form.querySelector<HTMLInputElement>('[name=ratio][value=custom]')!.checked = true;
+  if (id !== 'free') {
+    const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+    const [W, H] = dims(it);
+    const [a, b] = id === 'custom' ? [field('rw').value, field('rh').value] : id === 'original' ? [W / gcd(W, H), H / gcd(W, H)] : id.split(':');
+    const next = radio('ratio', `${b}:${a}`);
+    if (next) next.checked = true;
+    else {
+      field('rw').value = String(b);
+      field('rh').value = String(a);
+      radio('ratio', 'custom')!.checked = true;
+    }
   }
-  syncControls();
+  for (const x of items) {
+    const c = x.crop;
+    x.crop = { x: c.x + (c.w - c.h) / 2, y: c.y + (c.h - c.w) / 2, w: c.h, h: c.w };
+    clampCrop(x);
+  }
   changed();
 }
 
-function reorient(it: Item) {
+/** Swap an item's pixels (background removal or its undo), keeping rotation, flip and crop. */
+function setPixels(it: Item, px: Pixels) {
+  const [W0, H0] = dims(it);
   if (it.view !== it.base) it.view.width = 0;
+  Object.assign(it, { file: px.file, w: px.w, h: px.h, base: px.base, alpha: px.alpha });
   it.view = orient(it.base, it.rot, it.flip);
-  syncControls();
+  URL.revokeObjectURL(it.url);
+  it.url = URL.createObjectURL(it.file);
+  if (full?.item === it) dropFull();
+  const [W1, H1] = dims(it);
+  if (W1 !== W0 || H1 !== H0) {
+    const c = it.crop;
+    it.crop = { x: (c.x * W1) / W0, y: (c.y * H1) / H0, w: (c.w * W1) / W0, h: (c.h * H1) / H0 };
+  }
+  clampCrop(it);
+  renderThumbs();
   changed();
+}
+
+async function removeBackground() {
+  const it = items[cur];
+  if (!it || busy || it.before || !API_URL) return;
+  if (it.file.size > BG_MAX_BYTES) return setStatus('Background removal takes images up to 20 MB.', 'error');
+  if (!(await confirmUpload())) return;
+  const controller = new AbortController();
+  bgJob = controller;
+  busy = true;
+  readouts();
+  ui.busy.hidden = false;
+  ui.dial.hidden = false;
+  const progress = (text: string, f?: number) => {
+    ui.busyText.textContent = text;
+    setDial(ui.dial, f);
+  };
+  progress('Uploading… 0%', 0);
+  try {
+    const kind = await sniff(it.file);
+    // Type the body by its content, not the browser-reported MIME type.
+    const blob = await uploadForResult('/v1/remove-background', it.file.slice(0, it.file.size, `image/${kind}`), {
+      signal: controller.signal,
+      onUploadProgress: (f) => (f < 1 ? progress(`Uploading… ${Math.round(f * 100)}%`, f) : progress('Removing the background on the server…')),
+      messages: {
+        413: 'The image is larger than 20 MB.',
+        415: 'This file is not a JPEG, PNG or WebP image.',
+        422: 'The image could not be processed. It may be damaged or larger than 24 megapixels.',
+        504: 'Processing took too long. Try a smaller image.',
+      },
+    });
+    const px = await decodePixels(new File([blob], `${baseName(it)}-no-background.png`, { type: 'image/png' }));
+    if (!items.includes(it)) return freePixels(px);
+    it.before = { file: it.file, w: it.w, h: it.h, base: it.base, alpha: it.alpha };
+    setPixels(it, px);
+    inspect(it, px);
+    let note = 'Background removed.';
+    if (format() === 'image/jpeg') {
+      (ui.form.elements.namedItem('format') as HTMLSelectElement).value = 'image/png';
+      note += ' Switched to PNG to keep the transparency.';
+      changed();
+    }
+    setStatus(note, 'done');
+  } catch (err) {
+    setStatus(err instanceof DOMException && err.name === 'AbortError' ? 'Cancelled. Nothing was changed.' : message(err), 'error');
+  } finally {
+    bgJob = undefined;
+    busy = false;
+    ui.busy.hidden = true;
+    readouts();
+  }
+}
+
+function undoBackground() {
+  const it = items[cur];
+  if (!it?.before || busy) return;
+  const removed: Pixels = { file: it.file, w: it.w, h: it.h, base: it.base, alpha: it.alpha };
+  setPixels(it, it.before);
+  it.before = undefined;
+  freePixels(removed);
+  changed();
+  setStatus('Background restored.', 'done');
 }
 
 function renderThumbs() {
   ui.thumbs.replaceChildren(
     ...items.map((it, i) => {
-      const b = el('button', { type: 'button', className: 'ie-thumb', ariaLabel: `Edit ${it.file.name}`, title: it.file.name }, el('img', { src: it.url, alt: '' }));
+      const b = el('button', { type: 'button', className: 'ie-thumb checker', ariaLabel: `Edit ${it.origin.name}`, title: it.origin.name }, el('img', { src: it.url, alt: '' }));
       b.onclick = () => select(i);
       return el('li', {}, b);
     }),
@@ -518,27 +729,37 @@ function renderThumbs() {
 
 function select(i: number) {
   cur = i;
-  syncControls();
   changed();
 }
 
-function release() {
-  discard(items);
-  items = [];
-  dropFull();
-  clearTimeout(estTimer);
+function removeCurrent() {
+  const it = items[cur];
+  if (!it || busy) return;
+  discard(it);
+  items.splice(cur, 1);
+  cur = Math.min(cur, Math.max(0, items.length - 1));
   estGen++;
+  renderThumbs();
+  changed();
+  setStatus('');
+  if (!items.length) ui.canvas.getContext('2d')?.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
 }
 
 async function addFiles(files: File[]) {
-  if (!files.length) return;
+  if (!files.length || busy) return;
   setStatus('Opening…', 'working');
-  const { loaded, errors } = await loadAll(files);
-  if (!root || root.hidden) return discard(loaded); // closed while decoding
-  items.push(...loaded);
-  if (loaded.length) cur = items.length - loaded.length;
+  const errors: string[] = [];
+  const first = items.length;
+  for (const f of files) {
+    try {
+      items.push(await load(f));
+    } catch (err) {
+      if (!(err instanceof UserError)) console.error(err);
+      errors.push(err instanceof UserError ? err.message : `${f.name} could not be opened.`);
+    }
+  }
+  if (items.length > first) cur = first;
   renderThumbs();
-  syncControls();
   changed();
   setStatus(errors.join('\n'), errors.length ? 'error' : 'idle');
 }
@@ -557,14 +778,20 @@ async function run(task: () => Promise<void>) {
   }
 }
 
-function close() {
-  release();
-  root!.hidden = true;
-  root!.dispatchEvent(new CustomEvent('editor:close'));
+function onInput(t: HTMLInputElement) {
+  const it = items[cur];
+  const v = Number(t.value);
+  if (t.name === 'zoom' && it) setZoom(it, v);
+  else if (t.name === 'ratio' || t.name === 'fit' || t.name === 'rw' || t.name === 'rh') items.forEach(resetCrop);
+  else if (t.name === 'size') size = t.value === 'original' ? { kind: 'original' } : { kind: 'long', n: v };
+  else if (t.name === 'scale' || (t.name === 'pct' && v > 0)) size = { kind: 'pct', p: v };
+  else if ((t.name === 'cw' || t.name === 'ch') && v >= 1) size = { kind: 'px', axis: t.name === 'cw' ? 'w' : 'h', v: Math.round(v) };
+  changed(t.name);
 }
 
-function init(): HTMLElement {
-  if (root) return root;
+/** Wire up the editor markup once; it starts empty with its own drop target. */
+export function initImageEditor(): void {
+  if (root) return;
   const r = document.querySelector<HTMLElement>('[data-image-editor]');
   if (!r) throw new Error('ImageEditor markup missing');
   root = r;
@@ -572,40 +799,58 @@ function init(): HTMLElement {
   const { form, canvas } = ui;
   linkQuality(field('quality'), ui.qualityNum);
 
+  const prefs = loadPrefs();
+  (radio('ratio', prefs.editorRatio ?? '') ?? radio('ratio', 'original')!).checked = true;
+  const n = Number(prefs.editorSize);
+  if (n > 0) size = { kind: 'long', n };
+  (form.elements.namedItem('format') as HTMLSelectElement).value = prefs.imageFormat ?? 'image/webp';
+  field('quality').value = ui.qualityNum.value = String(prefs.imageQuality ?? 82);
+
   form.addEventListener('submit', (e) => e.preventDefault());
-  form.addEventListener('input', (e) => {
-    const t = e.target as HTMLInputElement;
-    const it = items[cur];
-    if (!it) return;
-    if (t.name === 'zoom') it.zoom = Number(t.value);
-    else if (t.name === 'cw' || t.name === 'ch') sizeDriver = t.name;
-    syncControls(t.name);
-    changed();
-  });
+  form.addEventListener('input', (e) => onInput(e.target as HTMLInputElement));
   // Write clamped values back once the user leaves a field.
   form.addEventListener('change', () => syncControls());
 
-  r.querySelector('[data-close]')!.addEventListener('click', close);
-  r.querySelector('[data-rotate-left]')!.addEventListener('click', () => rotate(-1));
-  r.querySelector('[data-rotate-right]')!.addEventListener('click', () => rotate(1));
-  ui.swap.addEventListener('click', swap);
-  r.querySelector('[data-flip]')!.addEventListener('click', flip);
-  r.querySelector('[data-zoom-out]')!.addEventListener('click', () => zoomBy(items[cur], 1 / 1.25));
-  r.querySelector('[data-zoom-in]')!.addEventListener('click', () => zoomBy(items[cur], 1.25));
-  r.querySelector('[data-reset]')!.addEventListener('click', () => {
-    Object.assign(items[cur], { zoom: 1, cx: 0, cy: 0 });
-    changed();
+  const pickers = r.querySelectorAll<HTMLInputElement>('[data-input], [data-add]');
+  pickers.forEach((input) =>
+    input.addEventListener('change', () => {
+      const files = [...(input.files ?? [])];
+      input.value = '';
+      void addFiles(files);
+    }),
+  );
+  r.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    r.classList.add('ie-over');
   });
-  ui.add.addEventListener('change', () => {
-    const files = [...(ui.add.files ?? [])];
-    ui.add.value = '';
-    void addFiles(files);
+  r.addEventListener('dragleave', (e) => {
+    if (!r.contains(e.relatedTarget as Node | null)) r.classList.remove('ie-over');
   });
-  r.addEventListener('dragover', (e) => e.preventDefault());
   r.addEventListener('drop', (e) => {
     e.preventDefault();
+    r.classList.remove('ie-over');
     void addFiles([...(e.dataTransfer?.files ?? [])]);
   });
+  document.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (files.length) void addFiles(files);
+  });
+
+  const on = (sel: string, fn: () => void) => r.querySelector(sel)!.addEventListener('click', fn);
+  on('[data-rotate-left]', () => rotate(-1));
+  on('[data-rotate-right]', () => rotate(1));
+  on('[data-flip]', flip);
+  on('[data-swap]', swap);
+  on('[data-zoom-out]', () => zoomBy(items[cur], 1 / 1.25));
+  on('[data-zoom-in]', () => zoomBy(items[cur], 1.25));
+  on('[data-reset]', () => {
+    resetCrop(items[cur]);
+    changed();
+  });
+  on('[data-remove-image]', removeCurrent);
+  on('[data-remove-bg]', () => void removeBackground());
+  on('[data-undo-bg]', undoBackground);
+  on('[data-busy-cancel]', () => bgJob?.abort());
 
   ui.download.addEventListener('click', () =>
     run(async () => {
@@ -626,9 +871,9 @@ function init(): HTMLElement {
         try {
           const { blob, note } = await exportBlob(it);
           entries[uniqueName(outName(it), taken)] = new Uint8Array(await blob.arrayBuffer());
-          if (note) failed.push(it.file.name);
+          if (note) failed.push(it.origin.name);
         } catch (err) {
-          throw err instanceof UserError ? new UserError(`${it.file.name}: ${err.message}`) : err;
+          throw err instanceof UserError ? new UserError(`${it.origin.name}: ${err.message}`) : err;
         }
       }
       // Images are already compressed, so store without deflate.
@@ -638,29 +883,37 @@ function init(): HTMLElement {
     }),
   );
 
-  // Stage: pointer drag (one finger/mouse) pans, two fingers pinch-zoom.
+  // Stage: one pointer moves the crop or drags a handle, two pinch-zoom.
   const pointers = new Map<number, { x: number; y: number }>();
-  let gesture: { x: number; y: number; cx: number; cy: number; zoom: number; dist: number } | undefined;
-  const startGesture = () => {
+  let gesture: { grab: Handle | 'move'; x: number; y: number; crop: Rect; zoom: number; dist: number } | undefined;
+  const startGesture = (grab: Handle | 'move' = 'move') => {
     const it = items[cur];
     const [a, b] = pointers.values();
-    gesture = a && it ? { x: a.x, y: a.y, cx: it.cx, cy: it.cy, zoom: it.zoom, dist: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0 } : undefined;
+    gesture = a && it ? { grab: b ? 'move' : grab, x: a.x, y: a.y, crop: { ...it.crop }, zoom: zoomOf(it), dist: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0 } : undefined;
   };
   canvas.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || free()) return;
+    if (e.button !== 0 || !items[cur] || busy) return;
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    startGesture();
+    startGesture(hitTest(e.clientX, e.clientY));
   });
   canvas.addEventListener('pointermove', (e) => {
     const it = items[cur];
-    if (!pointers.has(e.pointerId) || !gesture || !it) return;
+    if (!it) return;
+    if (!pointers.has(e.pointerId) || !gesture) {
+      canvas.style.cursor = CURSORS[hitTest(e.clientX, e.clientY)];
+      return;
+    }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const [a, b] = pointers.values();
-    if (b && gesture.dist) it.zoom = (gesture.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / gesture.dist;
-    else moveBy(it, gesture, a.x - gesture.x, a.y - gesture.y);
-    clampView(it);
-    readouts();
+    const [dx, dy] = [a.x - gesture.x, a.y - gesture.y];
+    if (b && gesture.dist) setZoom(it, (gesture.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / gesture.dist);
+    else if (gesture.grab === 'move') moveBy(it, gesture.crop, dx, dy);
+    else {
+      resizeCrop(it, gesture.grab, gesture.crop, dx * stage.toWorld, dy * stage.toWorld);
+      clampCrop(it);
+    }
+    syncControls();
     requestDraw();
   });
   const end = (e: PointerEvent) => {
@@ -673,7 +926,7 @@ function init(): HTMLElement {
   canvas.addEventListener(
     'wheel',
     (e) => {
-      if (!items[cur] || free()) return;
+      if (!items[cur]) return;
       e.preventDefault();
       zoomBy(items[cur], Math.exp(-e.deltaY * 0.002));
     },
@@ -681,11 +934,11 @@ function init(): HTMLElement {
   );
   canvas.addEventListener('keydown', (e) => {
     const it = items[cur];
-    if (!it || free()) return;
+    if (!it) return;
     const step = e.shiftKey ? 50 : 10;
     const moves: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
     if (moves[e.key]) {
-      moveBy(it, it, ...moves[e.key]);
+      moveBy(it, it.crop, ...moves[e.key]);
       changed();
     } else if (e.key === '+' || e.key === '=') zoomBy(it, 1.1);
     else if (e.key === '-') zoomBy(it, 1 / 1.1);
@@ -698,30 +951,9 @@ function init(): HTMLElement {
     canvas.height = Math.round(canvas.clientHeight * dpr);
     draw();
   }).observe(canvas);
-  return r;
-}
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', refreshPalette);
+  new MutationObserver(refreshPalette).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  refreshPalette();
 
-/** Open the editor with these images, replacing any already open. Throws UserError if none can be opened. */
-export async function openImageEditor(files: File[]): Promise<void> {
-  const r = init();
-  const { loaded, errors } = await loadAll(files);
-  if (!loaded.length) throw new UserError(errors.join('\n') || 'Choose at least one JPEG, PNG or WebP image.');
-  release();
-  items = loaded;
-  cur = 0;
-  const prefs = loadPrefs();
-  for (const [name, id] of [['ratio', prefs.editorRatio], ['size', prefs.editorSize]]) {
-    const radio = ui.form.querySelector<HTMLInputElement>(`[name=${name}][value="${id}"]`) ?? ui.form.querySelector<HTMLInputElement>(`[name=${name}][value=original]`)!;
-    radio.checked = true;
-  }
-  ui.form.querySelector<HTMLInputElement>(`[name=format][value="${prefs.imageFormat ?? 'image/webp'}"]`)!.checked = true;
-  field('quality').value = String(prefs.imageQuality ?? 82);
-  ui.qualityNum.value = field('quality').value;
-  r.hidden = false;
-  renderThumbs();
   syncControls();
-  changed();
-  setStatus(errors.join('\n'), errors.length ? 'error' : 'idle');
-  r.focus({ preventScroll: true });
-  r.scrollIntoView({ block: 'start' });
 }

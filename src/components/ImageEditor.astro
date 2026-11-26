@@ -1,53 +1,78 @@
 ---
-// Image editor markup. Behaviour: openImageEditor() in src/lib/editor.ts. Include at most once per page.
+// Image editor markup. Behaviour: initImageEditor() in src/lib/editor.ts. Include at most once per page.
 import Icon from './Icon.astro';
-import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
----
-<section class="image-editor" data-image-editor hidden tabindex="-1" aria-labelledby="ie-title">
-  <header class="ie-head">
-    <h2 id="ie-title">Image editor</h2>
-    <span class="ie-name" data-name></span>
-    <label class="btn ie-add">
-      <Icon name="plus" />
-      Add images
-      <input class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple data-add />
-    </label>
-    <button class="btn" type="button" data-close>Close</button>
-  </header>
+import ProgressDial from './ProgressDial.astro';
+import { choiceLabel, RATIOS, SCALES, SIZES } from '../lib/editor';
 
+const accept = 'image/jpeg,image/png,image/webp';
+const cloudReady = Boolean(import.meta.env.PUBLIC_API_URL);
+const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : 'Not available: the cloud service is not configured on this site';
+---
+<section class="image-editor" data-image-editor data-empty aria-label="Image editor">
   <form class="ie-body" data-form>
     <div class="ie-main">
-      <div class="ie-toolbar">
-        <button class="icon-btn" type="button" data-rotate-left aria-label="Rotate left" title="Rotate left">
-          <Icon name="undo" />
-        </button>
-        <button class="icon-btn" type="button" data-rotate-right aria-label="Rotate right" title="Rotate right">
-          <Icon name="redo" />
-        </button>
-        <button class="icon-btn" type="button" data-flip aria-label="Flip horizontally" title="Flip horizontally">
-          <Icon name="flip" />
-        </button>
-        <div class="ie-zoom" data-zoom-controls>
-          <button class="icon-btn" type="button" data-zoom-out aria-label="Zoom out" title="Zoom out">−</button>
-          <input type="range" name="zoom" min="1" max="8" step="0.01" value="1" aria-label="Zoom" />
-          <button class="icon-btn" type="button" data-zoom-in aria-label="Zoom in" title="Zoom in">+</button>
-          <button class="btn ie-reset" type="button" data-reset>Reset position</button>
+      <div class="ie-tb" role="toolbar" aria-label="Image tools">
+        <div class="ie-tb-group">
+          <label class="ie-tool" title="Add images">
+            <Icon name="plus" /><span class="ie-tool-label">Add</span>
+            <input class="visually-hidden" type="file" accept={accept} multiple data-add aria-label="Add images" />
+          </label>
+        </div>
+        <div class="ie-tb-group">
+          <button class="ie-tool" type="button" data-needs-image data-rotate-left aria-label="Rotate left" title="Rotate left">
+            <svg class="ie-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v5h5" /><path d="M4.6 9A8 8 0 1 1 6 17.7" /></svg>
+          </button>
+          <button class="ie-tool" type="button" data-needs-image data-rotate-right aria-label="Rotate right" title="Rotate right">
+            <svg class="ie-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4v5h-5" /><path d="M19.4 9A8 8 0 1 0 18 17.7" /></svg>
+          </button>
+          <button class="ie-tool" type="button" data-needs-image data-flip aria-label="Flip horizontally" title="Flip horizontally"><Icon name="flip" /></button>
+        </div>
+        <div class="ie-tb-group ie-zoom">
+          <button class="ie-tool" type="button" data-needs-image data-zoom-out aria-label="Zoom out" title="Zoom out">−</button>
+          <input type="range" name="zoom" min="1" max="8" step="0.01" value="1" aria-label="Zoom" data-needs-image />
+          <button class="ie-tool" type="button" data-needs-image data-zoom-in aria-label="Zoom in" title="Zoom in">+</button>
+          <button class="ie-tool" type="button" data-needs-image data-reset title="Reset the crop">Reset</button>
+        </div>
+        <div class="ie-tb-group">
+          <button class="ie-tool ie-cloud" type="button" data-remove-bg data-needs-image disabled title={bgTip} data-tip={bgTip} data-ready={cloudReady || undefined}>
+            <Icon name="cloud" /><span class="ie-tool-label">Remove background</span>
+          </button>
+          <button class="ie-tool" type="button" data-undo-bg hidden title="Undo background removal"><Icon name="undo" /><span class="ie-tool-label">Undo removal</span></button>
+        </div>
+        <div class="ie-tb-group ie-tb-end">
+          <button class="ie-tool" type="button" data-needs-image data-remove-image aria-label="Remove this image from the editor" title="Remove this image"><Icon name="xmark" /></button>
         </div>
       </div>
+
       <div class="ie-stage">
         <canvas data-canvas tabindex="0" role="application" aria-roledescription="crop area" aria-label="Image preview" aria-describedby="ie-help ie-crop"></canvas>
+        <label class="ie-empty" data-empty-state>
+          <span class="ie-ph" aria-hidden="true">
+            <svg viewBox="0 0 120 90"><rect x="5" y="5" width="110" height="80" rx="10" /><circle cx="38" cy="32" r="8" /><path d="M8 76 38 46l20 18 16-13 38 29" /></svg>
+          </span>
+          <span class="ie-empty-title">Drop images or choose files</span>
+          <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
+          <span class="ie-empty-hint">JPEG, PNG or WebP. You can also paste from the clipboard.</span>
+          <input class="visually-hidden" type="file" accept={accept} multiple data-input />
+        </label>
+        <div class="ie-busy" data-busy hidden>
+          <ProgressDial data-dial />
+          <p data-busy-text role="status" aria-live="polite"></p>
+          <button class="btn" type="button" data-busy-cancel>Cancel</button>
+        </div>
       </div>
-      <p class="ie-crop" id="ie-crop" data-crop></p>
-      <p class="visually-hidden" id="ie-help">Drag or use the arrow keys to position the image in the frame; hold Shift for bigger steps. Plus and minus zoom.</p>
+      <p class="ie-info"><span class="ie-name" data-name></span><span id="ie-crop" data-crop></span></p>
+      <p class="visually-hidden" id="ie-help">Drag the corners or edges of the frame to change the crop, drag inside to move it, or use the arrow keys; hold Shift for bigger steps. Plus and minus zoom.</p>
       <ul class="ie-thumbs" data-thumbs aria-label="Images" hidden></ul>
     </div>
 
-    <div class="ie-side">
+    <fieldset class="ie-side" data-side disabled>
+      <legend class="visually-hidden">Output settings</legend>
       <fieldset>
         <legend>Aspect ratio</legend>
         <div class="ie-chips">
           {RATIOS.map((id) => <label><input type="radio" name="ratio" value={id} checked={id === 'original'} /><span>{choiceLabel(id)}</span></label>)}
-          <button class="ie-swap" type="button" data-swap aria-label="Swap orientation" title="Swap orientation (e.g. 3:2 ⇄ 2:3)">⇄</button>
+          <button class="ie-chip-btn" type="button" data-swap aria-label="Swap orientation" title="Swap orientation (e.g. 3:2 ⇄ 2:3)">⇄</button>
         </div>
       </fieldset>
       <div class="ie-pair" data-custom-ratio hidden>
@@ -59,19 +84,26 @@ import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
       <fieldset>
         <legend>Size, long side (px)</legend>
         <div class="ie-chips">
-          {SIZES.map((id) => <label><input type="radio" name="size" value={id} checked={id === 'original'} /><span>{choiceLabel(id)}</span></label>)}
+          {SIZES.filter((id) => id !== 'custom').map((id) => <label><input type="radio" name="size" value={id} /><span>{choiceLabel(id)}</span></label>)}
         </div>
       </fieldset>
-      <div class="ie-pair" data-custom-size hidden>
-        <label class="field"><span>Width (px)</span><input type="number" name="cw" min="1" step="1" inputmode="numeric" /></label>
+      <fieldset>
+        <legend>Scale</legend>
+        <div class="ie-chips">
+          {SCALES.map((p) => <label><input type="radio" name="scale" value={p} /><span>{p}%</span></label>)}
+        </div>
+      </fieldset>
+      <div class="ie-size">
+        <label class="field"><span>Width</span><input type="number" name="cw" min="1" step="1" inputmode="numeric" /></label>
         <span aria-hidden="true">×</span>
-        <label class="field"><span>Height (px)</span><input type="number" name="ch" min="1" step="1" inputmode="numeric" /></label>
+        <label class="field"><span>Height</span><input type="number" name="ch" min="1" step="1" inputmode="numeric" /></label>
+        <label class="field"><span>Scale %</span><input type="number" name="pct" min="0.1" step="any" inputmode="decimal" /></label>
       </div>
 
       <fieldset data-fit-set>
         <legend>Fit</legend>
         <div class="segmented">
-          <label><input type="radio" name="fit" value="fill" checked /><span>Fill frame</span></label>
+          <label><input type="radio" name="fit" value="fill" checked /><span>Crop to frame</span></label>
           <label><input type="radio" name="fit" value="fit" /><span>Fit inside</span></label>
         </div>
       </fieldset>
@@ -87,44 +119,58 @@ import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
         </div>
       </fieldset>
 
-      <fieldset>
-        <legend>Format</legend>
-        <div class="segmented">
-          <label><input type="radio" name="format" value="image/jpeg" /><span>JPEG</span></label>
-          <label><input type="radio" name="format" value="image/png" /><span>PNG</span></label>
-          <label><input type="radio" name="format" value="image/webp" checked /><span>WebP</span></label>
-        </div>
-      </fieldset>
-      <div class="field">
-        <span id="ie-quality">Quality <span class="muted" data-quality-out></span></span>
+      <div class="field" data-quality-field>
+        <span id="ie-quality">Quality</span>
         <div class="ie-quality">
           <input type="range" name="quality" min="1" max="100" value="82" aria-labelledby="ie-quality" />
           <input type="number" min="1" max="100" step="1" inputmode="numeric" aria-labelledby="ie-quality" data-quality-num />
         </div>
       </div>
-      <p class="warn-box" data-jpeg-warn hidden>JPEG has no transparency: transparent areas get the background colour.</p>
       <label class="ie-check"><input type="checkbox" role="switch" name="strip" checked /> Remove metadata (EXIF, GPS location)</label>
       <p class="ie-note" data-gps-hint hidden>Location data will be kept.</p>
+      <p class="warn-box" data-upscale-warn role="status" hidden></p>
       <p class="warn-box" data-problem hidden></p>
 
       <div class="ie-actions">
-        <p class="warn-box" data-upscale-warn role="status" hidden></p>
+        <p class="warn-box" data-jpeg-warn hidden>JPEG has no transparency: transparent areas get the background colour.</p>
         <dl class="ie-out">
           <dt>Output</dt><dd data-dims>–</dd>
           <dt>File size</dt><dd data-estimate>–</dd>
         </dl>
-        <button class="btn btn-primary" type="button" data-download>Download</button>
+        <div class="ie-split">
+          <button class="btn btn-primary" type="button" data-download><Icon name="arrow-down" />Download</button>
+          <select name="format" aria-label="File type">
+            <option value="image/jpeg">JPEG</option>
+            <option value="image/png">PNG</option>
+            <option value="image/webp" selected>WebP</option>
+          </select>
+        </div>
         <button class="btn" type="button" data-download-all hidden>Download all (ZIP)</button>
         <p class="status" data-status role="status" aria-live="polite"></p>
       </div>
-    </div>
+    </fieldset>
   </form>
+
+  <dialog data-consent aria-labelledby="consent-title">
+    <h2 id="consent-title"><Icon name="cloud" /> Upload to remove the background?</h2>
+    <p>This uploads the current image for processing in Belgium (EU). Files are not intentionally retained after processing. Operational request metadata (time, size, IP address) may be logged.</p>
+    <p class="muted">Your answer is not remembered; we ask every time.</p>
+    <form method="dialog">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn btn-primary" value="upload" autofocus>Upload &amp; process</button>
+    </form>
+  </dialog>
 </section>
 
 <style is:global>
   .image-editor {
     --ie-w: min(100vw - 2rem, 1280px);
-    --stage: #1d1e22;
+    --stage: light-dark(#e9eaee, #1b1c20);
+    --stage-fg: light-dark(#4b4e57, #c9cbd2);
+    --stage-line: light-dark(rgb(0 0 0 / 0.09), rgb(255 255 255 / 0.08));
+    --stage-check-a: light-dark(#dcdde2, #34353a);
+    --stage-check-b: light-dark(#f4f4f6, #44454b);
+    --stage-dim: light-dark(rgb(233 234 238 / 0.72), rgb(14 14 18 / 0.62));
     width: var(--ie-w);
     margin: 1.5rem calc((100% - var(--ie-w)) / 2) 0;
     background: var(--surface);
@@ -132,79 +178,116 @@ import { choiceLabel, RATIOS, SIZES } from '../lib/editor';
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     overflow: hidden;
-    scroll-margin-top: 72px; /* below the sticky site header */
+    scroll-margin-top: 72px;
   }
-  .image-editor:focus { outline: none; }
   .image-editor .icon svg { width: 18px; height: 18px; }
-  .ie-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.6rem 0.55rem 1rem; border-bottom: 1px solid var(--border); }
-  .ie-head h2 { margin: 0; font-size: 1rem; white-space: nowrap; }
-  .ie-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.88rem; }
-  .ie-head .btn { padding: 0.4rem 0.8rem; font-size: 0.88rem; }
-  .ie-add:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .ie-glyph { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
-  .ie-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: clamp(540px, calc(100dvh - 140px), 900px); }
-  .ie-main { display: flex; flex-direction: column; min-width: 0; background: var(--stage); color: #d9dadf; }
-  .ie-toolbar { display: flex; align-items: center; gap: 0.15rem; flex-wrap: wrap; padding: 0.4rem 0.5rem; border-bottom: 1px solid rgb(255 255 255 / 0.08); }
-  .ie-toolbar .icon-btn { width: 36px; height: 36px; color: #c4c6cc; display: inline-grid; place-items: center; font-size: 1.2rem; }
-  .ie-toolbar .icon-btn:hover { background: rgb(255 255 255 / 0.1); color: #fff; }
-  .ie-zoom { display: flex; align-items: center; gap: 0.15rem; flex: 1; min-width: 14rem; margin-left: 0.5rem; padding-left: 0.5rem; border-left: 1px solid rgb(255 255 255 / 0.1); }
-  .ie-zoom input { flex: 1; min-width: 4rem; max-width: 14rem; }
-  .ie-reset { margin-left: auto; padding: 0.35rem 0.7rem; font-size: 0.85rem; background: transparent; color: inherit; border-color: rgb(255 255 255 / 0.18); }
-  .ie-reset:hover { border-color: rgb(255 255 255 / 0.4); }
+  .ie-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: clamp(560px, calc(100dvh - 140px), 920px); }
+  .ie-main { display: flex; flex-direction: column; min-width: 0; background: var(--stage); color: var(--stage-fg); }
+
+  /* Toolbar: compact groups with dividers, 34 px controls. */
+  .ie-tb { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem 0; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--stage-line); }
+  .ie-tb-group { display: flex; align-items: center; gap: 0.15rem; padding: 0 0.45rem; }
+  .ie-tb-group + .ie-tb-group { border-left: 1px solid var(--stage-line); }
+  .ie-tb-end { margin-left: auto; }
+  .ie-tool {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-width: 34px; height: 34px; padding: 0 0.5rem;
+    border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .ie-tool:hover:not(:disabled) { background: color-mix(in srgb, currentColor 12%, transparent); }
+  .ie-tool:disabled { opacity: 0.4; cursor: default; }
+  .ie-tool:focus-visible, label.ie-tool:focus-within { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .ie-tool[hidden] { display: none; }
+  .ie-zoom input { width: 9rem; }
+  .ie-cloud { position: relative; }
+
   .ie-stage { position: relative; flex: 1; min-height: 0; }
-  .ie-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
-  .ie-stage canvas:active { cursor: grabbing; }
-  .ie-stage canvas:focus-visible { outline-offset: -3px; border-radius: 0; }
-  .ie-crop { margin: 0; padding: 0.35rem 0.9rem 0.5rem; font: 0.78rem/1.4 var(--mono); color: #a3a5ad; min-height: 2em; }
-  .ie-thumbs { list-style: none; display: flex; gap: 0.45rem; overflow-x: auto; margin: 0; padding: 0.55rem 0.75rem 0.7rem; border-top: 1px solid rgb(255 255 255 / 0.08); }
-  .ie-thumb { display: block; width: 56px; height: 56px; padding: 0; border-radius: 8px; border: 2px solid transparent; overflow: hidden; background: #000; cursor: pointer; }
+  .ie-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  .ie-stage canvas:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .image-editor[data-empty] .ie-stage canvas, .image-editor:not([data-empty]) .ie-empty { display: none; }
+
+  .ie-empty {
+    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
+    border: 2px dashed color-mix(in srgb, var(--stage-fg) 30%, transparent); border-radius: 14px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+  .ie-empty:hover, .image-editor.ie-over .ie-empty { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .ie-empty:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .ie-ph {
+    display: grid; place-items: center; width: 168px; height: 128px; border-radius: 16px; margin-bottom: 0.25rem; opacity: 0.7;
+    background: repeating-conic-gradient(color-mix(in srgb, var(--stage-fg) 10%, transparent) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+  }
+  .ie-ph svg { width: 120px; height: 90px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .ie-empty-title { font-size: 1.15rem; font-weight: 650; color: var(--stage-fg); }
+  .ie-empty-hint { font-size: 0.85rem; opacity: 0.8; }
+  .image-editor.ie-over .ie-stage { box-shadow: inset 0 0 0 3px var(--accent); }
+
+  .ie-busy {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
+    background: color-mix(in srgb, var(--stage) 78%, transparent); backdrop-filter: blur(2px); text-align: center;
+  }
+  .ie-busy[hidden] { display: none; }
+  .ie-busy p { margin: 0; font-weight: 600; }
+
+  .ie-info { display: flex; gap: 0.75rem; margin: 0; padding: 0.35rem 0.9rem 0.5rem; font: 0.78rem/1.4 var(--mono); min-height: 2em; opacity: 0.85; }
+  .ie-name { min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .ie-thumbs { list-style: none; display: flex; gap: 0.45rem; overflow-x: auto; margin: 0; padding: 0.55rem 0.75rem 0.7rem; border-top: 1px solid var(--stage-line); }
+  .ie-thumb { display: block; width: 52px; height: 52px; padding: 0; border-radius: 8px; border: 2px solid transparent; overflow: hidden; cursor: pointer; }
   .ie-thumb[aria-current='true'] { border-color: var(--accent); }
   .ie-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 
-  .ie-side { display: grid; gap: 1rem; align-content: start; padding: 1rem; border-left: 1px solid var(--border); font-size: 0.92rem; overflow-y: auto; overscroll-behavior: contain; }
+  .ie-side { display: grid; gap: 0.9rem; align-content: start; min-width: 0; margin: 0; padding: 1rem; border: 0; border-left: 1px solid var(--border); font-size: 0.92rem; overflow-y: auto; overscroll-behavior: contain; }
+  .ie-side:disabled > :not(legend, .ie-actions), .ie-side:disabled .ie-actions > * { opacity: 0.5; }
   .ie-side fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-  .ie-side legend, .ie-side .field > span { font-weight: 600; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.4rem; padding: 0; }
+  .ie-side fieldset legend, .ie-side .field > span { font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.4rem; padding: 0; }
   .ie-side .field { gap: 0.15rem; }
-  .ie-side input[type='number'] { width: 100%; padding: 0.4rem 0.55rem; }
+  .ie-side input[type='number'], .ie-side select { width: 100%; height: 34px; padding: 0 0.55rem; border-radius: 8px; }
   .ie-side .segmented { display: flex; }
   .ie-side .segmented label { flex: 1; text-align: center; }
-  .ie-side .segmented span { padding: 0.35rem 0.5rem; font-size: 0.88rem; }
+  .ie-side .segmented span { padding: 0.3rem 0.5rem; font-size: 0.86rem; }
   .ie-side [type='range'] { width: 100%; }
   .ie-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
   .ie-chips label { position: relative; }
   .ie-chips input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .ie-chips span, .ie-swap { display: block; padding: 0.25rem 0.6rem; border: 1px solid var(--border); border-radius: 999px; font-family: inherit; font-weight: 600; font-size: 0.82rem; line-height: 1.3; font-variant-numeric: tabular-nums; }
+  .ie-chips span, .ie-chip-btn { display: block; padding: 0.22rem 0.6rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: inherit; font-family: inherit; font-weight: 600; font-size: 0.8rem; line-height: 1.35; font-variant-numeric: tabular-nums; }
   .ie-chips input:checked + span { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); }
-  .ie-chips input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 1px; }
-  .ie-swap { background: var(--surface); color: inherit; cursor: pointer; }
-  .ie-swap:disabled { opacity: 0.4; cursor: default; }
+  .ie-chips input:focus-visible + span, .ie-chip-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .ie-chip-btn { cursor: pointer; }
+  .ie-chip-btn:disabled { opacity: 0.4; cursor: default; }
   .ie-pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.4rem; align-items: end; }
-  .ie-pair > span { padding-bottom: 0.5rem; color: var(--muted); }
+  .ie-pair[hidden] { display: none; }
+  .ie-size { display: grid; grid-template-columns: 1fr auto 1fr 0.9fr; gap: 0.4rem; align-items: end; }
+  .ie-pair > span, .ie-size > span { padding-bottom: 0.45rem; color: var(--muted); }
   .ie-check { display: flex; gap: 0.5rem; align-items: center; }
   .ie-check input, .ie-bg [type='color'] { accent-color: var(--accent); }
   .ie-bg { display: flex; gap: 0.5rem; align-items: center; }
   .ie-bg .segmented { flex: 1; }
-  .ie-bg [type='color'] { width: 2.6rem; height: 2.2rem; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; flex: none; }
+  .ie-bg [type='color'] { width: 2.6rem; height: 2.1rem; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; flex: none; }
   .ie-bg [type='color']:disabled { opacity: 0.35; cursor: default; }
   .ie-side .warn-box { margin: 0; }
-  .ie-out { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0; padding: 0.5rem 0.7rem; border-radius: 10px; background: var(--surface-2); font-size: 0.88rem; font-variant-numeric: tabular-nums; }
-  .ie-out dt { color: var(--muted); }
-  .ie-out dd { margin: 0; text-align: right; font-weight: 600; }
   .ie-note { margin: -0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
   .ie-quality { display: flex; gap: 0.6rem; align-items: center; }
   .ie-side .ie-quality [type='number'] { width: 4.5rem; flex: none; }
-  .ie-actions { display: grid; gap: 0.5rem; position: sticky; bottom: 0; margin: 0 -1rem -1rem; padding: 0.75rem 1rem 1rem; background: var(--surface); border-top: 1px solid var(--border); }
+  .ie-out { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0; padding: 0.5rem 0.7rem; border-radius: 10px; background: var(--surface-2); font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+  .ie-out dt { color: var(--muted); }
+  .ie-out dd { margin: 0; text-align: right; font-weight: 600; }
+  .ie-actions { display: grid; gap: 0.55rem; position: sticky; bottom: 0; margin: 0 -1rem -1rem; padding: 0.75rem 1rem 1rem; background: var(--surface); border-top: 1px solid var(--border); }
+  .ie-split { display: flex; }
+  .ie-split .btn { flex: 1; justify-content: center; border-radius: 10px 0 0 10px; }
+  .ie-side .ie-split select { width: 6.5rem; height: auto; border-radius: 0 10px 10px 0; border-left: 0; font-weight: 600; background: var(--surface-2); }
   .ie-actions .status { margin: 0; min-height: 0; font-size: 0.85rem; }
   .ie-actions .status:empty { display: none; }
 
   @media (max-width: 820px) {
     .ie-body { grid-template-columns: minmax(0, 1fr); height: auto; }
-    .ie-side { border-left: 0; border-top: 1px solid var(--border); }
-    .ie-stage { flex: none; height: clamp(280px, 58dvh, 520px); }
+    .ie-side { border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
+    .ie-stage { flex: none; height: clamp(300px, 58dvh, 540px); }
+    .ie-tool-label { display: none; }
   }
   @media (max-width: 480px) {
     .image-editor { --ie-w: calc(100vw - 1rem); border-radius: 10px; }
-    .ie-zoom { margin-left: 0; padding-left: 0; border-left: 0; min-width: 100%; }
-    .ie-head h2 { display: none; }
+    .ie-tb-group.ie-zoom { order: 9; flex-basis: 100%; border-left: 0; }
+    .ie-zoom input { flex: 1; width: auto; }
   }
 </style>

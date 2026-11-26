@@ -15,7 +15,7 @@ export interface Tool {
 
 /** `tabs`: tool slugs in hub tab order; the first is the default. */
 export const categories: { id: Category; label: string; blurb: string; tabs: string[] }[] = [
-  { id: 'images', label: 'Images', blurb: 'Edit, resize, convert and compress photos and graphics.', tabs: ['images/editor', 'images/remove-background', 'images/convert', 'images/resize'] },
+  { id: 'images', label: 'Images', blurb: 'Edit, resize, convert and compress photos and graphics.', tabs: ['images/editor'] },
   { id: 'pdf', label: 'PDF', blurb: 'Merge, split, reorder and optimize PDF documents.', tabs: ['pdf/organize', 'pdf/merge', 'pdf/split', 'pdf/from-images', 'pdf/compress'] },
   { id: 'audio', label: 'Audio', blurb: 'Trim, convert and shrink recordings and music.', tabs: ['audio/convert'] },
   { id: 'files', label: 'Files & text', blurb: 'Archives, compression, JSON and JavaScript.', tabs: ['text/json', 'text/js-minify', 'files/zip', 'files/gzip'] },
