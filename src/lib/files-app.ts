@@ -202,14 +202,43 @@ export function initFilesApp(): void {
   const $ = <T extends Element = HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
   const $$ = <T extends Element = HTMLElement>(sel: string) => root.querySelectorAll<T>(sel);
   const input = $<HTMLInputElement>('[data-input]');
-  const ta = $<HTMLTextAreaElement>('[data-text]');
-  const code = $('[data-code]');
-  const gutter = $('[data-gutter]');
-  const curline = $('[data-curline]');
-  const hex = $('[data-hex]');
+  // Two editor panes (split view). The editor code works on "the current pane": these refs and the per-pane
+  // state below are swapped by usePane(); the other pane keeps showing what it last rendered.
+  interface Pane {
+    el: HTMLElement;
+    ta: HTMLTextAreaElement;
+    code: HTMLElement;
+    gutter: HTMLElement;
+    curline: HTMLElement;
+    hex: HTMLElement;
+    tabsEl: HTMLElement;
+    hlCode: HTMLElement;
+    mdEl: HTMLElement;
+    editorEl: HTMLElement;
+    sbJson: HTMLButtonElement;
+    sbSyntax: HTMLSelectElement;
+    open: number[];
+    active?: number;
+    shown?: number;
+    dirty: boolean;
+    lineCount: number;
+    synTimer: number;
+  }
+  const panes: Pane[] = [...root.querySelectorAll<HTMLElement>('[data-pane]')].map((el) => {
+    const q = <T extends Element = HTMLElement>(sel: string) => el.querySelector<T>(sel)!;
+    return {
+      el, ta: q<HTMLTextAreaElement>('[data-text]'), code: q('[data-code]'), gutter: q('[data-gutter]'), curline: q('[data-curline]'), hex: q('[data-hex]'),
+      tabsEl: q('[data-tabs]'), hlCode: q('[data-hl]'), mdEl: q('[data-md]'), editorEl: q('[data-editor]'),
+      sbJson: q<HTMLButtonElement>('[data-sb-json]'), sbSyntax: q<HTMLSelectElement>('[data-sb-syntax]'),
+      open: [], dirty: false, lineCount: 1, synTimer: 0,
+    };
+  });
+  let pane = panes[0];
+  let { ta, code, gutter, curline, hex, tabsEl, hlCode, mdEl, editorEl, sbJson, sbSyntax } = pane;
+  /** Query inside the current pane. */
+  const $p = <T extends Element = HTMLElement>(sel: string) => pane.el.querySelector<T>(sel)!;
   const empty = $('[data-empty-state]');
   const filesEl = $<HTMLUListElement>('[data-files]');
-  const tabsEl = $('[data-tabs]');
   const out = $<HTMLOListElement>('[data-out]');
   const outToggle = $<HTMLButtonElement>('[data-out-toggle]');
   const explorer = $('#fx-explorer');
@@ -221,21 +250,17 @@ export function initFilesApp(): void {
   const trayList = $<HTMLUListElement>('[data-tray-list]');
   const trayBusy = $('[data-tray-busy]');
   const dial = $('[data-dial]');
-  const sbJson = $<HTMLButtonElement>('[data-sb-json]');
   const icons = $<HTMLTemplateElement>('[data-icons]');
   const icon = (name: string) => icons.content.querySelector(`[data-i="${name}"]`)!.firstElementChild!.cloneNode(true);
   const field = <T extends HTMLInputElement>(name: string) => root.querySelector<T>(`[name="${name}"]`)!;
   const checkedValue = (name: string) => root.querySelector<HTMLInputElement>(`[name="${name}"]:checked`)!.value;
   const narrow = matchMedia('(max-width: 760px)');
-  const hlCode = $('[data-hl]');
-  const mdEl = $('[data-md]');
-  const editorEl = $('#fx-editor');
-  const sbSyntax = $<HTMLSelectElement>('[data-sb-syntax]');
-  const starter = $('[data-start-typing]');
+  const splitArea = $('[data-split-area]');
+  const seam = $<HTMLButtonElement>('[data-seam-compare]');
   const outPanel = $('[data-out-panel]');
 
   let items: Item[] = [];
-  let open: number[] = [];
+  let open: number[] = pane.open;
   let active: number | undefined;
   const ticked = new Set<number>();
   let tray: number[] = []; // item ids collected in the archive tray
@@ -246,6 +271,7 @@ export function initFilesApp(): void {
   let shown: number | undefined; // item currently loaded in the textarea
   let dirty = false; // textarea differs from that item's text
   let lineCount = 1;
+  let synTimer = 0;
   let escaped = false;
   let busy: AbortController | null = null;
   let busyInTray = false;
@@ -267,6 +293,25 @@ export function initFilesApp(): void {
     for (let i = 2; items.some((it) => it.name === n); i++) n = name.replace(/(\.[^.]*)?$/, ` (${i})$1`);
     return n;
   };
+
+  /** Make `p` the pane the editor code works on (no focus or UI change). */
+  function usePane(p: Pane) {
+    if (p === pane) return;
+    Object.assign(pane, { open, active, shown, dirty, lineCount, synTimer });
+    pane = p;
+    ({ ta, code, gutter, curline, hex, tabsEl, hlCode, mdEl, editorEl, sbJson, sbSyntax } = p);
+    ({ open, active, shown, dirty, lineCount, synTimer } = p);
+  }
+  /** Run `fn` against another pane, then switch back. */
+  function withPane(p: Pane, fn: () => void) {
+    const back = pane;
+    usePane(p);
+    try {
+      fn();
+    } finally {
+      usePane(back);
+    }
+  }
 
   // ---- Messages: a short line in the tab row + the Output panel (shown only once something is logged) ----
   let sayTimer = 0;
@@ -315,20 +360,30 @@ export function initFilesApp(): void {
     paintQueued = true;
     requestAnimationFrame(() => {
       paintQueued = false;
-      if (code.hidden) return;
-      const first = Math.floor(ta.scrollTop / LINE);
-      const last = Math.min(lineCount, first + Math.ceil(ta.clientHeight / LINE) + 1);
-      const nums: number[] = [];
-      for (let n = first + 1; n <= last; n++) nums.push(n);
-      gutter.textContent = nums.join('\n');
-      gutter.style.transform = `translateY(${first * LINE - ta.scrollTop}px)`;
-      const [line, col] = caretLineCol();
-      curline.style.transform = `translateY(${(line - 1) * LINE - ta.scrollTop}px)`;
-      const selLen = Math.abs(ta.selectionEnd - ta.selectionStart);
-      $('[data-sb-pos]').textContent = `Ln ${line}, Col ${col}${selLen ? ` (${selLen} selected)` : ''}`;
+      paintNow();
     });
   }
+  /** Gutter numbers, current-line band and Ln/Col for the current pane. */
+  function paintNow() {
+    if (code.hidden) return;
+    const first = Math.floor(ta.scrollTop / LINE);
+    const last = Math.min(lineCount, first + Math.ceil(ta.clientHeight / LINE) + 1);
+    const nums: number[] = [];
+    for (let n = first + 1; n <= last; n++) nums.push(n);
+    gutter.textContent = nums.join('\n');
+    gutter.style.transform = `translateY(${first * LINE - ta.scrollTop}px)`;
+    const [line, col] = caretLineCol();
+    curline.style.transform = `translateY(${(line - 1) * LINE - ta.scrollTop}px)`;
+    const selLen = Math.abs(ta.selectionEnd - ta.selectionStart);
+    $p('[data-sb-pos]').textContent = `Ln ${line}, Col ${col}${selLen ? ` (${selLen} selected)` : ''}`;
+  }
 
+  function measureLines(t: string) {
+    let n = 1;
+    for (let i = t.indexOf('\n'); i !== -1; i = t.indexOf('\n', i + 1)) n++;
+    lineCount = n;
+    code.style.setProperty('--fx-gw', `${Math.max(3, String(n).length) + 1}ch`);
+  }
   // Expensive per-document work (line count, byte size, JSON check) runs debounced after edits.
   let analyseTimer = 0;
   function analyse(delay = 0) {
@@ -338,10 +393,7 @@ export function initFilesApp(): void {
       const it = curText();
       if (it) {
         const t = it.text!;
-        let n = 1;
-        for (let i = t.indexOf('\n'); i !== -1; i = t.indexOf('\n', i + 1)) n++;
-        lineCount = n;
-        code.style.setProperty('--fx-gw', `${Math.max(3, String(n).length) + 1}ch`);
+        measureLines(t);
         if (it.edited) it.size = new Blob([t]).size;
         if (lang(it) === 'json' || tool === 'json') {
           if (it.size <= WARN_TEXT && t.trim()) it.json = checkJson(t);
@@ -357,12 +409,12 @@ export function initFilesApp(): void {
   function renderStatus() {
     const it = cur();
     const text = it?.text !== undefined;
-    $('[data-sb-size]').textContent = it ? formatBytes(it.size) : '';
+    $p('[data-sb-size]').textContent = it ? formatBytes(it.size) : '';
     // The language picker covers text documents; binary files just say so.
-    $('[data-sb-lang]').textContent = it && !text ? 'Binary' : '';
+    $p('[data-sb-lang]').textContent = it && !text ? 'Binary' : '';
     sbSyntax.hidden = !text;
     if (text) sbSyntax.value = syntaxOf(it);
-    if (!text) $('[data-sb-pos]').textContent = '';
+    if (!text) $p('[data-sb-pos]').textContent = '';
     const showJson = text && (lang(it) === 'json' || (tool === 'json' && syntaxOf(it) === 'plaintext')) && it.text!.trim() !== '';
     sbJson.hidden = !showJson;
     if (showJson) {
@@ -377,7 +429,6 @@ export function initFilesApp(): void {
   const HL_MAX = 300 * 1024;
   let hl: typeof Highlight | undefined;
   let md: typeof Markdown | undefined;
-  let synTimer = 0;
   let mdTimer = 0;
   // Lazy on purpose: highlight.js only downloads when a highlighted language is first shown.
   const loadHl = () => import('./highlight').then((m) => (hl = m));
@@ -392,7 +443,7 @@ export function initFilesApp(): void {
     const syntax = it ? syntaxOf(it) : 'plaintext';
     const large = ta.value.length >= HL_MAX;
     const want = !!it && !code.hidden && syntax !== 'plaintext' && !large;
-    $('[data-sb-hl]').textContent = it && syntax !== 'plaintext' && large ? 'Highlighting off (large file)' : '';
+    $p('[data-sb-hl]').textContent = it && syntax !== 'plaintext' && large ? 'Highlighting off (large file)' : '';
     if (want && !hl) void loadHl().then(() => refreshHl(true));
     const on = want && !!hl;
     code.toggleAttribute('data-hl-on', on);
@@ -414,9 +465,9 @@ export function initFilesApp(): void {
     const it = curText();
     const isMd = !!it && syntaxOf(it) === 'markdown';
     const view = isMd ? (it.mdView ?? 'edit') : 'edit';
-    $('[data-md-modes]').hidden = !isMd;
-    $('[data-md-html]').hidden = !isMd;
-    field(`mdView"][value="${view}`).checked = true;
+    $p('[data-md-modes]').hidden = !isMd;
+    $p('[data-md-html]').hidden = !isMd;
+    $p<HTMLInputElement>(`[data-md-view][value="${view}"]`).checked = true;
     if (view === 'edit') delete editorEl.dataset.mdView;
     else editorEl.dataset.mdView = view;
     if (it) code.hidden = view === 'preview';
@@ -442,45 +493,39 @@ export function initFilesApp(): void {
     );
   }
 
-  sbSyntax.append(...Object.entries(SYNTAXES).map(([value, label]) => el('option', { value, textContent: label })));
-  sbSyntax.addEventListener('change', () => {
-    const it = curText();
-    if (!it) return;
-    it.syntax = sbSyntax.value;
-    renderMdChrome();
-    refreshHl(true);
-    renderStatus();
-  });
-  $$<HTMLInputElement>('[name="mdView"]').forEach((r) =>
-    r.addEventListener('change', () => {
+  for (const p of panes) {
+    p.sbSyntax.append(...Object.entries(SYNTAXES).map(([value, label]) => el('option', { value, textContent: label })));
+    p.sbSyntax.addEventListener('change', () => {
+      activatePane(p);
       const it = curText();
       if (!it) return;
-      it.mdView = r.value as Item['mdView'];
+      it.syntax = sbSyntax.value;
       renderMdChrome();
       refreshHl(true);
-      paint();
-    }),
-  );
-  $('[data-md-html]').addEventListener('click', async () => {
-    const it = curText();
-    if (!it) return;
-    sync();
-    md ??= await import('./markdown');
-    const title = stem(it.name) || 'document';
-    downloadBlob(new Blob([md.markdownDocument(title, md.renderMarkdown(it.text!))], { type: 'text/html' }), `${title}.html`);
-    say(`Downloading ${title}.html.`);
-  });
-
-  // Empty state: the faded sample is one focusable text box. Clicking it, or Enter while it has focus, starts an
-  // untitled document with the caret at the start; printable keys and paste go through the app-wide handlers below.
-  starter.addEventListener('click', () => newDoc());
-  starter.addEventListener('keydown', (e) => {
-    // IME input: open the document and let the composition continue in the editor.
-    if (e.isComposing || e.key === 'Process') return void newDoc();
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
-    newDoc('\n');
-  });
+      renderStatus();
+    });
+    p.el.querySelectorAll<HTMLInputElement>('[data-md-view]').forEach((r) =>
+      r.addEventListener('change', () => {
+        activatePane(p);
+        const it = curText();
+        if (!it) return;
+        it.mdView = r.value as Item['mdView'];
+        renderMdChrome();
+        refreshHl(true);
+        paint();
+      }),
+    );
+    p.el.querySelector('[data-md-html]')!.addEventListener('click', async () => {
+      activatePane(p);
+      const it = curText();
+      if (!it) return;
+      sync();
+      md ??= await import('./markdown');
+      const title = stem(it.name) || 'document';
+      downloadBlob(new Blob([md.markdownDocument(title, md.renderMarkdown(it.text!))], { type: 'text/html' }), `${title}.html`);
+      say(`Downloading ${title}.html.`);
+    });
+  }
 
   function saveView() {
     const it = cur();
@@ -494,11 +539,14 @@ export function initFilesApp(): void {
     sync();
     const it = cur();
     const diffing = active === DIFF;
-    empty.hidden = !!it || diffing;
+    // The empty state and the comparison view exist in the first pane only.
+    if (pane === panes[0]) {
+      empty.hidden = !!it || diffing;
+      $('[data-diff]').hidden = !diffing;
+    }
     code.hidden = it?.text === undefined;
     hex.hidden = !it || it.text !== undefined;
-    $('[data-diff]').hidden = !diffing;
-    $('#fx-editor').setAttribute('aria-labelledby', active !== undefined ? `fx-tab-${active}` : '');
+    editorEl.setAttribute('aria-labelledby', active !== undefined ? tabId(active) : '');
     if (it?.text !== undefined) {
       if (shown !== it.id) {
         shown = it.id;
@@ -507,25 +555,30 @@ export function initFilesApp(): void {
         ta.setSelectionRange(v?.start ?? 0, v?.end ?? 0, v?.dir);
         ta.scrollTop = v?.top ?? 0;
         ta.scrollLeft = v?.left ?? 0;
+        // Gutter width and line count now, so a pane rendered in the background is complete too.
+        measureLines(it.text);
+        paintNow();
       }
     } else {
       shown = undefined;
       ta.value = '';
       if (it) {
-        const token = ++hexToken;
+        const token = String(++hexToken);
         const blob = blobOf(it);
-        const info = $('[data-info]');
+        const info = $p('[data-info]');
         const rows: [string, string][] = [['Name', it.name], ['Size', `${formatBytes(it.size)} (${it.size.toLocaleString()} bytes)`], ['Type', TYPE_LABEL[it.sniffed]]];
         if (it.note) rows.push(['Note', it.note]);
         if (ARCHIVES.includes(it.sniffed)) rows.push(['Tip', 'Add it to the Archive tray to extract it.']);
         rows.push(['Preview', blob.size > 4096 ? 'First 4 KB, hexadecimal' : 'Hexadecimal']);
         info.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })]));
-        $('[data-hexdump]').textContent = '';
+        const dump = $p('[data-hexdump]');
+        dump.textContent = '';
+        dump.dataset.token = token;
         void blob
           .slice(0, 4096)
           .arrayBuffer()
           .then((buf) => {
-            if (token === hexToken) $('[data-hexdump]').textContent = hexDump(new Uint8Array(buf));
+            if (dump.dataset.token === token) dump.textContent = hexDump(new Uint8Array(buf));
           });
       }
     }
@@ -535,6 +588,7 @@ export function initFilesApp(): void {
     renderExplorer();
     renderTools();
     analyse();
+    renderSplitChrome();
   }
 
   /** `stay` keeps the narrow-screen Explorer drawer open (actions started from it). */
@@ -560,10 +614,13 @@ export function initFilesApp(): void {
       active = open[Math.min(i, open.length - 1)];
     } else open.splice(i, 1);
     showActive();
+    // The second pane only exists while it shows something.
+    if (pane === panes[1] && !open.length) queueMicrotask(closeSplit);
   }
 
   function removeItem(id: number) {
     closeTab(id);
+    for (const p of panes) if (p !== pane && p.open.includes(id)) withPane(p, () => closeTab(id));
     items = items.filter((it) => it.id !== id);
     ticked.delete(id);
     tray = tray.filter((t) => t !== id);
@@ -764,6 +821,7 @@ export function initFilesApp(): void {
   };
 
   // ---- Tabs ----
+  const tabId = (id: number) => `fx-tab-${panes.indexOf(pane)}-${id}`;
   function renderTabs() {
     const hadFocus = tabsEl.contains(document.activeElement);
     tabsEl.replaceChildren(
@@ -772,10 +830,10 @@ export function initFilesApp(): void {
         const x = el('span', { className: 'fx-tab-x', title: 'Close' }, icon('xmark'));
         x.dataset.x = '';
         x.ariaHidden = 'true';
-        const tab = el('button', { type: 'button', className: 'fx-tab', id: `fx-tab-${id}`, tabIndex: id === active ? 0 : -1 }, icon(it ? kindIcon(it) : 'compare'), el('span', { className: 'fx-tab-name', textContent: it?.name ?? diffTitle() }), x);
+        const tab = el('button', { type: 'button', className: 'fx-tab', id: tabId(id), tabIndex: id === active ? 0 : -1 }, icon(it ? kindIcon(it) : 'compare'), el('span', { className: 'fx-tab-name', textContent: it?.name ?? diffTitle() }), x);
         tab.role = 'tab';
         tab.ariaSelected = String(id === active);
-        tab.setAttribute('aria-controls', 'fx-editor');
+        tab.setAttribute('aria-controls', editorEl.id);
         tab.dataset.id = String(id);
         return tab;
       }),
@@ -786,40 +844,45 @@ export function initFilesApp(): void {
       if (hadFocus) sel.focus();
     }
     const it = cur();
-    $<HTMLButtonElement>('[data-copy]').disabled = it?.text === undefined;
-    $<HTMLButtonElement>('[data-download]').disabled = !it;
-    $<HTMLButtonElement>('[data-close]').disabled = !it;
+    $p<HTMLButtonElement>('[data-copy]').disabled = it?.text === undefined;
+    $p<HTMLButtonElement>('[data-download]').disabled = !it;
+    $p<HTMLButtonElement>('[data-close]').disabled = !it;
   }
-  tabsEl.addEventListener('click', (e) => {
-    const tab = (e.target as HTMLElement).closest<HTMLElement>('.fx-tab');
-    if (!tab) return;
-    const id = Number(tab.dataset.id);
-    if ((e.target as HTMLElement).closest('[data-x]')) closeTab(id);
-    else openItem(id);
-  });
-  tabsEl.addEventListener('auxclick', (e) => {
-    const tab = (e.target as HTMLElement).closest<HTMLElement>('.fx-tab');
-    if (tab && e.button === 1) closeTab(Number(tab.dataset.id));
-  });
-  tabsEl.addEventListener('keydown', (e) => {
-    const i = open.indexOf(Number((e.target as HTMLElement).dataset.id));
-    if (i < 0) return;
-    let next = -1;
-    if (e.key === 'ArrowRight') next = (i + 1) % open.length;
-    else if (e.key === 'ArrowLeft') next = (i - 1 + open.length) % open.length;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = open.length - 1;
-    else if (e.key === 'Delete') {
-      closeTab(open[i]);
-      focusAfterClose();
-    } else return;
-    e.preventDefault();
-    if (next >= 0) {
-      openItem(open[next]);
-      tabsEl.querySelector<HTMLElement>(`#fx-tab-${open[next]}`)?.focus();
-    }
-  });
-  const focusAfterClose = () => (tabsEl.querySelector<HTMLElement>('[aria-selected="true"]') ?? $('[data-empty-state] [data-open]')).focus();
+  for (const p of panes) {
+    p.tabsEl.addEventListener('click', (e) => {
+      activatePane(p);
+      const tab = (e.target as HTMLElement).closest<HTMLElement>('.fx-tab');
+      if (!tab) return;
+      const id = Number(tab.dataset.id);
+      if ((e.target as HTMLElement).closest('[data-x]')) closeTab(id);
+      else openItem(id);
+    });
+    p.tabsEl.addEventListener('auxclick', (e) => {
+      activatePane(p);
+      const tab = (e.target as HTMLElement).closest<HTMLElement>('.fx-tab');
+      if (tab && e.button === 1) closeTab(Number(tab.dataset.id));
+    });
+    p.tabsEl.addEventListener('keydown', (e) => {
+      activatePane(p);
+      const i = open.indexOf(Number((e.target as HTMLElement).dataset.id));
+      if (i < 0) return;
+      let next = -1;
+      if (e.key === 'ArrowRight') next = (i + 1) % open.length;
+      else if (e.key === 'ArrowLeft') next = (i - 1 + open.length) % open.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = open.length - 1;
+      else if (e.key === 'Delete') {
+        closeTab(open[i]);
+        focusAfterClose();
+      } else return;
+      e.preventDefault();
+      if (next >= 0) {
+        openItem(open[next]);
+        tabsEl.querySelector<HTMLElement>(`#${tabId(open[next])}`)?.focus();
+      }
+    });
+  }
+  const focusAfterClose = () => (tabsEl.querySelector<HTMLElement>('[aria-selected="true"]') ?? $p('[data-tab-new]')).focus();
 
   // ---- Tools ----
   function setTool(t: Tool, focusTray = false) {
@@ -896,7 +959,7 @@ export function initFilesApp(): void {
     set('extract', archives > 0, extract, archives > 0);
     $<HTMLButtonElement>('[data-tray-clear]').disabled = !!busy || !list.length;
     const it = cur();
-    const hexBtn = $<HTMLButtonElement>('[data-hex-tray]');
+    const hexBtn = $p<HTMLButtonElement>('[data-hex-tray]');
     hexBtn.hidden = !it || it.text !== undefined || !ARCHIVES.includes(it.sniffed);
     hexBtn.disabled = !!it && tray.includes(it.id);
     hexBtn.querySelector('span:not(.icon)')!.textContent = hexBtn.disabled ? 'In the Archive tray' : 'Add to Archive tray';
@@ -1350,22 +1413,47 @@ export function initFilesApp(): void {
   $$('[data-new]').forEach((b) => b.addEventListener('click', () => newDoc()));
   $$('[data-paste]').forEach((b) => b.addEventListener('click', () => void pasteFromClipboard()));
   explorerToggle.onclick = () => setExplorer(explorerToggle.ariaExpanded !== 'true');
-  $('[data-copy]').addEventListener('click', async () => {
-    const it = curText();
-    if (!it) return;
-    sync();
-    try {
-      await navigator.clipboard.writeText(it.text!);
-      say(`Copied ${it.name}.`, 'ok');
-    } catch {
-      say('Copy failed. Select the text and copy it manually.', 'error');
-    }
-  });
-  $('[data-download]').addEventListener('click', download);
-  $('[data-close]').addEventListener('click', () => {
-    if (active !== undefined) closeTab(active);
-    focusAfterClose();
-  });
+  for (const p of panes) {
+    // Clicking or focusing anywhere in a pane makes it the one actions apply to.
+    p.el.addEventListener('focusin', () => activatePane(p));
+    p.el.addEventListener('pointerdown', () => activatePane(p));
+    p.el.querySelector('[data-copy]')!.addEventListener('click', async () => {
+      activatePane(p);
+      const it = curText();
+      if (!it) return;
+      sync();
+      try {
+        await navigator.clipboard.writeText(it.text!);
+        say(`Copied ${it.name}.`, 'ok');
+      } catch {
+        say('Copy failed. Select the text and copy it manually.', 'error');
+      }
+    });
+    p.el.querySelector('[data-download]')!.addEventListener('click', () => {
+      activatePane(p);
+      download();
+    });
+    p.el.querySelector('[data-close]')!.addEventListener('click', () => {
+      activatePane(p);
+      if (active !== undefined) closeTab(active);
+      focusAfterClose();
+    });
+    p.el.querySelector('[data-tab-new]')!.addEventListener('click', () => {
+      activatePane(p);
+      newDoc();
+    });
+    p.sbJson.onclick = () => {
+      activatePane(p);
+      const it = cur();
+      if (it?.json?.line) jumpTo(it.id, it.json.line, it.json.col!);
+      else void runJson('validate');
+    };
+    p.el.querySelector('[data-hex-tray]')!.addEventListener('click', () => {
+      activatePane(p);
+      if (cur()) addToTray([active!]);
+      showTray(true);
+    });
+  }
   outToggle.onclick = () => setOutOpen(outToggle.ariaExpanded !== 'true');
   $('[data-out-clear]').addEventListener('click', () => {
     out.replaceChildren();
@@ -1374,11 +1462,110 @@ export function initFilesApp(): void {
     setOutOpen(false);
     outPanel.hidden = true;
   });
-  sbJson.onclick = () => {
-    const it = cur();
-    if (it?.json?.line) jumpTo(it.id, it.json.line, it.json.col!);
-    else void runJson('validate');
-  };
+  // ---- Split editor ----
+  let split: 'right' | 'down' | undefined;
+  const splitSize: Partial<Record<'right' | 'down', number>> = {};
+  const paneActive = (p: Pane) => (p === pane ? active : p.active);
+
+  /** Make `p` the pane actions apply to; its document is reloaded if the other pane edited it meanwhile. */
+  function activatePane(p: Pane) {
+    if (p === pane || p.el.hidden) return;
+    saveView();
+    sync();
+    pane.el.removeAttribute('data-active');
+    usePane(p);
+    p.el.setAttribute('data-active', '');
+    const it = byId(shown);
+    if (it?.text !== undefined && it.text !== ta.value) shown = undefined;
+    showActive();
+  }
+
+  function setSplit(dir: 'right' | 'down') {
+    // Side by side is too narrow on phones.
+    if (narrow.matches) dir = 'down';
+    const [a, b] = panes;
+    if (!split) {
+      const aActive = paneActive(a);
+      const aOpen = a === pane ? open : a.open;
+      // The second pane starts with another open document, another text file, or the same one.
+      const pick = aOpen.find((id) => id !== aActive && id !== DIFF) ?? items.find((it) => it.id !== aActive && it.text !== undefined)?.id ?? (aActive !== DIFF ? aActive : undefined);
+      if (pick === undefined) return say('Open a file first, then split the editor.', 'error');
+      Object.assign(b, { open: [pick], active: pick, shown: undefined, dirty: false });
+    }
+    split = dir;
+    splitArea.dataset.split = dir;
+    b.el.hidden = false;
+    $$<HTMLElement>('[data-split-handle]').forEach((h) => (h.hidden = h.dataset.splitHandle !== dir));
+    ensureSplitResizer(dir);
+    if (splitSize[dir]) splitArea.style.setProperty('--fx-split', `${splitSize[dir]}px`);
+    withPane(b, showActive);
+    renderSplitChrome();
+  }
+
+  function closeSplit() {
+    if (!split) return;
+    const [a, b] = panes;
+    activatePane(a);
+    // Documents open in the second pane move over as tabs.
+    for (const id of b.open) if (!open.includes(id) && (byId(id) || id === DIFF)) open.push(id);
+    Object.assign(b, { open: [], active: undefined, shown: undefined, dirty: false });
+    b.el.hidden = true;
+    split = undefined;
+    delete splitArea.dataset.split;
+    $$<HTMLElement>('[data-split-handle]').forEach((h) => (h.hidden = true));
+    showActive();
+    renderSplitChrome();
+  }
+
+  /** Split buttons' pressed state and the seam "Compare" pill (two different text documents visible). */
+  function renderSplitChrome() {
+    $$<HTMLButtonElement>('[data-split-btn]').forEach((btn) => {
+      btn.ariaPressed = String(split === btn.dataset.splitBtn);
+      btn.disabled = !split && !items.length;
+    });
+    const [x, y] = panes.map((p) => byId(paneActive(p)));
+    seam.hidden = !split || !x || !y || x === y || x.text === undefined || y.text === undefined;
+  }
+
+  const splitResizers: Partial<Record<'right' | 'down', true>> = {};
+  function ensureSplitResizer(dir: 'right' | 'down') {
+    if (splitResizers[dir]) return;
+    splitResizers[dir] = true;
+    const right = dir === 'right';
+    const size = () => (right ? splitArea.clientWidth : splitArea.clientHeight);
+    resizable($(`[data-split-handle="${dir}"]`), {
+      key: right ? 'files.split' : 'files.split.down',
+      min: () => 160,
+      max: () => Math.max(160, size() - 160),
+      initial: Math.round(size() / 2),
+      apply: (v) => {
+        splitSize[dir] = v;
+        if (split === dir) splitArea.style.setProperty('--fx-split', `${v}px`);
+      },
+      // Size of the first pane: from the area's left (or top) edge to the pointer.
+      fromPointer: (e) => {
+        const r = splitArea.getBoundingClientRect();
+        return right ? e.clientX - r.left : e.clientY - r.top;
+      },
+      growKey: right ? 'ArrowRight' : 'ArrowDown',
+      shrinkKey: right ? 'ArrowLeft' : 'ArrowUp',
+      container: splitArea,
+    });
+  }
+
+  $$<HTMLButtonElement>('[data-split-btn]').forEach((btn) =>
+    btn.addEventListener('click', () => (split === btn.dataset.splitBtn ? closeSplit() : setSplit(btn.dataset.splitBtn as 'right' | 'down'))),
+  );
+  $('[data-split-close]').addEventListener('click', closeSplit);
+  narrow.addEventListener('change', () => split === 'right' && narrow.matches && setSplit('down'));
+  seam.addEventListener('click', () => {
+    const [x, y] = panes.map((p) => byId(paneActive(p))!);
+    closeSplit();
+    setTool('compare');
+    root.querySelector<HTMLSelectElement>('[name="cmpA"]')!.value = String(x.id);
+    root.querySelector<HTMLSelectElement>('[name="cmpB"]')!.value = String(y.id);
+    void compare({ name: x.name, id: x.id }, { name: y.name, id: y.id });
+  });
   $$<HTMLInputElement>('[name="tool"]').forEach((r) => r.addEventListener('change', () => setTool(r.value as Tool)));
   const acts: Record<string, () => void> = {
     validate: () => runJson('validate'),
@@ -1439,6 +1626,8 @@ export function initFilesApp(): void {
   }
 
   async function compare(a: Source, b: Source) {
+    // The comparison view lives in the first pane.
+    activatePane(panes[0]);
     diffSrc = { a, b };
     saveView();
     if (!open.includes(DIFF)) open.push(DIFF);
@@ -1660,10 +1849,6 @@ export function initFilesApp(): void {
   $$('[data-tray-add]').forEach((b) => b.addEventListener('click', addSelectedToTray));
   $$('[name="fmt"]').forEach((r) => r.addEventListener('change', renderTray));
   $('[data-tray-focus]').addEventListener('click', () => showTray(true));
-  $('[data-hex-tray]').addEventListener('click', () => {
-    if (active !== undefined) addToTray([active]);
-    showTray(true);
-  });
   $('[data-tray-clear]').addEventListener('click', () => {
     tray = [];
     renderTools();
@@ -1710,34 +1895,52 @@ export function initFilesApp(): void {
     else void addFiles([...e.dataTransfer!.files], true);
   });
 
-  ta.addEventListener('input', () => {
-    dirty = true;
-    const it = byId(shown)!;
-    it.edited = true;
-    refreshHl();
-    scheduleMd();
-    analyse(it.size > WARN_TEXT ? 600 : 150);
-    paint();
-  });
-  ta.addEventListener('scroll', () => {
-    syncHl();
-    // Split view: keep the preview roughly at the same relative position.
-    if (editorEl.dataset.mdView === 'split') {
-      const f = ta.scrollTop / Math.max(1, ta.scrollHeight - ta.clientHeight);
-      mdEl.scrollTop = f * (mdEl.scrollHeight - mdEl.clientHeight);
-    }
-    paint();
-  });
+  for (const p of panes) {
+    p.ta.addEventListener('input', () => {
+      activatePane(p);
+      dirty = true;
+      const it = byId(shown)!;
+      it.edited = true;
+      refreshHl();
+      scheduleMd();
+      analyse(it.size > WARN_TEXT ? 600 : 150);
+      paint();
+    });
+    p.ta.addEventListener('scroll', () => {
+      // The other pane scrolls too (wheel without focus): keep its overlay and gutter in step.
+      if (p !== pane) {
+        withPane(p, () => {
+          syncHl();
+          paintNow();
+        });
+        return;
+      }
+      syncHl();
+      // Markdown split view: keep the preview roughly at the same relative position.
+      if (editorEl.dataset.mdView === 'split') {
+        const f = ta.scrollTop / Math.max(1, ta.scrollHeight - ta.clientHeight);
+        mdEl.scrollTop = f * (mdEl.scrollHeight - mdEl.clientHeight);
+      }
+      paint();
+    });
+    p.ta.addEventListener('blur', () => (escaped = false));
+    p.ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') escaped = true;
+      else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !escaped) {
+        e.preventDefault();
+        insert('  ');
+      } else if (e.key !== 'Shift') escaped = false;
+    });
+  }
   document.addEventListener('selectionchange', () => document.activeElement === ta && paint());
-  new ResizeObserver(paint).observe(ta);
-  ta.addEventListener('blur', () => (escaped = false));
-  ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') escaped = true;
-    else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !escaped) {
-      e.preventDefault();
-      insert('  ');
-    } else if (e.key !== 'Shift') escaped = false;
+  // Gutters follow pane size changes (window, Explorer or split divider), in both panes.
+  const paneResize = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const p = panes.find((x) => x.ta === entry.target);
+      if (p && !p.el.hidden) withPane(p, paintNow);
+    }
   });
+  panes.forEach((p) => paneResize.observe(p.ta));
 
   // Shortcuts only while focus is inside the app, so the browser's own shortcuts keep working elsewhere.
   root.addEventListener('keydown', (e) => {
@@ -1746,6 +1949,10 @@ export function initFilesApp(): void {
     if (mod && !e.shiftKey && !e.altKey && key === 's') {
       e.preventDefault();
       download();
+    } else if (mod && e.altKey && !e.shiftKey && (key === 'n' || (e.metaKey && e.code === 'KeyN'))) {
+      // Ctrl/Cmd+Alt+N: AltGr+N (Ctrl+Alt on some layouts) types a letter such as "ń", so key must be "n".
+      e.preventDefault();
+      newDoc();
     } else if (mod && e.shiftKey && !e.altKey && key === 'f') {
       e.preventDefault();
       void runJson('format');

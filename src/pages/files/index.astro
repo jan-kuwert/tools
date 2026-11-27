@@ -9,6 +9,58 @@ import { categories, href } from '../../tools';
 const cat = categories.find((c) => c.id === 'files')!;
 // Cloned into client-built rows (explorer, tray, tabs, output).
 const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'download', 'trash', 'xmark', 'warning', 'check', 'compare'] as const;
+
+// Decorative, faint "file" behind the empty editor: a small sample tokenised at build time.
+const sample = `// files & text: everything stays in your browser
+import { format, minify } from './json';
+import { zip, unzip } from './archive';
+
+export interface Doc {
+  name: string;
+  text: string;
+  size: number;
+}
+
+const MAX_TEXT = 50 * 1024 * 1024; // 50 MB
+
+export async function open(files: File[]): Promise<Doc[]> {
+  const docs: Doc[] = [];
+  for (const file of files) {
+    if (file.size > MAX_TEXT) continue;
+    docs.push({ name: file.name, text: await file.text(), size: file.size });
+  }
+  return docs;
+}
+
+export function pretty(doc: Doc, indent = 2): string {
+  // big integers keep every digit
+  return format(doc.text, ' '.repeat(indent));
+}
+
+export async function bundle(docs: Doc[]): Promise<Blob> {
+  const entries = Object.fromEntries(docs.map((d) => [d.name, d.text]));
+  return new Blob([await zip(entries, { level: 6 })], { type: 'application/zip' });
+}
+
+/* drop a file, paste text, or start a new one */
+const settings = {
+  "theme": "system",
+  "indent": 2,
+  "archives": ["zip", "7z", "tar.gz"],
+  "highlight": true
+};
+
+export default { open, pretty, bundle, settings };`;
+const KW = /^(import|from|export|interface|const|async|function|for|of|if|continue|await|return|new|default|let)$/;
+const ghost = sample.split('\n').map((line) =>
+  [...line.matchAll(/(\/\/.*|\/\*.*\*\/)|('[^']*'|"[^"]*")|(\b\d[\d_]*\b)|([A-Za-z_$][\w$]*)|(\s+|.)/g)].map((m): [string, string] => {
+    if (m[1]) return ['comment', m[1]];
+    if (m[2]) return ['string', m[2]];
+    if (m[3]) return ['number', m[3]];
+    if (m[4]) return [KW.test(m[4]) ? 'keyword' : /^[A-Z]/.test(m[4]) ? 'title' : '', m[4]];
+    return ['', m[5]];
+  }),
+);
 ---
 <Base title={`${cat.label} · Tools`} description={cat.blurb}>
   <div class="tool-shell" data-wide>
@@ -34,6 +86,8 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
           <label><input type="radio" name="tool" value="gzip" /><span>Gzip</span></label>
           <label><input type="radio" name="tool" value="compare" /><span>Compare</span></label>
         </div>
+        <span class="fx-msg" data-msg role="status" aria-live="polite"></span>
+        <progress data-progress max="1" hidden aria-label="Progress"></progress>
         <div class="fx-top-actions">
           <button class="fx-btn" type="button" data-new title="New text document"><Icon name="new-file" /><span>New</span></button>
           <button class="fx-btn" type="button" data-open title="Open files"><Icon name="folder" /><span>Open</span></button>
@@ -82,83 +136,102 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
 
       <div class="fx-body">
         <div class="fx-main">
-          <div class="fx-tabbar">
-            <div class="fx-tabs" role="tablist" aria-label="Open documents" data-tabs></div>
-            <div class="fx-doc-info">
-              <span class="fx-msg" data-msg role="status" aria-live="polite"></span>
-              <progress data-progress max="1" hidden aria-label="Progress"></progress>
-              <span data-sb-hl></span>
-              <span data-sb-pos></span>
-              <span data-sb-size></span>
-              <button class="fx-sb-btn" type="button" data-sb-json hidden></button>
-              <select class="fx-sb-select" data-sb-syntax aria-label="Language" title="Language for highlighting" hidden></select>
-              <span data-sb-lang></span>
-            </div>
-            <div class="fx-doc-actions">
-              <div class="segmented fx-seg fx-md-modes" role="radiogroup" aria-label="Markdown view" data-md-modes hidden>
-                <label><input type="radio" name="mdView" value="edit" checked /><span>Editor</span></label>
-                <label><input type="radio" name="mdView" value="split" /><span>Split</span></label>
-                <label><input type="radio" name="mdView" value="preview" /><span>Preview</span></label>
-              </div>
-              <button class="fx-ib" type="button" data-md-html aria-label="Download as HTML" title="Download as HTML" hidden><Icon name="code" /></button>
-              <button class="fx-ib" type="button" data-copy aria-label="Copy text" title="Copy text"><Icon name="copy" /></button>
-              <button class="fx-ib" type="button" data-download aria-label="Download" title="Download (Ctrl/Cmd+S)"><Icon name="download" /></button>
-              <button class="fx-ib" type="button" data-close aria-label="Close tab" title="Close tab (Alt+W)"><Icon name="xmark" /></button>
-            </div>
-          </div>
-
-          <div class="fx-editor" id="fx-editor" role="tabpanel" data-editor>
-            <div class="fx-code" data-code hidden>
-              <div class="fx-curline" data-curline aria-hidden="true"></div>
-              <div class="fx-gutter" aria-hidden="true"><div data-gutter></div></div>
-              <div class="fx-ta">
-                <pre class="fx-hl" aria-hidden="true"><code data-hl></code></pre>
-                <textarea data-text spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="Document text" aria-describedby="fx-keys"></textarea>
-              </div>
-            </div>
-            <article class="fx-md" data-md tabindex="0" aria-label="Markdown preview" hidden></article>
-            <section class="fx-diff" data-diff hidden aria-label="Comparison">
-              <div class="fx-diff-head">
-                <span class="fx-diff-names" data-diff-names></span>
-                <span class="fx-diff-sum" data-diff-sum></span>
-                <span class="fx-grow"></span>
-                <span class="fx-note" data-diff-pos></span>
-                <button class="fx-ib" type="button" data-diff-prev aria-label="Previous change (P or Alt+Up)" title="Previous change (P)"><Icon name="arrow-up" /></button>
-                <button class="fx-ib" type="button" data-diff-next aria-label="Next change (N or Alt+Down)" title="Next change (N)"><Icon name="arrow-down" /></button>
-              </div>
-              <p class="fx-diff-notice" data-diff-notice hidden></p>
-              <div class="fx-diff-body" data-diff-body tabindex="0" role="region" aria-label="Differences. N and P move between changes."></div>
-            </section>
-            <div class="fx-hex" data-hex hidden tabindex="0" role="region" aria-label="File preview">
-              <dl class="fx-info" data-info></dl>
-              <button class="btn fx-hex-tray" type="button" data-hex-tray hidden><Icon name="files" /><span></span></button>
-              <pre data-hexdump></pre>
-            </div>
-            <div class="fx-empty" data-empty-state>
-              <div class="fx-ghost-doc" data-start-typing tabindex="0" role="textbox" aria-multiline="true" aria-label="New document: start typing">
-                <div class="fx-ghost-gutter" aria-hidden="true">{Array.from({ length: 10 }, (_, i) => <span>{i + 1}</span>)}</div>
-                <pre class="fx-ghost-text" aria-hidden="true">Start typing here, paste text, or drop files.
-
-JSON, JavaScript, Markdown, Python, CSS, SQL and more
-are highlighted as you type.
-
-{'{'}
-  "tip": "Format, minify or compare from the toolbar",
-  "archives": ["zip", "7z", "tar.gz"]
-{'}'}
-</pre>
-              </div>
-              <div class="fx-dropzone">
-                <svg class="fx-drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 30H11a7 7 0 0 1-1-13.9A11 11 0 0 1 31.4 13 9 9 0 1 1 36 30h-2" /><path d="M24 22v16M18 28l6-6 6 6" /></svg>
-                <p class="fx-empty-title">Drop files here or choose files</p>
-                <div class="fx-empty-actions">
-                  <button class="btn btn-primary" type="button" data-open><Icon name="upload" />Choose files</button>
-                  <button class="btn" type="button" data-paste><Icon name="paste" />Paste from clipboard</button>
+          <div class="fx-split" data-split-area>
+            {[0, 1].map((i) => (
+              <section class={`fx-pane fx-pane-${i}`} data-pane={i} data-active={i === 0 ? '' : undefined} hidden={i === 1} aria-label={i === 0 ? 'Editor' : 'Second editor'}>
+                <div class="fx-tabbar">
+                  <div class="fx-tabs" role="tablist" aria-label="Open documents" data-tabs></div>
+                  <button class="fx-ib fx-tab-new" type="button" data-tab-new aria-label="New file" title="New file (Ctrl/Cmd+Alt+N)"><Icon name="plus" /></button>
+                  <span class="fx-grow"></span>
+                  <div class="fx-doc-info">
+                    <span data-sb-hl></span>
+                    <span data-sb-pos></span>
+                    <span data-sb-size></span>
+                    <button class="fx-sb-btn" type="button" data-sb-json hidden></button>
+                    <select class="fx-sb-select" data-sb-syntax aria-label="Language" title="Language for highlighting" hidden></select>
+                    <span data-sb-lang></span>
+                  </div>
+                  <div class="fx-doc-actions">
+                    <div class="segmented fx-seg fx-md-modes" role="radiogroup" aria-label="Markdown view" data-md-modes hidden>
+                      <label><input type="radio" name={`mdView${i}`} data-md-view value="edit" checked /><span>Editor</span></label>
+                      <label><input type="radio" name={`mdView${i}`} data-md-view value="split" /><span>Split</span></label>
+                      <label><input type="radio" name={`mdView${i}`} data-md-view value="preview" /><span>Preview</span></label>
+                    </div>
+                    <button class="fx-ib" type="button" data-md-html aria-label="Download as HTML" title="Download as HTML" hidden><Icon name="code" /></button>
+                    <button class="fx-ib" type="button" data-copy aria-label="Copy text" title="Copy text"><Icon name="copy" /></button>
+                    <button class="fx-ib" type="button" data-download aria-label="Download" title="Download (Ctrl/Cmd+S)"><Icon name="download" /></button>
+                    <button class="fx-ib" type="button" data-close aria-label="Close tab" title="Close tab (Alt+W)"><Icon name="xmark" /></button>
+                    {i === 0 ? (
+                      <span class="fx-split-btns">
+                        <button class="fx-ib" type="button" data-split-btn="right" aria-pressed="false" aria-label="Split right" title="Split right: two files side by side">
+                          <svg class="fx-glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M12 4.5v15" /></svg>
+                        </button>
+                        <button class="fx-ib" type="button" data-split-btn="down" aria-pressed="false" aria-label="Split down" title="Split down: two files stacked">
+                          <svg class="fx-glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M3.5 12h17" /></svg>
+                        </button>
+                      </span>
+                    ) : (
+                      <button class="fx-ib" type="button" data-split-close aria-label="Close split" title="Close split">
+                        <svg class="fx-glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9.5 9.5l5 5M14.5 9.5l-5 5" /></svg>
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <p class="fx-empty-hint">Text up to 50 MB · JavaScript up to 10 MB · archives: ZIP, 7z, gzip; extracts 7z, RAR, tar, xz, bz2 and more · up to 500 MB.</p>
-                <p class="fx-empty-hint" id="fx-keys">Tab inserts two spaces; press Esc, then Tab, to leave the editor. Ctrl/Cmd+S downloads, Ctrl/Cmd+Shift+F formats JSON, Alt+W closes the tab.</p>
-              </div>
-            </div>
+
+                <div class="fx-editor" id={`fx-editor-${i}`} role="tabpanel" data-editor>
+                  <div class="fx-code" data-code hidden>
+                    <div class="fx-curline" data-curline aria-hidden="true"></div>
+                    <div class="fx-gutter" aria-hidden="true"><div data-gutter></div></div>
+                    <div class="fx-ta">
+                      <pre class="fx-hl" aria-hidden="true"><code data-hl></code></pre>
+                      <textarea data-text spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="Document text" aria-describedby="fx-keys"></textarea>
+                    </div>
+                  </div>
+                  <article class="fx-md" data-md tabindex="0" aria-label="Markdown preview" hidden></article>
+                  {i === 0 && (
+                    <section class="fx-diff" data-diff hidden aria-label="Comparison">
+                      <div class="fx-diff-head">
+                        <span class="fx-diff-names" data-diff-names></span>
+                        <span class="fx-diff-sum" data-diff-sum></span>
+                        <span class="fx-grow"></span>
+                        <span class="fx-note" data-diff-pos></span>
+                        <button class="fx-ib" type="button" data-diff-prev aria-label="Previous change (P or Alt+Up)" title="Previous change (P)"><Icon name="arrow-up" /></button>
+                        <button class="fx-ib" type="button" data-diff-next aria-label="Next change (N or Alt+Down)" title="Next change (N)"><Icon name="arrow-down" /></button>
+                      </div>
+                      <p class="fx-diff-notice" data-diff-notice hidden></p>
+                      <div class="fx-diff-body" data-diff-body tabindex="0" role="region" aria-label="Differences. N and P move between changes."></div>
+                    </section>
+                  )}
+                  <div class="fx-hex" data-hex hidden tabindex="0" role="region" aria-label="File preview">
+                    <dl class="fx-info" data-info></dl>
+                    <button class="btn fx-hex-tray" type="button" data-hex-tray hidden><Icon name="files" /><span></span></button>
+                    <pre data-hexdump></pre>
+                  </div>
+                  {i === 0 && (
+                    <div class="fx-empty" data-empty-state>
+                      <div class="fx-bg-doc" aria-hidden="true">
+                        <div class="fx-bg-gutter">{Array.from({ length: 60 }, (_, n) => <span>{n + 1}</span>)}</div>
+                        <pre class="fx-bg-code">{ghost.map((line) => <>{line.map(([cls, text]) => (cls ? <span class={`hljs-${cls}`}>{text}</span> : text))}{'\n'}</>)}</pre>
+                      </div>
+                      <div class="fx-drop-card">
+                        <svg class="fx-drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 30H11a7 7 0 0 1-1-13.9A11 11 0 0 1 31.4 13 9 9 0 1 1 36 30h-2" /><path d="M24 22v16M18 28l6-6 6 6" /></svg>
+                        <p class="fx-empty-title">Drop files here</p>
+                        <button class="btn btn-primary fx-new-big" type="button" data-new><Icon name="new-file" />New file</button>
+                        <div class="fx-empty-actions">
+                          <button class="btn" type="button" data-open><Icon name="upload" />Choose files</button>
+                          <button class="btn" type="button" data-paste><Icon name="paste" />Paste from clipboard</button>
+                        </div>
+                        <p class="fx-empty-hint">Text up to 50 MB · JavaScript up to 10 MB · archives: ZIP, 7z, gzip; extracts 7z, RAR, tar, xz, bz2 and more · up to 500 MB.</p>
+                        <p class="fx-empty-hint" id="fx-keys">Tab inserts two spaces; press Esc, then Tab, to leave the editor. Ctrl/Cmd+S downloads, Ctrl/Cmd+Shift+F formats JSON, Alt+W closes the tab, Ctrl/Cmd+Alt+N opens a new file.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            ))}
+            <div class="pane-resizer fx-split-handle" role="separator" aria-orientation="vertical" aria-label="Resize split" tabindex="0" data-split-handle="right" hidden title="Drag or use arrow keys to resize; double-click to reset"></div>
+            <div class="pane-resizer fx-split-handle" role="separator" aria-orientation="horizontal" aria-label="Resize split" tabindex="0" data-split-handle="down" hidden title="Drag or use arrow keys to resize; double-click to reset"></div>
+            <button class="fx-seam" type="button" data-seam-compare aria-label="Compare these two files" title="Compare these two files" hidden><Icon name="compare" /><span>Compare</span></button>
           </div>
 
           <section class="fx-panel" aria-labelledby="fx-out-title" data-out-panel hidden>
@@ -305,7 +378,10 @@ are highlighted as you type.
   .fx-top .mode { margin-right: 0.5rem; }
   .fx-modes { padding: 2px; border-radius: 9px; }
   .fx .segmented span { padding: 0.2rem 0.65rem; border-radius: 7px; font-size: 0.84rem; }
-  .fx-top-actions { display: flex; align-items: center; gap: 0.15rem; margin-left: auto; }
+  .fx-top-actions { display: flex; align-items: center; gap: 0.15rem; margin-left: 0.5rem; }
+  /* Last status message, muted, between the tools and the actions. */
+  .fx-top .fx-msg { margin-left: auto; font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+  .fx-top progress { width: 80px; height: 6px; accent-color: var(--accent); }
   /* The Explorer sits on the right: mirror the sidebar glyph. */
   .fx-side-toggle { margin-left: 0.25rem; }
   .fx-side-toggle .icon { transform: scaleX(-1); }
@@ -401,9 +477,39 @@ are highlighted as you type.
   .fx-tray-busy p { margin: 0; font-weight: 600; font-size: 0.85rem; }
   .fx-tray-busy .btn { padding: 0.35rem 0.9rem; font-size: 0.85rem; }
 
-  .fx-main { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
-  .fx-tabbar { display: flex; align-items: stretch; background: var(--app-bar); border-bottom: 1px solid var(--app-line); min-height: 36px; }
-  .fx-tabs { position: relative; display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+  .fx-main { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+
+  /* Editor panes: one, or two side by side ("right") or stacked ("down") around a draggable divider. */
+  .fx-split { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .fx-split[data-split='right'] { grid-template-columns: var(--fx-split, 50%) auto minmax(0, 1fr); }
+  .fx-split[data-split='down'] { grid-template-rows: var(--fx-split, 50%) auto minmax(0, 1fr); }
+  .fx-split[data-split='right'] .fx-pane-1 { grid-column: 3; grid-row: 1; border-left: 1px solid var(--app-line); }
+  .fx-split[data-split='down'] .fx-pane-1 { grid-row: 3; grid-column: 1; border-top: 1px solid var(--app-line); }
+  .fx-split[data-split='right'] [data-split-handle='right'] { grid-column: 2; grid-row: 1; }
+  .fx-split[data-split='down'] [data-split-handle='down'] { grid-row: 2; grid-column: 1; }
+  .fx-pane { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .fx-pane[hidden] { display: none; }
+  /* The inactive pane keeps its content but quiets its chrome. */
+  .fx-split[data-split] .fx-pane:not([data-active]) .fx-tab[aria-selected='true'] { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--muted) 45%, transparent); }
+  .fx-split[data-split] .fx-pane:not([data-active]) :is(.fx-doc-info, .fx-md-modes) { display: none; }
+  .fx-glyph { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+  .fx-split-btns { display: contents; }
+  .fx-ib[aria-pressed='true'] { background: var(--fx-sel); color: var(--accent); }
+  .fx-seam {
+    position: absolute; z-index: 7; display: inline-flex; align-items: center; gap: 0.35rem; height: 28px; padding: 0 0.7rem;
+    border: 1px solid var(--app-line); border-radius: 999px; background: var(--surface); color: var(--fg); box-shadow: var(--shadow);
+    font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; transform: translate(-50%, -50%);
+  }
+  .fx-seam[hidden] { display: none; }
+  .fx-seam:is(:hover, :focus-visible) { border-color: var(--accent); color: var(--accent); }
+  .fx-seam .icon svg { width: 15px; height: 15px; }
+  .fx-split[data-split='right'] .fx-seam { left: var(--fx-split, 50%); top: 50%; }
+  .fx-split[data-split='down'] .fx-seam { top: var(--fx-split, 50%); left: 50%; }
+  .fx-tabbar { display: flex; align-items: center; background: var(--app-bar); border-bottom: 1px solid var(--app-line); min-height: 36px; }
+  .fx-tabs { position: relative; display: flex; align-self: stretch; flex: 0 1 auto; min-width: min(7rem, 30%); overflow-x: auto; scrollbar-width: thin; }
+  .fx-tabs:empty { min-width: 0; }
+  .fx .pane-resizer:focus-visible { outline: none; }
+  .fx-tab-new { flex: none; width: 28px; height: 28px; margin-left: 0.2rem; }
   .fx-tab {
     display: inline-flex; align-items: center; gap: 0.4rem; flex: none; max-width: 15rem; padding: 0 0.4rem 0 0.75rem;
     border: 0; border-right: 1px solid var(--app-line); background: transparent; color: var(--muted); font: inherit; font-size: 0.84rem; cursor: pointer;
@@ -415,9 +521,9 @@ are highlighted as you type.
   .fx-tab-x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; opacity: 0.6; }
   .fx-tab-x:hover { opacity: 1; background: var(--fx-hover); }
   .fx-tab-x .icon svg { width: 14px; height: 14px; }
-  .fx-doc-actions { display: flex; align-items: center; gap: 0.1rem; padding: 0 0.35rem; }
+  .fx-doc-actions { display: flex; flex: none; align-items: center; gap: 0.1rem; padding: 0 0.35rem; }
   /* Document info (was a status bar): compact and muted at the right of the tab row. */
-  .fx-doc-info { display: flex; align-items: center; gap: 0.15rem 0.75rem; flex: 0 1 auto; min-width: 0; max-width: 60%; padding-left: 0.6rem; color: var(--muted); font-size: 0.76rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+  .fx-doc-info { display: flex; align-items: center; gap: 0.15rem 0.75rem; flex: 0 100 auto; min-width: 0; max-width: 60%; padding-left: 0.6rem; color: var(--muted); font-size: 0.76rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
   .fx-doc-info > span:empty { display: none; }
   .fx-doc-info progress { width: 80px; height: 6px; accent-color: var(--accent); }
 
@@ -528,29 +634,27 @@ are highlighted as you type.
   .fx-hex-tray { margin: 0 0 1rem; padding: 0.4rem 0.85rem; font-size: 0.88rem; }
   .fx-hex pre { margin: 0; font: 12.5px/1.6 var(--mono); color: var(--muted); }
 
-  /* Empty state: a faint document whose first line is a real input, fading into the drop area. */
-  .fx-empty { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: auto; }
-  .fx-ghost-doc {
-    position: relative; z-index: 1; display: flex; flex: none; height: calc(10 * var(--fx-line) + 8px); padding-top: 8px; overflow: hidden; cursor: text; outline: none;
-    font: 13px/var(--fx-line) var(--mono);
-    -webkit-mask-image: linear-gradient(to bottom, #000 0 40%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0 40%, transparent 100%);
+  /* Empty state: the whole area looks like a faint code file, with the drop prompt on top. */
+  .fx-empty { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
+  .fx-bg-doc {
+    position: absolute; inset: 0; display: flex; padding-top: 8px; overflow: hidden; pointer-events: none; user-select: none;
+    font: 13px/var(--fx-line) var(--mono); opacity: 0.32;
+    -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 0 35%, #000 85%); mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 0 35%, #000 85%);
   }
-  .fx-ghost-gutter { flex: none; width: 4ch; padding-right: 0.9ch; box-sizing: content-box; text-align: right; user-select: none; color: color-mix(in srgb, var(--muted) 70%, transparent); border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-  .fx-ghost-gutter span { display: block; height: var(--fx-line); }
-  .fx-ghost-text { position: relative; flex: 1; min-width: 0; margin: 0; padding: 0 12px 0 10px; font: inherit; white-space: pre; overflow: hidden; color: color-mix(in srgb, var(--muted) 72%, transparent); user-select: none; }
-  /* Keyboard focus shows a caret at the start of line 1. */
-  .fx-ghost-doc:focus-visible .fx-ghost-text::before { content: ''; position: absolute; left: 10px; top: 2px; width: 2px; height: calc(var(--fx-line) - 4px); background: var(--accent); animation: fx-blink 1.1s steps(1) infinite; }
-  @keyframes fx-blink { 50% { opacity: 0; } }
-  .fx-dropzone {
-    position: relative; flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.65rem;
-    margin: -2.5rem 1.5rem 1.5rem; padding: 1.5rem 1rem; text-align: center;
-    border: 1.5px dashed color-mix(in srgb, var(--muted) 35%, transparent); border-radius: 14px; transition: border-color 0.15s, background-color 0.15s;
+  .fx-bg-gutter { flex: none; width: 4ch; padding-right: 0.9ch; box-sizing: content-box; text-align: right; color: var(--muted); border-right: 1px solid var(--border); }
+  .fx-bg-gutter span { display: block; height: var(--fx-line); }
+  .fx-bg-code { margin: 0; padding: 0 12px 0 10px; font: inherit; color: var(--muted); }
+  .fx-drop-card {
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; width: min(30rem, calc(100% - 2rem));
+    padding: 1.75rem 1.5rem; text-align: center; border: 1.5px dashed color-mix(in srgb, var(--muted) 40%, transparent); border-radius: 16px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(2px); transition: border-color 0.15s, background-color 0.15s;
   }
-  .fx.fx-over .fx-dropzone { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .fx.fx-over .fx-drop-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
   .fx-drop-icon { width: 44px; height: 44px; fill: none; stroke: color-mix(in srgb, var(--muted) 80%, transparent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .fx-empty-title { margin: 0; font-size: 1.05rem; font-weight: 650; }
+  .fx-empty-title { margin: 0; font-size: 1.1rem; font-weight: 650; }
+  .fx-new-big { padding: 0.6rem 1.3rem; font-size: 0.98rem; }
   .fx-empty-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
-  .fx-empty-actions .btn { padding: 0.5rem 0.95rem; font-size: 0.9rem; }
+  .fx-empty-actions .btn { padding: 0.45rem 0.9rem; font-size: 0.88rem; }
   .fx-empty-hint { margin: 0; max-width: 54ch; color: var(--muted); font-size: 0.8rem; }
 
   /* Output panel */
@@ -600,7 +704,11 @@ are highlighted as you type.
     .fx-explorer { position: absolute; inset: 0 0 0 auto; z-index: 20; width: min(88%, 320px); box-shadow: -8px 0 24px rgb(0 0 0 / 0.18); }
     .fx .fx-resize-side { display: none; }
     .fx-field select { max-width: 8.5rem; }
-    .fx-doc-info :is([data-sb-pos], [data-sb-size], [data-sb-hl], .fx-msg) { display: none; }
+    .fx-doc-info :is([data-sb-pos], [data-sb-size], [data-sb-hl]) { display: none; }
+    .fx-top .fx-msg { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    /* Phones: only "split down"; side by side would be too narrow. */
+    [data-split-btn='right'] { display: none; }
+    .fx-drop-card { padding: 1.25rem 1rem; }
     .fx-modes span { padding-inline: 0.3rem; }
     .fx-diff-names { flex-basis: 100%; }
   }
