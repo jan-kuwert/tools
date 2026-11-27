@@ -15,12 +15,12 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
-    <link rel="icon" href={href('favicon.svg').replace(/\/$/, '')} type="image/svg+xml" />
+    <link rel="icon" href={`${href('favicon.svg').replace(/\/$/, '')}?v=eyes`} type="image/svg+xml" />
     <script is:inline src={href('theme.js').replace(/\/$/, '')}></script>
   </head>
   <body>
     <a class="visually-hidden" href="#main">Skip to content</a>
-    {!wide && <a class="corner corner-tl brand" href={href()} aria-label="tools home"><Fragment set:html={logo} /></a>}
+    {!wide && <slot name="home-link"><a class="corner corner-tl brand" href={href()} aria-label="tools home"><Fragment set:html={logo} /></a></slot>}
     <main id="main" class={wide ? 'wide' : undefined}><slot /></main>
     {!wide && (
       <footer class="site-footer">

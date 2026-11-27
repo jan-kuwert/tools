@@ -13,9 +13,15 @@ Fast, privacy-first file tools. Static Astro site (Netlify) plus one small Cloud
 | Text | Editor with tabs and split view, JSON format/minify, JavaScript minify, compare, Markdown preview | Browser |
 | GPX | Merge, trim, cut, split, clean up (pauses, spikes, privacy zones, simplify) and edit tracks point by point; keeps watch data (heart rate, cadence) | Browser |
 
-The home page opens each app full screen from its badge or card; inside an app, its name in the toolbar switches to another app, and Outputs and Settings sit at the top right. Further down, the start screen lists every tool in one card per app. Files created in any app are collected in the shared Outputs panel (memory only, until the page is left).
+The home page keeps the main headline with floating Outputs and Settings controls, without a header bar. It opens each app full screen from its badge or card; inside an app, its name in the toolbar switches to another app, and Outputs and Settings sit at the top right. Further down, the start screen lists every tool in one card per app. Files created in any app are collected in the shared Outputs panel (memory only, until the page is left).
 
-Brand assets: [`public/logo.svg`](public/logo.svg) is the vector wordmark; [`public/favicon.svg`](public/favicon.svg) is the matching modular “t” mark. The inline wordmark inherits the site’s text color in both themes. The headline eyes wander, blink occasionally and follow file drags; all three effects respect reduced motion.
+Switching apps or entry modes keeps working documents in memory; dropped files are delivered once. Reloading or leaving the hub discards those documents. PDF Standard and Optimized exports retain document-level features; Lossy and Black & white exports flatten pages.
+
+The privacy page uses a plain “Back to home” link instead of the logo.
+
+Brand assets: [`public/logo.svg`](public/logo.svg) is the vector wordmark; [`public/favicon.svg`](public/favicon.svg) is the matching eyes-only icon with the wordmark’s comic eyes. The inline wordmark inherits the site’s text color in both themes. The headline eyes wander, blink occasionally and follow file drags. The drop zone breathes, opens and leans toward dragged files, with large gloves reaching above the cursor preview. Its controls disappear during file drags and return afterward; the handwritten drop-anywhere instruction stays outside. All movement respects reduced motion.
+
+The start screen has a faint field of extensions read by the image, PDF, audio, archive, GPX and text tools. Labels drift within randomly offset, spaced slots to prevent overlaps, pause outside the start screen and stay static with reduced motion enabled.
 
 ## Develop
 

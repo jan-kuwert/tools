@@ -1,7 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="132" height="32" viewBox="0 0 132 32">
   <rect width="32" height="32" rx="9" fill="#4f46e5"/>
-  <path d="M7 8h11v5h-3v11h-5V13H7z" fill="#fff"/>
-  <rect x="20" y="8" width="5" height="5" rx="1" fill="#fff"/>
+  <ellipse cx="10" cy="16" rx="5" ry="7" fill="#fff"/>
+  <ellipse cx="22" cy="15.5" rx="5" ry="7.5" fill="#fff"/>
+  <g fill="#17181a">
+    <ellipse cx="11" cy="17" rx="1.75" ry="3.2"/>
+    <ellipse cx="23" cy="16.5" rx="1.75" ry="3.2"/>
+  </g>
   <g fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M46 8v11q0 5 5 5h2M42 13h12"/>
     <ellipse cx="67.5" cy="17.5" rx="7" ry="8.5" fill="#fff"/>

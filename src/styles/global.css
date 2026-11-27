@@ -70,7 +70,7 @@ a { color: var(--accent); }
 .corner .icon svg { width: 18px; height: 18px; }
 .corner-tl { top: 1rem; left: 1.25rem; }
 .brand { color: var(--fg); }
-.brand svg, .tb-brand svg { display: block; width: 107.25px; height: 26px; }
+.brand svg { display: block; width: 107.25px; height: 26px; }
 
 .site-footer { border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; }
 .site-footer .inner { width: min(100% - 2rem, 960px); margin: 0 auto; padding: 1.5rem 0; display: flex; gap: 1rem; flex-wrap: wrap; justify-content: space-between; align-items: end; }
