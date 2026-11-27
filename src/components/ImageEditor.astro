@@ -18,51 +18,61 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
         </div>
         <div class="ie-tb-group">
           <label class="ie-tool" title="Add images">
-            <Icon name="plus" /><span class="ie-tool-label">Add</span>
+            <Icon name="plus" /><span class="ie-tool-label ie-short">Add</span>
             <input class="visually-hidden" type="file" accept={accept} multiple data-add aria-label="Add images" />
           </label>
         </div>
         <div class="ie-tb-group">
+          <button class="ie-tool" type="button" data-arrange aria-pressed="false" disabled aria-label="Arrange and merge" title="Arrange several images side by side and merge them into one">
+            <Icon name="grid" /><span class="ie-tool-label ie-short">Arrange &amp; merge</span>
+          </button>
+        </div>
+        <div class="ie-tb-group ie-edit">
           <button class="ie-tool" type="button" data-needs-image data-rotate-left aria-label="Rotate left" title="Rotate left"><Icon name="rotate-left" /></button>
           <button class="ie-tool" type="button" data-needs-image data-rotate-right aria-label="Rotate right" title="Rotate right"><Icon name="rotate-right" /></button>
           <button class="ie-tool" type="button" data-needs-image data-flip aria-label="Flip horizontally" title="Flip horizontally (mirror left ↔ right)"><Icon name="flip" /></button>
           <button class="ie-tool" type="button" data-needs-image data-flip-v aria-label="Flip vertically" title="Flip vertically (mirror top ↕ bottom)"><Icon name="flip" class="ie-flip-v" /></button>
         </div>
-        <div class="ie-tb-group">
+        <div class="ie-tb-group ie-edit">
           <button class="ie-tool" type="button" data-crop-apply disabled aria-label="Crop to selection" title="Crop to selection (Enter)"><Icon name="crop" /></button>
           <button class="ie-tool" type="button" data-cut disabled aria-label="Cut out selection" title="Cut out selection: make it transparent (Delete)"><Icon name="scissor" /></button>
           <button class="ie-tool" type="button" data-undo disabled aria-label="Undo" title="Undo crop, cut or background removal (Ctrl+Z / ⌘Z)"><Icon name="undo" /></button>
           <button class="ie-tool" type="button" data-redo disabled aria-label="Redo" title="Redo (Shift+Ctrl+Z / ⇧⌘Z)"><Icon name="redo" /></button>
         </div>
-        <div class="ie-tb-group ie-zoom">
+        <div class="ie-tb-group ie-zoom ie-edit">
           <button class="ie-tool" type="button" data-needs-image data-zoom-out aria-label="Zoom out" title="Zoom out"><Icon name="zoom-out" /></button>
           <input type="range" name="zoom" min="1" max="8" step="0.01" value="1" aria-label="Zoom" data-needs-image />
           <button class="ie-tool" type="button" data-needs-image data-zoom-in aria-label="Zoom in" title="Zoom in"><Icon name="zoom-in" /></button>
-          <button class="ie-tool" type="button" data-needs-image data-reset title="Reset the selection">Reset</button>
+          <button class="ie-tool" type="button" data-needs-image data-reset aria-label="Reset the selection" title="Reset the selection"><Icon name="restart" /></button>
         </div>
-        <div class="ie-tb-group">
+        <div class="ie-tb-group ie-edit">
           <button class="ie-tool ie-cloud" type="button" data-remove-bg data-needs-image disabled title={bgTip} data-tip={bgTip} data-ready={cloudReady || undefined}>
             <Icon name="cloud" /><span class="ie-tool-label">Remove background</span>
           </button>
         </div>
-        <div class="ie-tb-group ie-tb-end">
+        <div class="ie-tb-group ie-tb-end ie-edit">
           <button class="ie-tool" type="button" data-needs-image data-remove-image aria-label="Remove this image from the editor" title="Remove this image"><Icon name="xmark" /></button>
         </div>
       </div>
 
       <div class="ie-stage">
-        <canvas data-canvas tabindex="0" role="application" aria-roledescription="crop area" aria-label="Image preview" aria-describedby="ie-help ie-crop"></canvas>
+        <canvas data-canvas tabindex="0" role="application" aria-roledescription="image stage" aria-label="Image preview" aria-describedby="ie-help ie-crop"></canvas>
         <div class="ie-float" data-float hidden>
           <button class="ie-tool" type="button" data-crop-apply title="Crop to selection (Enter)"><Icon name="crop" />Crop</button>
           <button class="ie-tool" type="button" data-cut title="Cut out selection (Delete)"><Icon name="scissor" />Cut</button>
         </div>
         <label class="ie-empty" data-empty-state>
-          <span class="ie-ph" aria-hidden="true">
-            <svg viewBox="0 0 120 90"><rect x="5" y="5" width="110" height="80" rx="10" /><circle cx="38" cy="32" r="8" /><path d="M8 76 38 46l20 18 16-13 38 29" /></svg>
-          </span>
+          <svg class="ie-ghost" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+            <circle class="g-sun" cx="860" cy="190" r="74" />
+            <path class="g-far" d="M0 372 92 318l70 30 96-92 84 64 70-46 110 96 84-58 64 40 118-112 96 86 80-42 104 82 78-50 54 30v262H0Z" />
+            <path class="g-mid" d="M0 452 120 384l92 44 128-96 120 92 84-38 116 70 122-96 110 84 98-50 100 62 110-30v274H0Z" />
+            <path class="g-near" d="M0 520c150-46 290-40 430-24 160 18 270-36 430-40 140-4 230 28 340 18v126H0Z" />
+            <path class="g-near" d="M152 506l26-78 26 78Zm22 0h8v18h-8ZM214 500l20-60 20 60Zm16 0h8v14h-8ZM960 488l30-90 30 90Zm26 0h8v20h-8ZM1032 484l22-66 22 66Zm18 0h8v16h-8Z" />
+          </svg>
           <span class="ie-empty-title">Drop images or choose files</span>
           <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
           <span class="ie-empty-hint">JPEG, PNG, WebP or SVG. You can also paste from the clipboard.</span>
+          <span class="ie-empty-mode" data-mode-hint hidden></span>
           <input class="visually-hidden" type="file" accept={accept} multiple data-input />
         </label>
         <div class="ie-busy" data-busy hidden>
@@ -72,7 +82,7 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
         </div>
       </div>
       <p class="ie-info"><span class="ie-name" data-name></span><span id="ie-crop" data-crop></span></p>
-      <p class="visually-hidden" id="ie-help">Drag the corners or edges of the selection to resize it, drag inside to move it, or use the arrow keys; hold Shift for bigger steps. Plus and minus zoom. Enter crops to the selection, Delete cuts it out. Ctrl or Command Z undoes, with Shift it redoes.</p>
+      <p class="visually-hidden" id="ie-help">Drag the corners or edges of the selection to resize it, drag inside to move it, or use the arrow keys; hold Shift for bigger steps. Plus and minus zoom. Enter crops to the selection, Delete cuts it out. Ctrl or Command Z undoes, with Shift it redoes. When arranging: Tab selects the next image, arrows nudge it by 1 px (Shift: 10 px), Alt with an arrow jumps to the next edge.</p>
       <ul class="ie-thumbs" data-thumbs aria-label="Images" hidden></ul>
     </div>
 
@@ -80,6 +90,40 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
 
     <fieldset class="ie-side" data-side disabled>
       <legend class="visually-hidden">Output settings</legend>
+      <div class="ie-arr">
+        <fieldset>
+          <legend>Layout</legend>
+          <div class="segmented">
+            <label><input type="radio" name="layout" value="free" /><span>Free</span></label>
+            <label><input type="radio" name="layout" value="row" checked /><span>Row</span></label>
+            <label><input type="radio" name="layout" value="column" /><span>Column</span></label>
+            <label><input type="radio" name="layout" value="grid" /><span>Grid</span></label>
+          </div>
+        </fieldset>
+        <fieldset data-align-set>
+          <legend>Align</legend>
+          <div class="segmented">
+            <label><input type="radio" name="align" value="start" /><span data-align-label>Top</span></label>
+            <label><input type="radio" name="align" value="center" checked /><span>Centre</span></label>
+            <label><input type="radio" name="align" value="end" /><span data-align-label>Bottom</span></label>
+          </div>
+        </fieldset>
+        <div class="ie-pair ie-arr-nums">
+          <label class="field"><span>Gap (px)</span><input type="number" name="gap" min="0" step="1" value="0" inputmode="numeric" /></label>
+          <span aria-hidden="true"></span>
+          <label class="field" data-cols-field><span>Columns</span><input type="number" name="cols" min="1" step="1" value="2" inputmode="numeric" /></label>
+        </div>
+        <label class="ie-check"><input type="checkbox" name="match" /> <span data-match-label>Match size (same height)</span></label>
+        <label class="ie-check"><input type="checkbox" name="enlarge" /> Allow enlarging when matching</label>
+        <label class="ie-check"><input type="checkbox" name="overlap" /> Allow overlap (collage)</label>
+        <div class="ie-zorder" data-zorder hidden>
+          <button class="btn" type="button" data-front>Bring to front</button>
+          <button class="btn" type="button" data-back>Send to back</button>
+        </div>
+        <p class="ie-note">Drag images to arrange them; they snap together. Untick an image in the strip below to leave it out.</p>
+        <p class="warn-box" data-arr-warn hidden></p>
+      </div>
+      <div class="ie-edit">
       <fieldset>
         <legend>Aspect ratio</legend>
         <div class="ie-chips">
@@ -119,6 +163,7 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
           <label><input type="radio" name="fit" value="fit" /><span>Fit inside</span></label>
         </div>
       </fieldset>
+      </div>
 
       <fieldset>
         <legend>Background</legend>
@@ -131,6 +176,7 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
         </div>
       </fieldset>
 
+      <div class="ie-edit">
       <div class="field" data-quality-field>
         <span id="ie-quality">Quality</span>
         <div class="ie-quality">
@@ -159,6 +205,17 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
           </select>
         </div>
         <button class="btn" type="button" data-download-all hidden>Download all (ZIP)</button>
+        <p class="status" data-status role="status" aria-live="polite"></p>
+      </div>
+      </div>
+
+      <div class="ie-actions ie-arr">
+        <dl class="ie-out">
+          <dt>Canvas</dt><dd data-arr-size>–</dd>
+          <dt>Images</dt><dd data-arr-count>–</dd>
+        </dl>
+        <button class="btn btn-primary" type="button" data-merge><Icon name="check" />Merge into one image</button>
+        <button class="btn" type="button" data-arrange-done>Back to editing</button>
         <p class="status" data-status role="status" aria-live="polite"></p>
       </div>
     </fieldset>
@@ -195,7 +252,7 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .ie-flip-v svg { transform: rotate(90deg); }
 
   .ie-body { display: grid; grid-template-columns: minmax(0, 1fr) auto var(--ie-side, 340px); height: clamp(560px, calc(100dvh - 140px), 920px); }
-  .ie-main { display: flex; flex-direction: column; min-width: 0; background: var(--app-stage); color: var(--fg); }
+  .ie-main { display: flex; flex-direction: column; min-width: 0; background: var(--app-stage); color: var(--fg); container-type: inline-size; }
 
   /* Toolbar: compact groups with dividers, 34 px controls. */
   .ie-tb { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem 0; padding: 0.4rem 0.5rem; background: var(--app-bar); border-bottom: 1px solid var(--app-line); }
@@ -216,7 +273,9 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .ie-tool:disabled { opacity: 0.4; cursor: default; }
   .ie-tool:focus-visible, label.ie-tool:focus-within { outline: 3px solid var(--accent); outline-offset: 1px; }
   .ie-tool[hidden] { display: none; }
-  .ie-zoom input { width: 7rem; }
+  .ie-zoom input { width: 6rem; }
+  /* Keep the toolbar on one line: short labels go first, the cloud action keeps its label longest. */
+  @container (max-width: 1240px) { .ie-short { display: none; } }
   .ie-cloud { position: relative; }
 
   .ie-stage { position: relative; flex: 1; min-height: 0; }
@@ -231,19 +290,25 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .ie-float .ie-tool { height: 30px; }
 
   .ie-empty {
-    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
+    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; overflow: hidden;
     border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px; text-align: center; cursor: pointer;
     transition: border-color 0.15s, background-color 0.15s;
   }
+  .ie-empty > :not(svg, input) { position: relative; }
   .ie-empty:hover, .image-editor.ie-over .ie-empty { border-color: var(--accent); background: var(--app-selected); }
   .ie-empty:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
-  .ie-ph {
-    display: grid; place-items: center; width: 168px; height: 128px; border-radius: 16px; margin-bottom: 0.25rem; color: var(--muted);
-    background: repeating-conic-gradient(color-mix(in srgb, var(--fg) 7%, transparent) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
-  }
-  .ie-ph svg { width: 120px; height: 90px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  /* Faint landscape behind the drop prompt; `slice` keeps it filling the area at any aspect ratio. */
+  .ie-ghost { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--fg); pointer-events: none; }
+  .ie-ghost .g-sun { opacity: 0.045; }
+  .ie-ghost .g-far { opacity: 0.035; }
+  .ie-ghost .g-mid { opacity: 0.055; }
+  .ie-ghost .g-near { opacity: 0.075; }
   .ie-empty-title { font-size: 1.15rem; font-weight: 650; }
   .ie-empty-hint { font-size: 0.85rem; color: var(--muted); }
+  .ie-empty-mode { font-size: 0.9rem; font-weight: 600; color: var(--accent); }
+  /* Brief accent ring pointing at the controls a tool entry opened (global CSS drops animations for reduced motion). */
+  .ie-flash { border-radius: 8px; animation: ie-flash 1s ease-out; }
+  @keyframes ie-flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 3px transparent; } }
   .image-editor.ie-over .ie-stage { box-shadow: inset 0 0 0 3px var(--accent); }
 
   .ie-busy {
@@ -256,12 +321,26 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .ie-info { display: flex; gap: 0.75rem; margin: 0; padding: 0.35rem 0.9rem 0.5rem; font: 0.78rem/1.4 var(--mono); min-height: 2em; color: var(--muted); }
   .ie-name { min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--fg); }
   .ie-thumbs { list-style: none; display: flex; gap: 0.45rem; overflow-x: auto; margin: 0; padding: 0.55rem 0.75rem 0.7rem; background: var(--app-bar); border-top: 1px solid var(--app-line); }
+  .ie-thumbs li { position: relative; flex: none; }
   .ie-thumb { display: block; width: 52px; height: 52px; padding: 0; border-radius: 8px; border: 2px solid transparent; overflow: hidden; cursor: pointer; }
   .ie-thumb[aria-current='true'] { border-color: var(--accent); }
   .ie-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .ie-include { position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+  .image-editor:not([data-arranging]) .ie-include { display: none; }
+  .image-editor[data-arranging] .ie-thumb { cursor: default; }
+  .image-editor[data-arranging] li:has(.ie-include:not(:checked)) .ie-thumb { opacity: 0.4; }
+
+  /* Arrange mode swaps the editing controls for the arrange panel. */
+  .ie-side > .ie-edit, .ie-side > .ie-arr:not(.ie-actions) { display: contents; }
+  .image-editor:not([data-arranging]) .ie-arr, .image-editor[data-arranging] .ie-edit { display: none; }
+  .ie-zorder { display: flex; gap: 0.4rem; }
+  .ie-zorder .btn { flex: 1; justify-content: center; padding: 0.4rem 0.6rem; font-size: 0.85rem; }
+  .ie-arr-nums > span { visibility: hidden; }
+  .ie-actions.ie-arr .btn { justify-content: center; }
+  [data-arrange][aria-pressed='true'] { background: var(--app-selected); color: var(--accent); }
 
   .ie-side { display: grid; gap: 0.9rem; align-content: start; min-width: 0; margin: 0; padding: 1rem; border: 0; border-left: 1px solid var(--app-line); background: var(--app-side); font-size: 0.92rem; overflow-y: auto; overscroll-behavior: contain; }
-  .ie-side:disabled > :not(legend, .ie-actions), .ie-side:disabled .ie-actions > * { opacity: 0.5; }
+  .ie-side:disabled :is(fieldset, .field, .ie-pair, .ie-size, .ie-check, .ie-note, .ie-actions > *):not(:is(fieldset fieldset, .ie-pair, .ie-size) *) { opacity: 0.5; }
   .ie-side fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .ie-side fieldset legend, .ie-side .field > span { font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.4rem; padding: 0; }
   .ie-side .field { gap: 0.15rem; }

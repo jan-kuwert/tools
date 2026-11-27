@@ -4,8 +4,10 @@
 // cropping to the frame, around it with "Fit inside". The stage draws a ≤ PREVIEW px copy; export
 // decodes the source at full resolution (SVGs are rasterized at the resolution the output needs).
 // Crop, Cut and background removal replace an image's pixels and are undoable per image.
+// Arrange mode places several images on one canvas (geometry in ./arrange) and merges them into a new image.
 import { zipSync, type Zippable } from 'fflate';
 import { API_URL, uploadForResult } from './api';
+import { attach, bounds, layoutColumn, layoutGrid, layoutRow, nextEdge, overlaps, settle, snap, type Align, type Box, type Dir, type Guides } from './arrange';
 import {
   canvasHasAlpha, canvasOf, decodeImage, drawImage, encodeCanvas, EXT, imageKind, inspectImage, isSvg, keepMetadata, linkQuality, MAX_PIXELS,
   rasterizeSvg, svgSize, uniqueName, type ImageType, type Rect,
@@ -61,6 +63,8 @@ interface Item extends State {
   gps: boolean;
   undo: State[];
   redo: State[];
+  include: boolean; // part of the merge in arrange mode
+  merged?: boolean; // made by Merge: undoing past its first state removes it
 }
 
 let root: HTMLElement | undefined;
@@ -103,6 +107,16 @@ function bind(root: HTMLElement) {
     crop: q('[data-crop]'),
     needsImage: [...root.querySelectorAll<HTMLButtonElement | HTMLInputElement>('[data-needs-image]')],
     selectionActions: [...root.querySelectorAll<HTMLButtonElement>('[data-crop-apply], [data-cut]')],
+    arrange: q<HTMLButtonElement>('[data-arrange]'),
+    merge: q<HTMLButtonElement>('[data-merge]'),
+    arrSize: q('[data-arr-size]'),
+    arrCount: q('[data-arr-count]'),
+    arrWarn: q('[data-arr-warn]'),
+    zorder: q('[data-zorder]'),
+    colsField: q('[data-cols-field]'),
+    alignSet: q('[data-align-set]'),
+    alignLabels: [...root.querySelectorAll<HTMLElement>('[data-align-label]')],
+    matchLabel: q('[data-match-label]'),
     float: q('[data-float]'),
     undo: q<HTMLButtonElement>('[data-undo]'),
     redo: q<HTMLButtonElement>('[data-redo]'),
@@ -125,7 +139,7 @@ function bind(root: HTMLElement) {
     estimate: q('[data-estimate]'),
     download: q<HTMLButtonElement>('[data-download]'),
     downloadAll: q<HTMLButtonElement>('[data-download-all]'),
-    status: q('[data-status]'),
+    status: [...root.querySelectorAll<HTMLElement>('[data-status]')],
   };
 }
 
@@ -253,10 +267,10 @@ function outSize(it: Item): [number, number] {
 }
 
 /** Raster scale for an SVG source: as sharp as the output needs, within the pixel limit. Raster sources: 1. */
-function rasterScale(it: Item): number {
+function rasterScale(it: Item, s = scaleOf(it)): number {
   if (!it.px.svg) return 1;
   const cap = Math.sqrt(MAX_PIXELS / (it.px.w * it.px.h));
-  return Math.min(cap, Math.max(1, Math.ceil(scaleOf(it) * 100) / 100));
+  return Math.min(cap, Math.max(1, Math.ceil(s * 100) / 100));
 }
 
 function problem(it: Item): string | undefined {
@@ -321,7 +335,7 @@ function inspect(it: Item, px: Pixels) {
 
 async function load(file: File): Promise<Item> {
   const px = await filePixels(file);
-  const it: Item = { px, origin: file, view: px.base, rot: 0, flip: false, crop: { x: 0, y: 0, w: px.w, h: px.h }, gps: false, undo: [], redo: [] };
+  const it: Item = { px, origin: file, view: px.base, rot: 0, flip: false, crop: { x: 0, y: 0, w: px.w, h: px.h }, gps: false, undo: [], redo: [], include: true };
   resetCrop(it);
   inspect(it, px);
   return it;
@@ -355,16 +369,15 @@ function fullOf(it: Item, k = 1): Promise<Source> {
   return src;
 }
 
-function renderOutput(it: Item, src: Source): HTMLCanvasElement {
+/** The item's crop drawn at FW×FH; `bg` fills padding and transparency. */
+function renderOutput(it: Item, src: Source, [FW, FH]: [number, number], bg?: string): HTMLCanvasElement {
   const [W, H] = dims(it);
-  const [FW, FH] = outSize(it);
   const ks = src.width / W; // > 1 for SVGs rasterized above their own size
   const c = it.crop;
   const sx = FW / c.w;
   const sy = FH / c.h;
   const out = canvasOf(FW, FH);
   const ctx = out.getContext('2d')!;
-  const bg = background();
   if (bg) {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, FW, FH);
@@ -391,7 +404,7 @@ function renderOutput(it: Item, src: Source): HTMLCanvasElement {
 async function exportBlob(it: Item): Promise<{ blob: Blob; note?: string }> {
   const p = problem(it);
   if (p) throw new UserError(p);
-  const canvas = renderOutput(it, await fullOf(it, rasterScale(it)));
+  const canvas = renderOutput(it, await fullOf(it, rasterScale(it)), outSize(it), background());
   const type = format();
   const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : quality());
   return field('strip').checked ? { blob } : keepMetadata(it.origin, blob);
@@ -426,7 +439,11 @@ function pushHistory(it: Item) {
 
 function step(back: boolean) {
   const it = items[cur];
-  if (!it || busy) return;
+  if (!it || busy || arranging) return;
+  if (back && !it.undo.length && it.merged) {
+    removeCurrent();
+    return setStatus('Merge undone: the merged image was removed.', 'done');
+  }
   const s = (back ? it.undo : it.redo).pop();
   if (!s) return;
   (back ? it.redo : it.undo).push(snapshot(it));
@@ -464,14 +481,14 @@ function bake(kind: 'crop' | 'cut') {
 // ---- Stage ----
 
 /** Stage colours from the theme's CSS variables, resolved to values canvas accepts (light-dark() is not). */
-let palette = { a: '#34353a', b: '#44454b', dim: 'rgb(14 14 18 / 0.62)' };
+let palette = { a: '#34353a', b: '#44454b', dim: 'rgb(14 14 18 / 0.62)', accent: '#8b85ff' };
 function refreshPalette() {
   const probe = ui.canvas;
   const resolve = (v: string) => {
     probe.style.color = `var(${v})`;
     return getComputedStyle(probe).color;
   };
-  palette = { a: resolve('--ie-check-a'), b: resolve('--ie-check-b'), dim: resolve('--ie-dim') };
+  palette = { a: resolve('--ie-check-a'), b: resolve('--ie-check-b'), dim: resolve('--ie-dim'), accent: resolve('--accent') };
   probe.style.color = '';
   requestDraw();
 }
@@ -527,6 +544,7 @@ function draw() {
   if (!it || !ctx || !canvas.width) return;
   const { width: cw, height: ch } = canvas;
   ctx.clearRect(0, 0, cw, ch);
+  if (arranging) return drawArrange(ctx, cw, ch, cw / canvas.clientWidth);
   if (problem(it)) return;
   const dpr = cw / canvas.clientWidth;
   const [W, H] = dims(it);
@@ -621,6 +639,224 @@ function zoomBy(it: Item | undefined, factor: number) {
   changed();
 }
 
+// ---- Arrange & merge ----
+
+type Layout = 'free' | 'row' | 'column' | 'grid';
+/** An image on the merge canvas; x/y/w/h in output px, `scale` = output px per source px of its crop. */
+interface Block extends Box {
+  it: Item;
+  scale: number;
+}
+
+let arranging = false;
+let blocks: Block[] = [];
+let active = 0;
+let guides: Guides = { x: [], y: [] };
+
+const layoutId = () => value('layout') as Layout;
+const gapPx = () => Math.max(0, Math.round(Number(field('gap').value) || 0));
+const allowOverlap = () => field('overlap').checked;
+const rest = (b: Block) => blocks.filter((o) => o !== b);
+const tooBig = (B: Box) =>
+  `The merged image would be ${B.w} × ${B.h} px (${((B.w * B.h) / 1e6).toFixed(1)} MP), above the 16.7 megapixel limit that works on every device. Turn on Match size, try a column or grid, or leave out an image.`;
+
+/** Output px per crop px: 1, or with Match size the same height (width in a column), enlarging only if allowed. */
+function blockScales(list: Item[]): number[] {
+  if (!field('match').checked) return list.map(() => 1);
+  const lens = list.map((it) => (layoutId() === 'column' ? it.crop.w : it.crop.h));
+  const target = field('enlarge').checked ? Math.max(...lens) : Math.min(...lens);
+  return lens.map((l) => target / l);
+}
+
+/** Resize the blocks for the current options and re-run the quick layout unless it is Free. */
+function rearrange() {
+  const scales = blockScales(blocks.map((b) => b.it));
+  blocks.forEach((b, i) => Object.assign(b, { scale: scales[i], w: Math.max(1, Math.round(b.it.crop.w * scales[i])), h: Math.max(1, Math.round(b.it.crop.h * scales[i])) }));
+  const sizes = blocks.map((b): [number, number] => [b.w, b.h]);
+  const align = value('align') as Align;
+  const gap = gapPx();
+  const cols = Math.max(1, Math.round(Number(field('cols').value)) || 1);
+  const id = layoutId();
+  const placed = id === 'row' ? layoutRow(sizes, gap, align) : id === 'column' ? layoutColumn(sizes, gap, align) : id === 'grid' ? layoutGrid(sizes, cols, gap, align) : undefined;
+  placed?.forEach((p, i) => Object.assign(blocks[i], { x: p.x, y: p.y }));
+}
+
+/** Match the blocks to the ticked images, keeping the positions of those already placed. */
+function syncBlocks() {
+  const included = items.filter((it) => it.include);
+  const kept = blocks.filter((b) => included.includes(b.it));
+  for (const it of included) {
+    if (kept.some((b) => b.it === it)) continue;
+    const B = kept.length ? bounds(kept) : { x: 0, y: 0, w: 0, h: 0 };
+    kept.push({ it, scale: 1, x: B.x + B.w + (kept.length ? gapPx() : 0), y: B.y, w: Math.round(it.crop.w), h: Math.round(it.crop.h) });
+  }
+  blocks = kept;
+  active = clamp(active, 0, Math.max(0, blocks.length - 1));
+  rearrange();
+}
+
+function setArranging(on: boolean) {
+  if (on && items.length < 2) return;
+  arranging = on;
+  root!.toggleAttribute('data-arranging', on);
+  ui.arrange.ariaPressed = String(on);
+  guides = { x: [], y: [] };
+  blocks = [];
+  active = 0;
+  if (on) syncBlocks();
+  renderThumbs();
+  changed();
+}
+
+/** Leave Row/Column/Grid once the user places a block by hand. */
+function goFree() {
+  radio('layout', 'free')!.checked = true;
+}
+
+function blockAt(x: number, y: number): number {
+  const rect = ui.canvas.getBoundingClientRect();
+  const px = ((x - rect.left) * stage.dpr - stage.ox) / stage.vs;
+  const py = ((y - rect.top) * stage.dpr - stage.oy) / stage.vs;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h) return i;
+  }
+  return -1;
+}
+
+/** Move block `b` to `to` if allowed; without overlap a blocked move stays put. Returns whether it moved. */
+function place(b: Block, to: Box): boolean {
+  if (!allowOverlap() && rest(b).some((o) => overlaps(to, o))) return false;
+  b.x = to.x;
+  b.y = to.y;
+  return true;
+}
+
+function drawArrange(ctx: CanvasRenderingContext2D, cw: number, ch: number, dpr: number) {
+  if (!blocks.length) return;
+  const B = bounds(blocks);
+  const pad = 32 * dpr;
+  const vs = Math.min((cw - 2 * pad) / B.w, (ch - 2 * pad) / B.h);
+  const ox = (cw - B.w * vs) / 2 - B.x * vs;
+  const oy = (ch - B.h * vs) / 2 - B.y * vs;
+  stage = { ox, oy, vs, dpr, toWorld: dpr / vs };
+  const d = (r: Box): Box => ({ x: ox + r.x * vs, y: oy + r.y * vs, w: r.w * vs, h: r.h * vs });
+  const area = d(B);
+  ctx.fillStyle = value('bg') === 'colour' ? field('colour').value : checkerPattern(ctx, dpr);
+  ctx.fillRect(area.x, area.y, area.w, area.h);
+  ctx.imageSmoothingQuality = 'high';
+  for (const b of blocks) {
+    const r = d(b);
+    const k = b.it.view.width / dims(b.it)[0];
+    const c = b.it.crop;
+    ctx.drawImage(b.it.view, c.x * k, c.y * k, c.w * k, c.h * k, r.x, r.y, r.w, r.h);
+  }
+  blocks.forEach((b, i) => {
+    const r = d(b);
+    ctx.lineWidth = (i === active ? 2.5 : 1) * dpr;
+    ctx.strokeStyle = i === active ? palette.accent : 'rgb(128 128 128 / 0.7)';
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+  });
+  ctx.setLineDash([6 * dpr, 4 * dpr]);
+  ctx.lineWidth = dpr;
+  ctx.strokeStyle = palette.accent;
+  ctx.beginPath();
+  for (const x of guides.x) {
+    ctx.moveTo(ox + x * vs, 0);
+    ctx.lineTo(ox + x * vs, ch);
+  }
+  for (const y of guides.y) {
+    ctx.moveTo(0, oy + y * vs);
+    ctx.lineTo(cw, oy + y * vs);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function arrangeReadouts() {
+  const B = blocks.length ? bounds(blocks) : undefined;
+  const id = layoutId();
+  const big = B && B.w * B.h > MAX_PIXELS ? tooBig(B) : '';
+  const enlarged = blocks.some((b) => !b.it.px.svg && b.scale > 1.01);
+  ui.arrSize.textContent = B ? `${B.w} × ${B.h} px` : '–';
+  ui.arrCount.textContent = `${blocks.length} of ${items.length}`;
+  ui.arrWarn.textContent =
+    big || (blocks.length < 2 ? 'Tick at least two images in the strip below to merge them.' : enlarged ? 'Some images are enlarged to match the others, so they may look soft. Untick “Allow enlarging” to shrink the larger ones instead.' : '');
+  ui.arrWarn.hidden = !ui.arrWarn.textContent;
+  ui.merge.disabled = busy || blocks.length < 2 || !!big;
+  ui.zorder.hidden = !allowOverlap();
+  ui.colsField.hidden = id !== 'grid';
+  ui.alignSet.hidden = id === 'free';
+  const [start, end] = id === 'column' ? ['Left', 'Right'] : id === 'grid' ? ['Start', 'End'] : ['Top', 'Bottom'];
+  [ui.alignLabels[0].textContent, ui.alignLabels[1].textContent] = [start, end];
+  ui.matchLabel.textContent = `Match size (same ${id === 'column' ? 'width' : 'height'})`;
+  ui.name.textContent = `Arranging ${blocks.length} images`;
+  const b = blocks[active];
+  const where = b && B ? `${b.it.origin.name}: ${b.w} × ${b.h} px at ${b.x - B.x}, ${b.y - B.y}` : '';
+  ui.crop.textContent = B ? `Canvas ${B.w} × ${B.h} px${where ? ` · ${where}` : ''}` : '';
+  ui.canvas.ariaLabel = where ? `Arrange images. Selected ${active + 1} of ${blocks.length}, ${where}` : 'Arrange images';
+}
+
+function merge() {
+  if (blocks.length < 2) return;
+  const B = bounds(blocks);
+  if (B.w * B.h > MAX_PIXELS) return setStatus(tooBig(B), 'error');
+  return run(async () => {
+    setStatus('Merging…', 'working');
+    const canvas = canvasOf(B.w, B.h);
+    const ctx = canvas.getContext('2d')!;
+    if (value('bg') === 'colour') {
+      ctx.fillStyle = field('colour').value;
+      ctx.fillRect(0, 0, B.w, B.h);
+    }
+    for (const b of blocks) {
+      const piece = renderOutput(b.it, await fullOf(b.it, rasterScale(b.it, b.scale)), [b.w, b.h]);
+      ctx.drawImage(piece, b.x - B.x, b.y - B.y);
+      piece.width = 0;
+    }
+    const px = await bakedPixels(canvas);
+    const n = blocks.length;
+    const it: Item = { px, origin: new File([], 'merged.png', { type: 'image/png' }), view: px.base, rot: 0, flip: false, crop: { x: 0, y: 0, w: px.w, h: px.h }, gps: false, undo: [], redo: [], include: true, merged: true };
+    resetCrop(it);
+    items.push(it);
+    cur = items.length - 1;
+    setArranging(false);
+    setStatus(`Merged ${n} images into ${B.w} × ${B.h} px. Undo removes the merged image; the originals are unchanged.`, 'done');
+  });
+}
+
+function zOrder(front: boolean) {
+  const b = blocks.splice(active, 1)[0];
+  if (!b) return;
+  if (front) blocks.push(b);
+  else blocks.unshift(b);
+  active = front ? blocks.length - 1 : 0;
+  changed();
+}
+
+/** Keyboard in arrange mode: Tab cycles blocks, arrows nudge, Alt+arrows jump to the next edge. Returns whether handled. */
+function arrangeKey(e: KeyboardEvent): boolean {
+  const b = blocks[active];
+  if (!b) return false;
+  if (e.key === 'Tab') {
+    const next = active + (e.shiftKey ? -1 : 1);
+    if (next < 0 || next >= blocks.length) return false; // let focus leave the stage
+    active = next;
+  } else if (e.key === 'Escape') setArranging(false);
+  else {
+    const dirs: Record<string, Dir> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+    const dir = dirs[e.key];
+    if (!dir) return false;
+    const n = e.shiftKey ? 10 : 1;
+    const to = e.altKey
+      ? nextEdge(b, rest(b), gapPx(), dir)
+      : { ...b, x: b.x + (dir === 'left' ? -n : dir === 'right' ? n : 0), y: b.y + (dir === 'up' ? -n : dir === 'down' ? n : 0) };
+    if (place(b, to)) goFree();
+  }
+  changed();
+  return true;
+}
+
 // ---- UI sync ----
 
 function readouts() {
@@ -629,11 +865,14 @@ function readouts() {
   root!.toggleAttribute('data-empty', !has);
   ui.side.disabled = !has;
   for (const c of ui.needsImage) c.disabled = !has || busy;
-  for (const b of ui.selectionActions) b.disabled = busy || !hasSelection(it);
-  ui.undo.disabled = busy || !it?.undo.length;
+  for (const b of ui.selectionActions) b.disabled = busy || arranging || !hasSelection(it);
+  ui.undo.disabled = busy || !(it?.undo.length || it?.merged);
   ui.redo.disabled = busy || !it?.redo.length;
   ui.removeBg.disabled = !has || busy || !API_URL;
+  ui.arrange.disabled = busy || (items.length < 2 && !arranging);
   ui.download.disabled = ui.downloadAll.disabled = true;
+  if (arranging) return arrangeReadouts();
+  ui.canvas.ariaLabel = 'Image preview';
   ui.name.textContent = !it ? '' : items.length > 1 ? `${it.origin.name} (${cur + 1} of ${items.length})` : it.origin.name;
   ui.svgNote.hidden = !it?.px.svg;
   if (!it) {
@@ -702,7 +941,7 @@ function syncHints() {
 
 /** Refresh everything after a state change; `editing` is the field being typed in. */
 function changed(editing?: string) {
-  if (ui.status.dataset.kind === 'done') setStatus('');
+  if (ui.status[0].dataset.kind === 'done') setStatus('');
   syncControls(editing);
   requestDraw();
   scheduleEstimate();
@@ -719,7 +958,9 @@ function scheduleEstimate() {
       const { blob } = await exportBlob(it);
       if (gen !== estGen) return;
       const pct = Math.round((blob.size / it.origin.size - 1) * 100);
-      ui.estimate.textContent = `${formatBytes(blob.size)} · ${pct === 0 ? 'same as original' : pct < 0 ? `${-pct}% smaller` : `${pct}% larger`}`;
+      ui.estimate.textContent = !it.origin.size
+        ? formatBytes(blob.size)
+        : `${formatBytes(blob.size)} · ${pct === 0 ? 'same as original' : pct < 0 ? `${-pct}% smaller` : `${pct}% larger`}`;
     } catch (err) {
       if (gen === estGen) ui.estimate.textContent = message(err);
     }
@@ -733,8 +974,10 @@ function message(err: unknown) {
 }
 
 function setStatus(text: string, kind: 'idle' | 'working' | 'error' | 'done' = 'idle') {
-  ui.status.textContent = text;
-  ui.status.dataset.kind = kind;
+  for (const s of ui.status) {
+    s.textContent = text;
+    s.dataset.kind = kind;
+  }
 }
 
 function reorient(it: Item) {
@@ -869,8 +1112,19 @@ function renderThumbs() {
   ui.thumbs.replaceChildren(
     ...items.map((it, i) => {
       const b = el('button', { type: 'button', className: 'ie-thumb checker', ariaLabel: `Edit ${it.origin.name}`, title: it.origin.name }, el('img', { src: it.px.url, alt: '' }));
-      b.onclick = () => select(i);
-      return el('li', {}, b);
+      b.onclick = () => {
+        if (!arranging) return select(i);
+        const at = blocks.findIndex((x) => x.it === it);
+        if (at >= 0) active = at;
+        changed();
+      };
+      const include = el('input', { type: 'checkbox', className: 'ie-include', checked: it.include, title: 'Include in the merge', ariaLabel: `Include ${it.origin.name} in the merge` });
+      include.onchange = () => {
+        it.include = include.checked;
+        if (arranging) syncBlocks();
+        changed();
+      };
+      return el('li', {}, b, include);
     }),
   );
   ui.thumbs.hidden = items.length < 2;
@@ -908,9 +1162,11 @@ async function addFiles(files: File[]) {
     }
   }
   if (items.length > first) cur = first;
+  if (arranging) syncBlocks();
   renderThumbs();
   changed();
   setStatus(errors.join('\n'), errors.length ? 'error' : 'idle');
+  if (afterLoad?.()) afterLoad = undefined;
 }
 
 async function run(task: () => Promise<void>) {
@@ -928,10 +1184,63 @@ async function run(task: () => Promise<void>) {
   }
 }
 
+/** Set by a `?mode=` entry point; runs after images load until it returns true. */
+let afterLoad: (() => boolean) | undefined;
+
+/** Briefly ring `el` in the accent colour. */
+function flash(el: Element | null | undefined) {
+  if (!el) return;
+  el.classList.remove('ie-flash');
+  void (el as HTMLElement).offsetWidth; // restart the animation
+  el.classList.add('ie-flash');
+  setTimeout(() => el.classList.remove('ie-flash'), 1100);
+}
+
+/** Entry points from the All tools list: `?mode=crop|flip|merge|svg`; anything else keeps the defaults. */
+function applyMode(mode: string | null) {
+  const hint = root!.querySelector<HTMLElement>('[data-mode-hint]')!;
+  if (mode === 'crop') {
+    radio('fit', 'fill')!.checked = true;
+    afterLoad = () => {
+      const chip = ui.form.querySelector<HTMLInputElement>('[name=ratio]:checked');
+      chip?.focus();
+      flash(chip?.closest('fieldset'));
+      return true;
+    };
+  } else if (mode === 'flip') {
+    const group = root!.querySelector('[data-flip]')!.closest('.ie-tb-group');
+    flash(group);
+    afterLoad = () => {
+      root!.querySelector<HTMLButtonElement>('[data-rotate-left]')!.focus();
+      flash(group);
+      return true;
+    };
+  } else if (mode === 'merge') {
+    hint.textContent = 'Add two or more images to merge them into one.';
+    afterLoad = () => {
+      if (items.length < 2) {
+        setStatus('Add one more image to merge.');
+        return false;
+      }
+      setArranging(true);
+      flash(ui.arrange);
+      return true;
+    };
+  } else if (mode === 'svg') {
+    hint.textContent = 'Drop an SVG to convert it to PNG, JPEG or WebP.';
+    (ui.form.elements.namedItem('format') as HTMLSelectElement).value = 'image/png';
+  }
+  hint.hidden = !hint.textContent;
+}
+
+const ARRANGE_FIELDS = ['layout', 'align', 'gap', 'cols', 'match', 'enlarge', 'overlap'];
+
 function onInput(t: HTMLInputElement) {
   const it = items[cur];
   const v = Number(t.value);
-  if (t.name === 'zoom' && it) setZoom(it, v);
+  if (ARRANGE_FIELDS.includes(t.name)) {
+    if (arranging) rearrange();
+  } else if (t.name === 'zoom' && it) setZoom(it, v);
   else if (t.name === 'ratio' || t.name === 'fit' || t.name === 'rw' || t.name === 'rh') items.forEach(resetCrop);
   else if (t.name === 'size') size = t.value === 'original' ? { kind: 'original' } : { kind: 'long', n: v };
   else if (t.name === 'scale' || (t.name === 'pct' && v > 0)) size = { kind: 'pct', p: v };
@@ -1005,6 +1314,11 @@ export function initImageEditor(): void {
   onEach('[data-remove-image]', removeCurrent);
   onEach('[data-remove-bg]', () => void removeBackground());
   onEach('[data-busy-cancel]', () => bgJob?.abort());
+  onEach('[data-arrange]', () => setArranging(!arranging));
+  onEach('[data-arrange-done]', () => setArranging(false));
+  onEach('[data-merge]', () => void merge());
+  onEach('[data-front]', () => zOrder(true));
+  onEach('[data-back]', () => zOrder(false));
 
   // Undo/redo anywhere in the editor except while typing in a field.
   r.addEventListener('keydown', (e) => {
@@ -1058,9 +1372,10 @@ export function initImageEditor(): void {
     container: r,
   });
 
-  // Stage: one pointer moves the crop or drags a handle, two pinch-zoom.
+  // Stage: one pointer moves the crop or drags a handle, two pinch-zoom. Arrange mode drags whole images.
   const pointers = new Map<number, { x: number; y: number }>();
   let gesture: { grab: Handle | 'move'; x: number; y: number; crop: Rect; zoom: number; dist: number } | undefined;
+  let blockDrag: { b: Block; x: number; y: number; start: Box } | undefined;
   const startGesture = (grab: Handle | 'move' = 'move') => {
     const it = items[cur];
     const [a, b] = pointers.values();
@@ -1068,6 +1383,16 @@ export function initImageEditor(): void {
   };
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || !items[cur] || busy) return;
+    if (arranging) {
+      const i = blockAt(e.clientX, e.clientY);
+      if (i < 0) return;
+      canvas.setPointerCapture(e.pointerId);
+      active = i;
+      blockDrag = { b: blocks[i], x: e.clientX, y: e.clientY, start: { ...blocks[i] } };
+      dragging = true;
+      changed();
+      return;
+    }
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     dragging = true;
@@ -1076,6 +1401,23 @@ export function initImageEditor(): void {
   canvas.addEventListener('pointermove', (e) => {
     const it = items[cur];
     if (!it) return;
+    if (arranging) {
+      if (!blockDrag) {
+        canvas.style.cursor = blockAt(e.clientX, e.clientY) >= 0 ? 'grab' : 'default';
+        return;
+      }
+      const { b, start } = blockDrag;
+      const moved = { ...start, x: Math.round(start.x + (e.clientX - blockDrag.x) * stage.toWorld), y: Math.round(start.y + (e.clientY - blockDrag.y) * stage.toWorld) };
+      const snapped = snap(moved, rest(b), gapPx(), 8 * stage.toWorld);
+      const to = allowOverlap() ? snapped.box : settle(snapped.box, rest(b), gapPx());
+      guides = to === snapped.box ? snapped.guides : { x: [], y: [] };
+      if (to) place(b, to);
+      if (b.x !== start.x || b.y !== start.y) goFree();
+      canvas.style.cursor = 'grabbing';
+      readouts();
+      requestDraw();
+      return;
+    }
     if (!pointers.has(e.pointerId) || !gesture) {
       canvas.style.cursor = CURSORS[hitTest(e.clientX, e.clientY)];
       return;
@@ -1093,6 +1435,16 @@ export function initImageEditor(): void {
     requestDraw();
   });
   const end = (e: PointerEvent) => {
+    if (blockDrag) {
+      // Like arranging displays: a block dropped on its own attaches to the nearest neighbour.
+      if (!allowOverlap()) place(blockDrag.b, attach(blockDrag.b, rest(blockDrag.b), gapPx()));
+      blockDrag = undefined;
+      guides = { x: [], y: [] };
+      dragging = false;
+      canvas.style.cursor = 'grab';
+      changed();
+      return;
+    }
     if (!pointers.delete(e.pointerId)) return;
     startGesture();
     if (pointers.size) return;
@@ -1106,7 +1458,7 @@ export function initImageEditor(): void {
   canvas.addEventListener(
     'wheel',
     (e) => {
-      if (!items[cur]) return;
+      if (!items[cur] || arranging) return;
       e.preventDefault();
       zoomBy(items[cur], Math.exp(-e.deltaY * 0.002));
     },
@@ -1114,6 +1466,10 @@ export function initImageEditor(): void {
   );
   canvas.addEventListener('keydown', (e) => {
     const it = items[cur];
+    if (arranging) {
+      if (arrangeKey(e)) e.preventDefault();
+      return;
+    }
     if (!it || e.ctrlKey || e.metaKey || e.altKey) return;
     const step = e.shiftKey ? 50 : 10;
     const moves: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
@@ -1137,5 +1493,6 @@ export function initImageEditor(): void {
   new MutationObserver(refreshPalette).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   refreshPalette();
 
+  applyMode(new URLSearchParams(location.search).get('mode'));
   syncControls();
 }
