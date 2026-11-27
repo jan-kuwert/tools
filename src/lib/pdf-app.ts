@@ -1,6 +1,7 @@
 // PDF app (src/pages/pdf/index.astro): one combined document. Every PDF and image (JPEG/PNG) dropped in adds its pages
 // to a single page order that the sidebar, grid and page view edit (reorder across files, rotate, delete/restore).
-// Export writes that order as one PDF (standard or qpdf-optimized); Split writes parts of it plus a ZIP.
+// Export writes that order as one PDF (standard, qpdf-optimized, or redrawn as JPEG pages for Lossy / Black & white);
+// Split writes parts of it plus a ZIP.
 // pdf-lib (~500 KB), pdf.js and qpdf (wasm) are imported dynamically on first use to keep first paint instant.
 import { zipSync } from 'fflate';
 import type { PDFDocument } from '@cantoo/pdf-lib';
@@ -8,7 +9,7 @@ import type * as PdfJs from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import qpdfWasmUrl from '@neslinesli93/qpdf-wasm/dist/qpdf.wasm?url';
-import { downloadBlob, el, formatBytes, setDial, sniff, throwIfAborted, tick, UserError, type Result } from './tool';
+import { downloadBlob, el, formatBytes, publishOutput, setDial, sniff, throwIfAborted, tick, UserError, type Result } from './tool';
 import { loadPdf, parseRanges, pdfBlob, SIGNATURE_NOTE } from './pdf';
 import { resizable } from './resize';
 
@@ -42,6 +43,8 @@ const PAPER: [string, number, number][] = [
   ['Letter', 612, 792],
   ['Legal', 612, 1008],
 ];
+/** Lossy export presets: render resolution (dpi) and JPEG quality. */
+const LOSSY = { low: [72, 0.5], medium: [110, 0.6], high: [150, 0.75] } as const;
 
 /** One loaded file (PDF or image) with its legend row in the sidebar. */
 interface Source {
@@ -1212,7 +1215,17 @@ export function initPdfApp(): void {
   });
 
   // ---------- Export summary & size estimate ----------
-  const quality = () => new FormData(exportForm).get('quality') as 'standard' | 'optimized';
+  const quality = () => new FormData(exportForm).get('quality') as 'standard' | 'optimized' | 'lossy';
+  /** Settings for redrawing pages as JPEGs, or undefined for a vector export. */
+  function rasterOpts(): { dpi: number; q: number; gray: boolean; label: string } | undefined {
+    const d = new FormData(exportForm);
+    const gray = d.get('color') === 'gray';
+    // Black & white alone still has to redraw the pages; do it sharp enough for fine print.
+    if (d.get('quality') !== 'lossy') return gray ? { dpi: 200, q: 0.85, gray, label: 'Black & white' } : undefined;
+    const preset = d.get('preset') as keyof typeof LOSSY;
+    const [dpi, q] = LOSSY[preset];
+    return { dpi, q, gray, label: `Lossy (${preset} quality${gray ? ', black & white' : ''})` };
+  }
   const outRot = [...root.querySelectorAll<HTMLElement>('[data-out-rot]')];
 
   /** The document changed: drop cached bytes, show the rough size now and compute the real one once edits pause. */
@@ -1239,7 +1252,7 @@ export function initPdfApp(): void {
         cache = { gen: g, standard };
         summary();
       }
-      if (quality() === 'optimized' && totalSize() < OPT_EST_MAX && cache && !cache.optimized) {
+      if (quality() === 'optimized' && !rasterOpts() && totalSize() < OPT_EST_MAX && cache && !cache.optimized) {
         const optimized = await optimize(cache.standard, ctl.signal, () => {});
         if (g !== gen || !cache) return;
         cache.optimized = optimized;
@@ -1288,6 +1301,7 @@ export function initPdfApp(): void {
     }, 0);
     if (!k.length) bytes.replaceChildren('–');
     else if (totalSize() > EST_MAX && !fresh) bytes.replaceChildren(muted('calculated on export'));
+    else if (rasterOpts()) bytes.replaceChildren(muted('calculated on export'));
     else if (!fresh) bytes.replaceChildren(`≈ ${formatBytes(rough)}`);
     else if (quality() === 'standard') bytes.replaceChildren(formatBytes(fresh.standard.length));
     else if (fresh.optimized)
@@ -1437,6 +1451,55 @@ export function initPdfApp(): void {
     }
   }
 
+  /** Redraw every page of `input` as one JPEG (grayscale when asked) on a page of the same size; rotation is baked in. */
+  async function rasterize(input: Uint8Array, o: { dpi: number; q: number; gray: boolean }, signal: AbortSignal, progress: Progress): Promise<Uint8Array> {
+    progress('Loading renderer…');
+    const lib = await getPdfjs();
+    const { PDFDocument } = await import('@cantoo/pdf-lib');
+    // pdf.js transfers the buffer to its worker; keep the caller's (cached) bytes intact.
+    const task = lib.getDocument({ data: input.slice(), worker });
+    try {
+      const src = await task.promise.catch(() => {
+        throw new UserError('The pages could not be redrawn for Lossy or Black & white. Try Standard or Optimized.');
+      });
+      const out = await PDFDocument.create();
+      const canvas = document.createElement('canvas');
+      for (let i = 1; i <= src.numPages; i++) {
+        throwIfAborted(signal);
+        progress(`Redrawing page ${i} of ${src.numPages}`, (i - 1) / src.numPages);
+        const pg = await src.getPage(i);
+        // Viewports default to the page's /Rotate, so the image is upright and the new page needs none.
+        const { width, height } = pg.getViewport({ scale: 1 });
+        const s = Math.min(o.dpi / 72, Math.sqrt(MAX_CANVAS_PX / (width * height)));
+        const viewport = pg.getViewport({ scale: s });
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        await pg.render({ canvas, viewport }).promise;
+        pg.cleanup();
+        if (o.gray) grayscale(canvas);
+        const jpg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', o.q));
+        if (!jpg) throw new UserError('This browser could not encode the page images.');
+        const img = await out.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+        out.addPage([width, height]).drawImage(img, { x: 0, y: 0, width, height });
+      }
+      throwIfAborted(signal);
+      progress('Saving…');
+      await tick();
+      return out.save({ useObjectStreams: true });
+    } finally {
+      void task.destroy();
+    }
+  }
+
+  /** Luminance (Rec. 601) in place. */
+  function grayscale(canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext('2d')!;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = data.data;
+    for (let i = 0; i < px.length; i += 4) px[i] = px[i + 1] = px[i + 2] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    ctx.putImageData(data, 0, 0);
+  }
+
   const baseName = (name: string) => name.replace(/\.(pdf|jpe?g|png)$/i, '');
   const totalSize = () => sources.reduce((s, x) => s + x.file.size, 0);
   /** Name stem: the file's own name, or "combined" when pages come from several files. */
@@ -1460,7 +1523,14 @@ export function initPdfApp(): void {
     const sig = sigNote();
     let blob = pdfBlob(standard);
     let note = sig;
-    if (new FormData(exportForm).get('quality') === 'optimized') {
+    const raster = rasterOpts();
+    if (raster) {
+      const bytes = await rasterize(standard, raster, signal, progress);
+      blob = pdfBlob(bytes);
+      note = `${raster.label}: every page is now a ${raster.dpi} dpi image; text can no longer be selected or searched.`;
+      if (bytes.length > totalSize()) note += ` It is larger than the original files (${formatBytes(totalSize())}); Standard or Optimized gives a smaller file here.`;
+      if (sig) note += ' ' + sig;
+    } else if (quality() === 'optimized') {
       const optimized = reuse?.optimized ?? (await optimize(standard, signal, progress));
       if (g === gen) cache = { gen, standard, optimized };
       throwIfAborted(signal);
@@ -1564,6 +1634,7 @@ export function initPdfApp(): void {
     resultList.replaceChildren(
       ...results.map((r) => {
         const url = URL.createObjectURL(r.blob);
+        publishOutput(r.blob, r.name);
         urls.push(url);
         let delta = '';
         if (r.inputSize) {

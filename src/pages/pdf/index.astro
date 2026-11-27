@@ -3,6 +3,7 @@
 // Behaviour: src/lib/pdf-app.ts.
 import Base from '../../layouts/Base.astro';
 import Icon from '../../components/Icon.astro';
+import AppBar from '../../components/AppBar.astro';
 import ModeBadge from '../../components/ModeBadge.astro';
 import ProgressDial from '../../components/ProgressDial.astro';
 import { categories, href, toolBySlug } from '../../tools';
@@ -10,6 +11,8 @@ import { categories, href, toolBySlug } from '../../tools';
 const category = categories.find((c) => c.id === 'pdf')!;
 const limits = `${toolBySlug('pdf/merge').limits} · ${toolBySlug('pdf/from-images').limits}`;
 const accept = 'application/pdf,.pdf,image/jpeg,image/png';
+// Fanned paper pages behind the empty state: [x, y, rotation°], left stack then right stack.
+const sheets = [[70, 210, -14], [120, 190, -6], [175, 180, 3], [905, 175, 8], [955, 230, -4]];
 ---
 <Base title="PDF · Tools" description={category.blurb}>
   <div class="tool-shell" data-wide>
@@ -26,7 +29,7 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
 
     <section class="pdf-app" data-pdf-app data-empty aria-label="PDF">
       <header class="pa-tb">
-        <div class="pa-title"><Icon name="pdf" /><span>PDF</span><ModeBadge mode="local" /></div>
+        <AppBar part="switch" current="pdf" />
         <button class="pa-tool" type="button" data-open title="Open or add PDFs and images"><Icon name="plus" /><span class="pa-tool-label">Add</span></button>
         <div class="pa-viewseg" role="radiogroup" aria-label="View">
           <label title="Pages: read continuously (G)"><input type="radio" name="pa-view" value="pages" checked /><span><Icon name="pdf" /><span class="pa-tool-label">Pages</span></span></label>
@@ -50,6 +53,7 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
         </div>
         <div class="pa-end">
           <button class="pa-tool" type="button" data-close-all disabled aria-label="Close all files" title="Close all files"><Icon name="xmark" /></button>
+          <AppBar part="actions" />
         </div>
       </header>
 
@@ -79,7 +83,29 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
             <ol class="pa-cards" data-cards role="listbox" aria-multiselectable="true" aria-label="Pages, in output order"></ol>
           </div>
           <label class="pa-empty" data-empty-state>
-            <span class="pa-ph" aria-hidden="true"><Icon name="pdf" /></span>
+            <svg class="pa-bg-art" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+              <defs>
+                <radialGradient id="pa-g-a"><stop offset="0" class="s-a" /><stop offset="1" class="s-a" stop-opacity="0" /></radialGradient>
+                <radialGradient id="pa-g-b"><stop offset="0" class="s-b" /><stop offset="1" class="s-b" stop-opacity="0" /></radialGradient>
+                <pattern id="pa-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" /></pattern>
+                <radialGradient id="pa-fade" r="0.6"><stop offset="0.25" stop-color="#000" /><stop offset="1" stop-color="#fff" /></radialGradient>
+                <mask id="pa-edge"><rect width="1200" height="600" fill="url(#pa-fade)" /></mask>
+              </defs>
+              <g class="g-aurora">
+                <ellipse class="g-blob b1" cx="220" cy="470" rx="440" ry="300" fill="url(#pa-g-a)" />
+                <ellipse class="g-blob b2" cx="1000" cy="130" rx="420" ry="300" fill="url(#pa-g-b)" />
+              </g>
+              <rect class="g-dots" width="1200" height="600" fill="url(#pa-dots)" mask="url(#pa-edge)" />
+              {sheets.map(([x, y, r], i) => (
+                <g transform={`translate(${x} ${y}) rotate(${r})`}>
+                  <rect class="g-paper" width="170" height="220" rx="8" />
+                  <path class="g-fold" d="M134 0h28a8 8 0 0 1 8 8v28z" />
+                  <rect class="g-head" x="20" y="26" width="86" height="11" rx="5.5" />
+                  {i === sheets.length - 1 && <path class="g-mark" d="M20 105h96" />}
+                  <path class="g-lines" d="M20 60h130M20 76h130M20 92h104M20 108h130M20 124h118M20 140h76M20 168h130M20 184h96" />
+                </g>
+              ))}
+            </svg>
             <span class="pa-empty-title">Drop PDFs or images, or choose files</span>
             <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
             <span class="pa-empty-hint">PDFs and JPEG or PNG images all become pages of one document. You can also paste from the clipboard.</span>
@@ -180,13 +206,29 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
             <h2 id="pa-export-title">Export</h2>
             <form class="pa-form" data-export-form>
               <fieldset>
-                <legend class="visually-hidden">Quality</legend>
+                <legend class="visually-hidden">Compression</legend>
                 <div class="segmented pa-seg">
                   <label title="Written by the PDF library as is"><input type="radio" name="quality" value="standard" checked /><span>Standard</span></label>
                   <label title="Lossless optimization; smaller when possible"><input type="radio" name="quality" value="optimized" /><span>Optimized</span></label>
+                  <label title="Pages redrawn as JPEG images; much smaller for scans and photos"><input type="radio" name="quality" value="lossy" /><span>Lossy</span></label>
                 </div>
               </fieldset>
-              <p class="pa-note">Optimized: lossless, used only when smaller.</p>
+              <fieldset class="pa-lossy">
+                <legend>Image quality</legend>
+                <div class="segmented pa-seg">
+                  <label title="72 dpi, smallest file"><input type="radio" name="preset" value="low" /><span>Low</span></label>
+                  <label title="110 dpi"><input type="radio" name="preset" value="medium" checked /><span>Medium</span></label>
+                  <label title="150 dpi, sharpest"><input type="radio" name="preset" value="high" /><span>High</span></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend class="visually-hidden">Color</legend>
+                <div class="segmented pa-seg">
+                  <label><input type="radio" name="color" value="color" checked /><span>Color</span></label>
+                  <label title="Grayscale pages"><input type="radio" name="color" value="gray" /><span>Black & white</span></label>
+                </div>
+              </fieldset>
+              <p class="pa-note">Optimized: lossless, used only when smaller. Lossy and Black & white redraw each page as an image, so text can no longer be selected or searched.</p>
               <label class="field">
                 <span>File name</span>
                 <input type="text" name="filename" autocomplete="off" spellcheck="false" />
@@ -253,10 +295,6 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
 
   /* Toolbar */
   .pa-tb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; padding: 0.45rem 0.6rem; background: var(--app-bar); border-bottom: 1px solid var(--app-line); }
-  .pa-title { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.5rem 0 0.3rem; font-weight: 700; font-size: 1rem; }
-  .pa-title > .icon { color: var(--accent); }
-  .pa-title .mode { margin-left: 0.15rem; }
-  .pa-title .mode::after { left: -6px; right: auto; }
   .pa-group { display: flex; align-items: center; gap: 0.1rem; }
   .pa-tool {
     display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-width: 34px; height: 34px; padding: 0 0.5rem;
@@ -385,14 +423,30 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   .pdf-app[data-view='grid'] .pa-view, .pdf-app:not([data-view='grid']) .pa-grid { display: none; }
 
   .pa-empty {
-    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
+    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; overflow: hidden;
     padding: 1rem; border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px; text-align: center; cursor: pointer;
     transition: border-color 0.15s, background-color 0.15s;
   }
   .pa-empty:hover, .pdf-app.pa-over .pa-empty { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
   .pa-empty:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
-  .pa-ph { display: grid; place-items: center; width: 96px; height: 120px; margin-bottom: 0.25rem; border-radius: 6px; background: var(--surface); box-shadow: var(--paper-shadow); color: var(--muted); }
-  .pdf-app .pa-ph .icon svg { width: 40px; height: 40px; }
+  .pa-empty > :not(svg, input) { position: relative; }
+  /* Decorative backdrop behind the drop prompt (same language as the image editor's): soft accent glows, an
+     edge-weighted dot grid and fanned paper pages kept clear of the centre. */
+  .pa-bg-art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .pa-bg-art .s-a { stop-color: var(--accent); }
+  .pa-bg-art .s-b { stop-color: color-mix(in oklch, var(--accent), light-dark(#f97316, #fb923c) 55%); }
+  .pa-bg-art .g-aurora { opacity: 0.2; }
+  .pa-bg-art .g-dots { fill: var(--fg); opacity: 0.15; }
+  .pa-bg-art .g-paper { fill: var(--surface); fill-opacity: 0.8; stroke: var(--fg); stroke-opacity: 0.1; stroke-width: 1.5; }
+  .pa-bg-art .g-fold { fill: var(--fg); opacity: 0.06; }
+  .pa-bg-art .g-head { fill: var(--accent); opacity: 0.35; }
+  .pa-bg-art .g-lines { fill: none; stroke: var(--fg); stroke-opacity: 0.13; stroke-width: 5; stroke-linecap: round; }
+  .pa-bg-art .g-mark { fill: none; stroke: var(--accent); stroke-opacity: 0.25; stroke-width: 14; stroke-linecap: round; }
+  @media (prefers-reduced-motion: no-preference) {
+    .pa-bg-art .g-blob { transform-box: fill-box; transform-origin: center; animation: pa-drift 26s ease-in-out infinite alternate; }
+    .pa-bg-art .g-blob.b2 { animation-duration: 32s; animation-direction: alternate-reverse; }
+  }
+  @keyframes pa-drift { to { transform: translate(-50px, 30px) scale(1.12); } }
   .pa-empty-title { font-size: 1.15rem; font-weight: 650; }
   .pa-empty-hint { max-width: 36ch; font-size: 0.85rem; color: var(--muted); }
   .pdf-app.pa-over .pa-main { box-shadow: inset 0 0 0 3px var(--accent); }
@@ -426,6 +480,7 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   .pa-split[data-highlight] { margin: -0.5rem; padding: 0.5rem; border-radius: 10px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
   .pa-export { flex: none; padding: 0.85rem 1rem 1rem; background: var(--app-bar); border-top: 1px solid var(--app-line); }
   .pa-export .btn-primary { justify-content: center; }
+  .pa-export .pa-form:not(:has(input[value='lossy']:checked)) .pa-lossy { display: none; }
   .pa-out { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0; padding: 0.5rem 0.7rem; border-radius: 10px; background: var(--app-hover); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
   .pa-out dt { color: var(--muted); }
   .pa-out dd { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 0.25rem; margin: 0; text-align: right; font-weight: 600; }
@@ -452,7 +507,7 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
 
   @media (max-width: 860px) {
     .pdf-app { height: auto; }
-    .pa-body { grid-template-columns: minmax(0, 1fr); align-content: start; }
+    .pa-body, .pdf-app[data-empty] .pa-body { grid-template-columns: minmax(0, 1fr); align-content: start; }
     .pa-body > .pane-resizer { display: none; }
     /* Stacked: page view, thumbnails, options (Export last). */
     .pdf-app[data-empty] .pa-side { display: none; }
@@ -472,7 +527,6 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   }
   @media (max-width: 480px) {
     .pdf-app { --pa-w: calc(100vw - 1rem); border-radius: 10px; }
-    .pa-title .mode { display: none; }
     .pa-tb { gap: 0.3rem; }
     .pa-pageno input { width: 3.2rem; }
     .pa-cardsize .icon { display: none; }

@@ -1,0 +1,456 @@
+---
+// GPX category app: load tracks from runs, rides and watches; view, edit, clean up, merge and export them.
+// Behaviour: src/lib/gpx-app.ts; parsing and edits: src/lib/gpx.ts.
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import AppBar from '../../components/AppBar.astro';
+import ModeBadge from '../../components/ModeBadge.astro';
+import { categories, href } from '../../tools';
+
+const category = categories.find((c) => c.id === 'gpx')!;
+const types = ['running', 'trail_running', 'walking', 'hiking', 'cycling', 'road_biking', 'mountain_biking', 'swimming', 'skiing', 'other'];
+
+// Empty-state backdrop: wobbly topographic contours around two hills in opposite corners (centre stays clear).
+const contour = (cx: number, cy: number, r: number, seed: number) => {
+  const n = 28;
+  const p = Array.from({ length: n }, (_, i) => {
+    const a = (i / n) * Math.PI * 2;
+    const k = 1 + 0.13 * Math.sin(3 * a + seed) + 0.07 * Math.sin(5 * a + seed * 2.3) + 0.04 * Math.cos(7 * a - seed);
+    return [cx + Math.cos(a) * r * k * 1.25, cy + Math.sin(a) * r * k];
+  });
+  const mid = (a: number[], b: number[]) => `${((a[0] + b[0]) / 2).toFixed(1)} ${((a[1] + b[1]) / 2).toFixed(1)}`;
+  return `M${mid(p[0], p[1])}` + p.map((_, i) => `Q${p[(i + 1) % n].map((v) => v.toFixed(1)).join(' ')} ${mid(p[(i + 1) % n], p[(i + 2) % n])}`).join('') + 'Z';
+};
+const hills = [
+  [230, 130, 1.1],
+  [990, 490, 2.4],
+].flatMap(([cx, cy, seed]) => Array.from({ length: 8 }, (_, i) => ({ d: contour(cx, cy, 34 + i * 34, seed + i * 0.35), major: i % 4 === 3 })));
+---
+<Base title="GPX · Tools" description={category.blurb}>
+  <div class="tool-shell" data-wide>
+    <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#gpx'}>GPX</a></div>
+    <div class="tool-head">
+      <h1>GPX</h1>
+      <ModeBadge mode="local" />
+    </div>
+    <p class="tool-summary">{category.blurb}</p>
+    <div class="privacy-note privacy-local" role="note">
+      <Icon name="lock" />
+      <p><strong>Runs in your browser; nothing is uploaded.</strong> <a href={href('privacy')}>How we check</a></p>
+    </div>
+
+    <section class="gpx-app" data-gpx-app data-empty aria-label="GPX">
+      <header class="gx-tb">
+        <AppBar part="switch" current="gpx" />
+        <button class="gx-tool" type="button" data-open title="Add GPX files"><Icon name="plus" /><span class="gx-label">Add files</span></button>
+        <div class="gx-group">
+          <button class="gx-tool" type="button" data-undo disabled aria-label="Undo" title="Undo (Ctrl/Cmd+Z)"><Icon name="undo" /></button>
+          <button class="gx-tool" type="button" data-redo disabled aria-label="Redo" title="Redo (Ctrl/Cmd+Shift+Z)"><Icon name="redo" /></button>
+        </div>
+        <button class="gx-tool" type="button" data-fit disabled title="Zoom to fit (F)"><Icon name="fit" /><span class="gx-label">Fit</span></button>
+        <div class="gx-group" role="group" aria-label="View">
+          <button class="gx-tool" type="button" data-toggle="points" aria-pressed="false" title="Show points to select, drag, insert (double-click a line) and delete them (P)"><Icon name="pin" /><span class="gx-label">Edit points</span></button>
+          <button class="gx-tool" type="button" data-toggle="profile" aria-pressed="true" title="Elevation profile"><Icon name="profile" /><span class="gx-label">Profile</span></button>
+          <button class="gx-tool" type="button" data-toggle="hr" aria-pressed="true" hidden title="Heart rate in the profile"><Icon name="heart" /><span class="gx-label">Heart rate</span></button>
+        </div>
+        <div class="gx-end">
+          <button class="gx-tool" type="button" data-close-all disabled aria-label="Close all tracks" title="Close all tracks"><Icon name="xmark" /></button>
+          <AppBar part="actions" />
+        </div>
+      </header>
+
+      <div class="gx-msg" data-msg hidden>
+        <p data-msg-text role="status" aria-live="polite"></p>
+        <button class="gx-tool" type="button" data-msg-close aria-label="Dismiss message"><Icon name="xmark" /></button>
+      </div>
+
+      <div class="gx-body">
+        <aside class="gx-side" aria-labelledby="gx-tracks-title">
+          <div class="gx-side-head">
+            <h2 id="gx-tracks-title">Tracks</h2>
+            <button class="gx-link" type="button" data-tick-all>Select all</button>
+          </div>
+          <ol class="gx-list" data-list></ol>
+          <p class="gx-hint">Tick tracks to merge or export them together. Drag the handle or press Alt+↑/↓ to reorder; double-click a name to rename.</p>
+        </aside>
+
+        <div class="gx-main">
+          <div class="gx-map" data-map tabindex="0" role="application" aria-roledescription="map" aria-label="Track map. Drag or arrow keys pan, wheel, pinch or +/− zoom, F fits.">
+            <canvas data-map-canvas></canvas>
+            <div class="gx-tip" data-tip hidden></div>
+          </div>
+          <div class="gx-prof" data-prof>
+            <canvas data-prof-canvas role="img" aria-label="Elevation profile. Drag to select a range, click to set the cursor."></canvas>
+            <p class="gx-prof-read" data-prof-read aria-hidden="true"></p>
+          </div>
+          <label class="gx-empty" data-empty-state>
+            <svg class="gx-bg-art" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+              <defs>
+                <radialGradient id="gx-g-a"><stop offset="0" class="s-a" /><stop offset="1" class="s-a" stop-opacity="0" /></radialGradient>
+                <radialGradient id="gx-g-b"><stop offset="0" class="s-b" /><stop offset="1" class="s-b" stop-opacity="0" /></radialGradient>
+                <radialGradient id="gx-fade" r="0.62"><stop offset="0.3" stop-color="#000" /><stop offset="1" stop-color="#fff" /></radialGradient>
+                <mask id="gx-edge"><rect width="1200" height="600" fill="url(#gx-fade)" /></mask>
+              </defs>
+              <g class="g-aurora">
+                <ellipse class="g-blob b1" cx="200" cy="150" rx="420" ry="300" fill="url(#gx-g-a)" />
+                <ellipse class="g-blob b2" cx="1020" cy="470" rx="420" ry="300" fill="url(#gx-g-b)" />
+              </g>
+              <g mask="url(#gx-edge)">
+                {hills.map((h) => <path class:list={['g-contour', { major: h.major }]} d={h.d} />)}
+                <path class="g-route" d="M250 455C330 555 480 540 600 528S850 552 905 450S985 250 950 172" />
+              </g>
+              <g class="g-start" transform="translate(250 455)"><circle r="15" /><circle class="g-dot" r="6" /></g>
+              <g class="g-end" transform="translate(950 172)"><path d="M0 0C-6-14-18-22-18-35A18 18 0 0 1 18-35C18-22 6-14 0 0Z" /><circle class="g-dot" cy="-35" r="6.5" /></g>
+            </svg>
+            <span class="gx-empty-title">Drop GPX files or choose files</span>
+            <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
+            <span class="gx-empty-hint">Tracks and routes from watches, bike computers and apps. Heart rate, cadence and other watch data are kept.</span>
+            <input class="visually-hidden" type="file" multiple accept=".gpx,application/gpx+xml" data-input />
+          </label>
+        </div>
+
+        <aside class="gx-insp" aria-label="Inspector">
+          <div class="gx-insp-scroll" data-insp>
+            <section class="gx-track" aria-labelledby="gx-track-title">
+              <h2 id="gx-track-title">Track</h2>
+              <label class="field"><span>Name</span><input type="text" data-name autocomplete="off" spellcheck="false" /></label>
+              <label class="field">
+                <span>Activity type</span>
+                <input type="text" data-type list="gx-types" autocomplete="off" spellcheck="false" placeholder="e.g. running" />
+                <datalist id="gx-types">{types.map((t) => <option value={t} />)}</datalist>
+              </label>
+              <dl class="gx-stats" data-stats aria-label="Statistics"></dl>
+            </section>
+
+            <section class="gx-sel" aria-labelledby="gx-sel-title">
+              <h2 id="gx-sel-title">Selection</h2>
+              <p class="gx-note" data-sel-info></p>
+              <div class="gx-row">
+                <label class="field"><span>Start (km)</span><input type="number" min="0" step="0.01" data-sel-start inputmode="decimal" /></label>
+                <label class="field"><span>End (km)</span><input type="number" min="0" step="0.01" data-sel-end inputmode="decimal" /></label>
+              </div>
+              <fieldset>
+                <legend>Delete selection</legend>
+                <div class="segmented gx-seg">
+                  <label title="Connect the points before and after the gap"><input type="radio" name="gx-join" value="join" checked /><span>Join ends</span></label>
+                  <label title="Leave a gap between two segments"><input type="radio" name="gx-join" value="break" /><span>Segment break</span></label>
+                </div>
+              </fieldset>
+              <div class="gx-actions">
+                <button class="btn" type="button" data-act="trim" disabled><Icon name="crop" />Trim to selection</button>
+                <button class="btn" type="button" data-act="cut" disabled><Icon name="scissor" />Delete selection</button>
+                <button class="btn" type="button" data-act="split" disabled><Icon name="scissor" />Split at cursor</button>
+                <button class="btn" type="button" data-act="clear" disabled><Icon name="xmark" />Clear</button>
+              </div>
+            </section>
+
+            <section class="gx-point" data-point-sec hidden aria-labelledby="gx-point-title">
+              <h2 id="gx-point-title">Point</h2>
+              <dl class="gx-stats" data-point></dl>
+              <button class="btn" type="button" data-act="delete-point"><Icon name="trash" />Delete point</button>
+            </section>
+
+            <section class="gx-clean" data-clean-sec aria-labelledby="gx-clean-title">
+              <h2 id="gx-clean-title">Clean up</h2>
+              <form class="gx-form" data-clean="pauses">
+                <p class="gx-form-title">Remove pauses</p>
+                <div class="gx-row">
+                  <label class="field"><span>Below (km/h)</span><input type="number" name="kmh" min="0.1" step="0.1" value="1.5" required /></label>
+                  <label class="field"><span>Longer than (s)</span><input type="number" name="secs" min="1" step="1" value="30" required /></label>
+                </div>
+                <label class="gx-check"><input type="checkbox" name="close" />Also close the time gap</label>
+                <button class="btn" type="submit">Remove pauses</button>
+              </form>
+              <form class="gx-form" data-clean="spikes">
+                <p class="gx-form-title">Remove GPS spikes</p>
+                <label class="field"><span>Faster than (km/h)</span><input type="number" name="kmh" min="1" step="1" value="60" required /></label>
+                <button class="btn" type="submit">Remove spikes</button>
+              </form>
+              <form class="gx-form" data-clean="outliers">
+                <p class="gx-form-title">Remove distance outliers</p>
+                <div class="gx-row">
+                  <label class="field"><span>Jumps farther than (m)</span><input type="number" name="dist" min="5" step="5" value="50" required /></label>
+                  <label class="field" title="Also find groups of up to this many stray points in a row"><span>Up to (points in a row)</span><input type="number" name="run" min="1" max="20" step="1" value="1" required /></label>
+                </div>
+                <p class="gx-note" data-outlier-info aria-live="polite"></p>
+                <div class="gx-row">
+                  <button class="btn" type="button" data-outlier-next disabled>Show next</button>
+                  <button class="btn" type="submit">Remove outliers</button>
+                </div>
+              </form>
+              <form class="gx-form" data-clean="simplify">
+                <p class="gx-form-title">Simplify</p>
+                <label class="field"><span>Tolerance (m)</span><input type="number" name="tol" min="0.5" step="0.5" value="3" required /></label>
+                <p class="gx-note" data-simplify-info aria-live="polite"></p>
+                <button class="btn" type="submit">Simplify</button>
+              </form>
+              <form class="gx-form" data-clean="privacy">
+                <p class="gx-form-title">Privacy zones</p>
+                <div class="gx-row">
+                  <label class="field"><span>Hide first (m)</span><input type="number" name="start" min="0" step="10" value="200" required /></label>
+                  <label class="field"><span>Hide last (m)</span><input type="number" name="end" min="0" step="10" value="200" required /></label>
+                </div>
+                <button class="btn" type="submit">Hide start and end</button>
+              </form>
+              <form class="gx-form" data-clean="smooth">
+                <p class="gx-form-title">Smooth elevation</p>
+                <label class="field"><span>Window (points)</span><input type="number" name="win" min="3" max="99" step="2" value="5" required /></label>
+                <button class="btn" type="submit">Smooth</button>
+              </form>
+              <form class="gx-form" data-clean="shift">
+                <p class="gx-form-title">Shift time</p>
+                <div class="gx-row">
+                  <label class="field"><span>Offset</span><input type="number" name="offset" step="any" value="0" required /></label>
+                  <label class="field"><span>Unit</span><select name="unit"><option value="60000">minutes</option><option value="3600000">hours</option></select></label>
+                </div>
+                <button class="btn" type="submit">Shift</button>
+              </form>
+              <form class="gx-form" data-clean="start">
+                <p class="gx-form-title">Set start time</p>
+                <div class="gx-row">
+                  <label class="field"><span>Date</span><input type="date" name="startDate" required /></label>
+                  <label class="field"><span>Time (local)</span><input type="time" name="startTime" step="1" required /></label>
+                </div>
+                <button class="btn" type="submit">Set start</button>
+              </form>
+              <form class="gx-form" data-clean="reverse">
+                <p class="gx-form-title">Reverse direction</p>
+                <button class="btn" type="submit"><Icon name="reverse" />Reverse track</button>
+              </form>
+            </section>
+
+            <section class="gx-merge" data-merge-sec aria-labelledby="gx-merge-title">
+              <h2 id="gx-merge-title">Merge</h2>
+              <p class="gx-note" data-merge-info></p>
+              <fieldset>
+                <legend>Order</legend>
+                <div class="segmented gx-seg">
+                  <label><input type="radio" name="gx-order" value="time" checked /><span>Start time</span></label>
+                  <label><input type="radio" name="gx-order" value="list" /><span>List order</span></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Segments</legend>
+                <div class="segmented gx-seg">
+                  <label><input type="radio" name="gx-segs" value="one" checked /><span>One segment</span></label>
+                  <label><input type="radio" name="gx-segs" value="keep" /><span>Keep segments</span></label>
+                </div>
+              </fieldset>
+              <p class="warn-box" data-overlap hidden></p>
+              <div class="gx-actions">
+                <button class="btn" type="button" data-act="merge" disabled><Icon name="merge" />Merge tracks</button>
+                <button class="btn" type="button" data-act="combine" disabled><Icon name="download" />Combine into one file</button>
+              </div>
+            </section>
+            <p class="gx-limits">GPX 1.0 and 1.1 · up to 50 MB per file</p>
+          </div>
+
+          <section class="gx-export" aria-labelledby="gx-export-title">
+            <h2 id="gx-export-title">Export</h2>
+            <fieldset>
+              <legend class="visually-hidden">Tracks to export</legend>
+              <div class="segmented gx-seg">
+                <label><input type="radio" name="gx-scope" value="active" checked /><span>This track</span></label>
+                <label><input type="radio" name="gx-scope" value="ticked" /><span>Selected</span></label>
+                <label><input type="radio" name="gx-scope" value="all" /><span>All</span></label>
+              </div>
+            </fieldset>
+            <label class="gx-check"><input type="checkbox" data-each />Export each track as a separate file</label>
+            <button class="btn btn-primary" type="button" data-export disabled><Icon name="download" />Export GPX</button>
+            <p class="gx-note" data-export-info aria-live="polite"></p>
+          </section>
+        </aside>
+      </div>
+
+      <template data-icons>
+        <Icon name="grip" class="i-grip" />
+        <Icon name="eye" class="i-eye" />
+        <Icon name="eye-off" class="i-eye-off" />
+        <Icon name="trash" class="i-trash" />
+      </template>
+    </section>
+  </div>
+</Base>
+
+<style is:global>
+  .gpx-app {
+    --gx-w: min(100vw - 2rem, 1440px);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: var(--gx-w);
+    height: clamp(600px, calc(100dvh - 120px), 1000px);
+    margin: 1.5rem calc((100% - var(--gx-w)) / 2) 0;
+    background: var(--app-bg);
+    border: 1px solid var(--app-line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .gpx-app .icon svg { width: 18px; height: 18px; }
+  .gpx-app h2 { margin: 0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  /* Whole-surface drop highlight. */
+  .gpx-app.gx-over::after { content: ''; position: absolute; inset: 0; z-index: 20; border-radius: inherit; box-shadow: inset 0 0 0 3px var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); pointer-events: none; }
+
+  /* Toolbar */
+  .gx-tb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; padding: 0.45rem 0.6rem; background: var(--app-bar); border-bottom: 1px solid var(--app-line); }
+  .gx-group { display: flex; align-items: center; gap: 0.1rem; }
+  .gx-tool {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-width: 34px; height: 34px; padding: 0 0.5rem;
+    border: 0; border-radius: 8px; background: transparent; color: var(--fg); font: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .gx-tool:hover:not(:disabled) { background: var(--app-hover); }
+  .gx-tool:disabled { opacity: 0.4; cursor: default; }
+  .gx-tool[aria-pressed='true'] { background: var(--app-selected); color: var(--accent); }
+  .gx-end { display: flex; align-items: center; gap: 0.35rem; margin-left: auto; }
+
+  .gx-msg { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.6rem 0.35rem 1rem; border-bottom: 1px solid var(--app-line); background: var(--app-bar); font-size: 0.88rem; }
+  .gx-msg p { flex: 1; margin: 0; white-space: pre-line; }
+  .gx-msg[data-kind='error'] { background: color-mix(in srgb, var(--error) 10%, var(--surface)); color: var(--error); }
+  .gx-msg[data-kind='error'] .gx-tool { color: inherit; }
+
+  .gx-body { flex: 1; display: grid; grid-template-columns: 270px minmax(0, 1fr) 300px; min-height: 0; }
+  .gpx-app[data-empty] .gx-body { grid-template-columns: 0 minmax(0, 1fr) 300px; }
+  .gpx-app[data-empty] .gx-side { visibility: hidden; overflow: hidden; }
+
+  /* Track list */
+  .gx-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-side); border-right: 1px solid var(--app-line); }
+  .gx-side-head { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 0.75rem 0.35rem; }
+  .gx-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+  .gx-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; margin: 0; padding: 0 0.4rem; display: grid; align-content: start; gap: 2px; }
+  .gx-item { position: relative; display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto auto; align-items: center; gap: 0.15rem; padding: 0.3rem 0.2rem; border-radius: 10px; border: 2px solid transparent; }
+  .gx-item:hover { background: var(--app-hover); }
+  .gx-item[aria-current='true'] { background: var(--app-selected); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .gx-item[data-hidden] .gx-item-main { opacity: 0.5; }
+  .gx-item[data-lifted] { opacity: 0.4; }
+  .gx-item[data-drop='before'] { box-shadow: 0 -3px 0 var(--accent); }
+  .gx-item[data-drop='after'] { box-shadow: 0 3px 0 var(--accent); }
+  .gx-item input[type='checkbox'] { width: 16px; height: 16px; margin: 0 0.2rem; accent-color: var(--accent); }
+  .gx-grip { cursor: grab; touch-action: none; color: var(--muted); }
+  .gx-item .gx-tool { min-width: 28px; height: 28px; padding: 0; color: var(--muted); }
+  .gpx-app .gx-item .icon svg { width: 16px; height: 16px; }
+  .gx-swatch { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; overflow: hidden; }
+  .gx-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+  .gx-swatch::-webkit-color-swatch { border: 0; border-radius: 50%; }
+  .gx-swatch::-moz-color-swatch { border: 0; border-radius: 50%; }
+  .gx-item-main { min-width: 0; display: grid; gap: 0.05rem; padding: 0.15rem 0.3rem; border: 0; border-radius: 6px; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+  .gx-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.86rem; font-weight: 650; }
+  .gx-item-meta { font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .gx-item-meta:empty { display: none; }
+  .gx-hint { margin: 0; padding: 0.6rem 0.75rem; font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--app-line); }
+  .gx-dragging, .gx-dragging * { cursor: grabbing !important; user-select: none; }
+
+  /* Map and profile */
+  .gx-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-stage); }
+  .gx-map { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; }
+  .gx-map:active { cursor: grabbing; }
+  .gx-map[data-hover] { cursor: pointer; }
+  .gx-map:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 0; }
+  .gx-map canvas, .gx-prof canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .gx-tip {
+    position: absolute; z-index: 3; left: 0; top: 0; padding: 0.35rem 0.55rem; border-radius: 8px; pointer-events: none; white-space: pre;
+    background: color-mix(in srgb, var(--app-bar) 94%, transparent); border: 1px solid var(--app-line); box-shadow: 0 4px 14px rgb(0 0 0 / 0.16);
+    font-size: 0.78rem; line-height: 1.45; font-variant-numeric: tabular-nums;
+  }
+  .gx-prof { position: relative; flex: none; height: 170px; border-top: 1px solid var(--app-line); background: var(--app-bar); touch-action: none; cursor: crosshair; }
+  .gpx-app:not([data-profile]) .gx-prof { display: none; }
+  .gx-prof-read { position: absolute; top: 0.2rem; left: 52px; right: 44px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
+  .gpx-app[data-empty] :is(.gx-map, .gx-prof), .gpx-app:not([data-empty]) .gx-empty { display: none; }
+
+  .gx-empty {
+    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; overflow: hidden;
+    padding: 1rem; border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+  .gx-empty:hover, .gpx-app.gx-over .gx-empty { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .gx-empty:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .gx-empty > :not(svg, input) { position: relative; }
+  .gx-empty-title { font-size: 1.15rem; font-weight: 650; }
+  .gx-empty-hint { max-width: 38ch; font-size: 0.85rem; color: var(--muted); }
+  /* Decorative backdrop: soft accent glows, topographic contours and a dashed route with start and end pins, all fading towards the centre. */
+  .gx-bg-art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .gx-bg-art .s-a { stop-color: var(--accent); }
+  .gx-bg-art .s-b { stop-color: color-mix(in oklch, var(--accent), light-dark(#0ea5a4, #2dd4bf) 55%); }
+  .gx-bg-art .g-aurora { opacity: 0.2; }
+  .gx-bg-art .g-contour { fill: none; stroke: var(--fg); stroke-opacity: 0.16; stroke-width: 1.5; }
+  .gx-bg-art .g-contour.major { stroke-opacity: 0.28; stroke-width: 2.5; }
+  .gx-bg-art .g-route { fill: none; stroke: var(--accent); stroke-opacity: 0.6; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 2 14; }
+  .gx-bg-art .g-start circle { fill: var(--local); fill-opacity: 0.25; }
+  .gx-bg-art .g-end path { fill: var(--accent); fill-opacity: 0.55; }
+  .gx-bg-art .g-dot { fill: var(--surface); fill-opacity: 1; }
+  .gx-bg-art .g-start .g-dot { fill: var(--local); fill-opacity: 0.8; }
+  @media (prefers-reduced-motion: no-preference) {
+    .gx-bg-art .g-blob { transform-box: fill-box; transform-origin: center; animation: gx-drift 26s ease-in-out infinite alternate; }
+    .gx-bg-art .g-blob.b2 { animation-duration: 32s; animation-direction: alternate-reverse; }
+    .gx-bg-art .g-route { animation: gx-walk 3s linear infinite; }
+  }
+  @keyframes gx-drift { to { transform: translate(-50px, 30px) scale(1.12); } }
+  @keyframes gx-walk { to { stroke-dashoffset: -32; } }
+
+  /* Inspector: sections scroll, Export stays pinned at the bottom. */
+  .gx-insp { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-side); border-left: 1px solid var(--app-line); font-size: 0.9rem; }
+  .gx-insp-scroll { flex: 1; min-height: 0; display: grid; align-content: start; gap: 1.2rem; overflow-y: auto; overscroll-behavior: contain; padding: 1rem; }
+  .gx-insp section { display: grid; gap: 0.6rem; }
+  .gpx-app[data-empty] :is(.gx-track, .gx-sel, .gx-point) { display: none; }
+  .gx-insp section[data-highlight] { margin: -0.5rem; padding: 0.5rem; border-radius: 10px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .gx-insp fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .gx-insp legend, .gx-insp .field > span { padding: 0; margin-bottom: 0.3rem; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .gx-insp .field { gap: 0; min-width: 0; }
+  .gx-insp :is(input[type='text'], input[type='number'], input[type='date'], input[type='time'], select) { width: 100%; min-width: 0; padding: 0.35rem 0.55rem; font-size: 0.88rem; }
+  .gx-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .gx-seg { display: flex; }
+  .gx-seg label { flex: 1; text-align: center; }
+  .gx-seg span { padding: 0.3rem 0.35rem; font-size: 0.82rem; }
+  .gx-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+  .gx-insp .btn { justify-content: flex-start; padding: 0.42rem 0.6rem; font-size: 0.84rem; }
+  .gx-insp .btn .icon svg { width: 16px; height: 16px; }
+  /* Clean-up tools as flat groups divided by hairlines (like the image editor's sidebar), not cards. */
+  .gx-form { display: grid; gap: 0.4rem; padding-top: 0.75rem; border-top: 1px solid var(--app-line); }
+  .gx-insp h2 + .gx-form { padding-top: 0; border-top: 0; }
+  .gx-form .btn { justify-self: start; padding-block: 0.32rem; }
+  .gx-form .gx-row:has(.btn) { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .gx-form-title { margin: 0; font-size: 0.74rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .gx-form .field > span { font-size: 0.68rem; margin-bottom: 0.2rem; }
+  .gx-check { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; }
+  .gx-check input { accent-color: var(--accent); }
+  .gx-stats { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0; padding: 0.5rem 0.7rem; border-radius: 10px; background: var(--app-hover); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+  .gx-stats dt { color: var(--muted); }
+  .gx-stats dd { margin: 0; text-align: right; font-weight: 600; }
+  .gx-note { margin: 0; font-size: 0.84rem; color: var(--muted); }
+  .gx-note:empty { display: none; }
+  .gx-insp .warn-box { margin: 0; }
+  .gx-limits { margin: 0; font-size: 0.8rem; color: var(--muted); }
+  .gx-export { flex: none; padding: 0.85rem 1rem 1rem; background: var(--app-bar); border-top: 1px solid var(--app-line); }
+  .gx-export .btn-primary { justify-content: center; }
+
+  @media (max-width: 860px) {
+    .gpx-app { height: auto; }
+    .gx-body, .gpx-app[data-empty] .gx-body { grid-template-columns: minmax(0, 1fr); align-content: start; }
+    .gx-main { order: 1; height: clamp(380px, 70dvh, 700px); }
+    .gpx-app[data-empty] .gx-main { height: clamp(300px, 50dvh, 480px); }
+    .gx-side { order: 2; border-right: 0; border-top: 1px solid var(--app-line); }
+    .gpx-app[data-empty] .gx-side { display: none; }
+    .gx-list { max-height: 260px; }
+    .gx-prof { height: 130px; }
+    .gx-insp { order: 3; border-left: 0; border-top: 1px solid var(--app-line); }
+    .gx-insp-scroll { overflow: visible; }
+    .gx-export { position: sticky; bottom: 0; z-index: 4; }
+    .gx-label { display: none; }
+  }
+  @media (max-width: 480px) {
+    .gpx-app { --gx-w: calc(100vw - 1rem); border-radius: 10px; }
+    .gx-tb { gap: 0.3rem; }
+  }
+
+  /* Embedded in the home hub: the app is the whole frame, edge to edge. */
+  :root[data-embed] main#main:has(.gpx-app) { width: 100%; padding: 0; }
+  :root[data-embed] .tool-shell:has(.gpx-app) > :not(.gpx-app) { display: none; }
+  :root[data-embed] .gpx-app { width: 100%; height: 100dvh; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+  @media (max-width: 860px) { :root[data-embed] .gpx-app { height: auto; min-height: 100dvh; } }
+</style>
+
+<script>
+  import { initGpxApp } from '../../lib/gpx-app';
+
+  initGpxApp();
+</script>

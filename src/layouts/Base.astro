@@ -17,7 +17,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
     <link rel="icon" href={href('favicon.svg').replace(/\/$/, '')} type="image/svg+xml" />
     <script is:inline src={href('theme.js').replace(/\/$/, '')}></script>
   </head>
-  <body class:list={{ 'is-wide': wide }}>
+  <body>
     <a class="visually-hidden" href="#main">Skip to content</a>
     <a class="corner corner-tl brand" href={href()}>Tools</a>
     {wide && (
@@ -26,12 +26,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
       </button>
     )}
     <main id="main" class={wide ? 'wide' : undefined}><slot /></main>
-    {wide ? (
-      <>
-        <a class="corner corner-bl" href={href('privacy')}><Icon name="shield" />Privacy</a>
-        <a class="corner corner-br" href={href('settings')}><Icon name="settings" />Settings</a>
-      </>
-    ) : (
+    {!wide && (
       <footer class="site-footer">
         <div class="inner">
           <dl class="footer-legend">
@@ -42,9 +37,5 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
         </div>
       </footer>
     )}
-    <script>
-      import { cycleTheme } from '../lib/prefs';
-      document.querySelector('[data-theme-toggle]')?.addEventListener('click', cycleTheme);
-    </script>
   </body>
 </html>

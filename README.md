@@ -6,11 +6,14 @@ Fast, privacy-first file tools. Static Astro site (Netlify) plus one small Cloud
 | --- | --- | --- |
 | Images | Remove background | Cloud (EU) |
 | Images | Editor (aspect ratio × pixel size, crop with overflow preview, compress, convert, optional EXIF keep), Convert & compress, Resize | Browser |
-| PDF | Merge, Split, Reorder/rotate/delete, Images to PDF, Optimize | Browser |
+| PDF | Merge, Split, Reorder/rotate/delete, Images to PDF, Optimize, lossy and black & white export | Browser |
 | Audio | Convert & trim: waveform, keep/remove selection, fades → MP3/WAV/OGG | Browser |
 | Audio | Export to M4A (AAC)/FLAC/Opus/MP3 with tags and cover art (ffmpeg) | Cloud (EU), optional |
-| Files | Create ZIP, Gzip/gunzip | Browser |
-| Text | JSON format/minify, JavaScript minify | Browser |
+| Files | Explorer for files and folders, bulk rename, ZIP/7z/gzip create and extract | Browser |
+| Text | Editor with tabs and split view, JSON format/minify, JavaScript minify, compare, Markdown preview | Browser |
+| GPX | Merge, trim, cut, split, clean up (pauses, spikes, privacy zones, simplify) and edit tracks point by point; keeps watch data (heart rate, cadence) | Browser |
+
+The home page opens each app full screen from its badge or card; inside an app, its name in the toolbar switches to another app, and Outputs and Settings sit at the top right. Further down, the start screen lists every tool in one card per app. Files created in any app are collected in the shared Outputs panel (memory only, until the page is left).
 
 ## Develop
 

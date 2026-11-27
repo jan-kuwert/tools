@@ -43,7 +43,20 @@ export const formatBytes = (n: number): string => {
 
 export const replaceExt = (name: string, ext: string): string => name.replace(/\.[^./]*$/, '') + '.' + ext;
 
+const published = new WeakSet<Blob>();
+
+/**
+ * Hand a created file to the home hub's shared Outputs panel (message `{ type: 'tools:output', name, blob }`).
+ * No-op outside the hub frame; each Blob is published once, so calling it again on download is safe.
+ */
+export const publishOutput = (blob: Blob, name: string): void => {
+  if (window === parent || published.has(blob)) return;
+  published.add(blob);
+  parent.postMessage({ type: 'tools:output', name, blob }, location.origin);
+};
+
 export const downloadBlob = (blob: Blob, name: string): void => {
+  publishOutput(blob, name);
   const url = URL.createObjectURL(blob);
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
   a.click();
@@ -185,6 +198,7 @@ export function createTool(opts: ToolOptions): { files: () => File[]; setFiles(f
   const renderResults = (items: Result[]) => {
     clearResults();
     const cards = items.map((r) => {
+      publishOutput(r.blob, r.name);
       const url = URL.createObjectURL(r.blob);
       urls.push(url);
       let delta = '';

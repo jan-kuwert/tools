@@ -1,7 +1,7 @@
 ---
 // Image editor markup. Behaviour: initImageEditor() in src/lib/editor.ts. Include at most once per page.
 import Icon from './Icon.astro';
-import ModeBadge from './ModeBadge.astro';
+import AppBar from './AppBar.astro';
 import ProgressDial from './ProgressDial.astro';
 import { choiceLabel, RATIOS, SCALES, SIZES } from '../lib/editor';
 
@@ -11,10 +11,9 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
 ---
 <section class="image-editor" data-image-editor data-empty aria-label="Image editor">
   <form class="ie-body" data-form>
-    <div class="ie-main">
       <div class="ie-tb" role="toolbar" aria-label="Image tools">
         <div class="ie-tb-group ie-title">
-          <Icon name="images" /><h2>Images</h2><ModeBadge mode="local" />
+          <AppBar part="switch" current="images" />
         </div>
         <div class="ie-tb-group">
           <label class="ie-tool" title="Add images">
@@ -53,7 +52,9 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
         <div class="ie-tb-group ie-tb-end ie-edit">
           <button class="ie-tool" type="button" data-needs-image data-remove-image aria-label="Remove this image from the editor" title="Remove this image"><Icon name="xmark" /></button>
         </div>
+        <div class="ie-tb-group ie-tb-actions"><AppBar part="actions" /></div>
       </div>
+    <div class="ie-main">
 
       <div class="ie-stage">
         <canvas data-canvas tabindex="0" role="application" aria-roledescription="image stage" aria-label="Image preview" aria-describedby="ie-help ie-crop"></canvas>
@@ -62,12 +63,40 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
           <button class="ie-tool" type="button" data-cut title="Cut out selection (Delete)"><Icon name="scissor" />Cut</button>
         </div>
         <label class="ie-empty" data-empty-state>
-          <svg class="ie-ghost" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-            <circle class="g-sun" cx="860" cy="190" r="74" />
-            <path class="g-far" d="M0 372 92 318l70 30 96-92 84 64 70-46 110 96 84-58 64 40 118-112 96 86 80-42 104 82 78-50 54 30v262H0Z" />
-            <path class="g-mid" d="M0 452 120 384l92 44 128-96 120 92 84-38 116 70 122-96 110 84 98-50 100 62 110-30v274H0Z" />
-            <path class="g-near" d="M0 520c150-46 290-40 430-24 160 18 270-36 430-40 140-4 230 28 340 18v126H0Z" />
-            <path class="g-near" d="M152 506l26-78 26 78Zm22 0h8v18h-8ZM214 500l20-60 20 60Zm16 0h8v14h-8ZM960 488l30-90 30 90Zm26 0h8v20h-8ZM1032 484l22-66 22 66Zm18 0h8v16h-8Z" />
+          <svg class="ie-ghost" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+            <defs>
+              <radialGradient id="ie-g-a"><stop offset="0" class="s-a" /><stop offset="1" class="s-a" stop-opacity="0" /></radialGradient>
+              <radialGradient id="ie-g-b"><stop offset="0" class="s-b" /><stop offset="1" class="s-b" stop-opacity="0" /></radialGradient>
+              <radialGradient id="ie-g-c"><stop offset="0" class="s-c" /><stop offset="1" class="s-c" stop-opacity="0" /></radialGradient>
+              <linearGradient id="ie-g-card" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="s-a" /><stop offset="1" class="s-b" /></linearGradient>
+              <pattern id="ie-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" /></pattern>
+              <radialGradient id="ie-fade" r="0.6"><stop offset="0.25" stop-color="#000" /><stop offset="1" stop-color="#fff" /></radialGradient>
+              <mask id="ie-edge"><rect width="1200" height="600" fill="url(#ie-fade)" /></mask>
+            </defs>
+            <g class="g-aurora">
+              <ellipse class="g-blob b1" cx="250" cy="160" rx="420" ry="300" fill="url(#ie-g-a)" />
+              <ellipse class="g-blob b2" cx="980" cy="470" rx="440" ry="320" fill="url(#ie-g-b)" />
+              <ellipse class="g-blob b3" cx="760" cy="80" rx="320" ry="220" fill="url(#ie-g-c)" />
+            </g>
+            <rect class="g-dots" width="1200" height="600" fill="url(#ie-dots)" mask="url(#ie-edge)" />
+            <g class="g-cards">
+              <g class="g-card c1" transform="rotate(-9 210 300)">
+                <rect x="90" y="200" width="240" height="180" rx="18" />
+                <rect class="g-fill" x="104" y="214" width="212" height="152" rx="10" />
+              </g>
+              <g class="g-card c2" transform="rotate(6 250 360)">
+                <rect x="150" y="270" width="200" height="150" rx="16" />
+                <rect class="g-fill" x="162" y="282" width="176" height="126" rx="9" />
+              </g>
+              <g class="g-card c3" transform="rotate(7 990 260)">
+                <rect x="870" y="160" width="240" height="200" rx="18" />
+                <rect class="g-fill" x="884" y="174" width="212" height="172" rx="10" />
+              </g>
+              <g class="g-crop" transform="rotate(7 990 260)">
+                <rect class="g-sel" x="912" y="200" width="150" height="112" rx="2" />
+                <path d="M896 214v-30h30M1048 184h30v30M1078 298v30h-30M926 328h-30v-30" />
+              </g>
+            </g>
           </svg>
           <span class="ie-empty-title">Drop images or choose files</span>
           <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
@@ -251,20 +280,18 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .image-editor .icon svg { width: 18px; height: 18px; }
   .ie-flip-v svg { transform: rotate(90deg); }
 
-  .ie-body { display: grid; grid-template-columns: minmax(0, 1fr) auto var(--ie-side, 340px); height: clamp(560px, calc(100dvh - 140px), 920px); }
-  .ie-main { display: flex; flex-direction: column; min-width: 0; background: var(--app-stage); color: var(--fg); container-type: inline-size; }
+  /* Toolbar across the full width; stage and settings sidebar below it. */
+  .ie-body { display: grid; grid-template-columns: minmax(0, 1fr) auto var(--ie-side, 340px); grid-template-rows: auto minmax(0, 1fr); height: clamp(560px, calc(100dvh - 140px), 920px); }
+  .ie-body > .ie-tb { grid-column: 1 / -1; container-type: inline-size; }
+  .ie-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-stage); color: var(--fg); }
 
   /* Toolbar: compact groups with dividers, 34 px controls. */
   .ie-tb { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem 0; padding: 0.4rem 0.5rem; background: var(--app-bar); border-bottom: 1px solid var(--app-line); }
   .ie-tb-group { display: flex; align-items: center; gap: 0.1rem; padding: 0 0.4rem; }
   .ie-tb-group + .ie-tb-group { border-left: 1px solid var(--app-line); }
   .ie-tb-end { margin-left: auto; }
-  /* Own title only when embedded in the hub; the standalone page has its h1. */
-  :root:not([data-embed]) .ie-title { display: none; }
-  :root:not([data-embed]) .ie-title + .ie-tb-group { border-left: 0; }
-  .ie-title { gap: 0.45rem; padding-left: 0.35rem; padding-right: 0.75rem; }
-  .ie-title h2 { margin: 0; font-size: 0.98rem; font-weight: 650; white-space: nowrap; }
-  .ie-title .mode::after { left: -6px; right: auto; }
+  .ie-title { padding-left: 0; }
+  .ie-tb-group.ie-tb-actions { border-left: 0; padding-left: 0; }
   .ie-tool {
     display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-width: 34px; height: 34px; padding: 0 0.5rem;
     border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer; white-space: nowrap;
@@ -275,7 +302,7 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .ie-tool[hidden] { display: none; }
   .ie-zoom input { width: 6rem; }
   /* Keep the toolbar on one line: short labels go first, the cloud action keeps its label longest. */
-  @container (max-width: 1240px) { .ie-short { display: none; } }
+  @container (max-width: 1320px) { .ie-short, .ie-tb .ab-label { display: none; } }
   .ie-cloud { position: relative; }
 
   .ie-stage { position: relative; flex: 1; min-height: 0; }
@@ -297,12 +324,27 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
   .ie-empty > :not(svg, input) { position: relative; }
   .ie-empty:hover, .image-editor.ie-over .ie-empty { border-color: var(--accent); background: var(--app-selected); }
   .ie-empty:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
-  /* Faint landscape behind the drop prompt; `slice` keeps it filling the area at any aspect ratio. */
-  .ie-ghost { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--fg); pointer-events: none; }
-  .ie-ghost .g-sun { opacity: 0.045; }
-  .ie-ghost .g-far { opacity: 0.035; }
-  .ie-ghost .g-mid { opacity: 0.055; }
-  .ie-ghost .g-near { opacity: 0.075; }
+  /* Decorative backdrop behind the drop prompt: soft accent glows, an edge-weighted dot grid and tilted image cards
+     with crop marks kept clear of the centre. `slice` keeps it filling the area at any aspect ratio. */
+  .ie-ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .ie-ghost .s-a { stop-color: var(--accent); }
+  .ie-ghost .s-b { stop-color: color-mix(in oklch, var(--accent), light-dark(#ec4899, #f472b6) 55%); }
+  .ie-ghost .s-c { stop-color: color-mix(in oklch, var(--accent), light-dark(#06b6d4, #22d3ee) 60%); }
+  .ie-ghost .g-aurora { opacity: 0.2; }
+  .ie-ghost .g-dots { fill: var(--fg); opacity: 0.15; }
+  .ie-ghost .g-card > rect:first-child { fill: var(--surface); fill-opacity: 0.55; stroke: var(--fg); stroke-opacity: 0.1; stroke-width: 1.5; }
+  .ie-ghost .g-card .g-fill { fill: url(#ie-g-card); opacity: 0.14; }
+  .ie-ghost .g-card.c2 > rect:first-child { fill-opacity: 0.75; }
+  .ie-ghost .g-crop { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; opacity: 0.4; }
+  .ie-ghost .g-sel { stroke-width: 1.5; stroke-dasharray: 6 6; }
+  @media (prefers-reduced-motion: no-preference) {
+    .ie-ghost .g-blob { transform-box: fill-box; transform-origin: center; animation: ie-drift 26s ease-in-out infinite alternate; }
+    .ie-ghost .g-blob.b2 { animation-duration: 32s; animation-direction: alternate-reverse; }
+    .ie-ghost .g-blob.b3 { animation-duration: 21s; }
+    .ie-ghost .g-sel { animation: ie-march 1.6s linear infinite; }
+  }
+  @keyframes ie-drift { to { transform: translate(60px, 30px) scale(1.12); } }
+  @keyframes ie-march { to { stroke-dashoffset: -12; } }
   .ie-empty-title { font-size: 1.15rem; font-weight: 650; }
   .ie-empty-hint { font-size: 0.85rem; color: var(--muted); }
   .ie-empty-mode { font-size: 0.9rem; font-weight: 600; color: var(--accent); }

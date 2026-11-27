@@ -209,12 +209,14 @@ async function create(req: Extract<SzRequest, { op: 'create' }>): Promise<SzResp
   FS.mount(sz!.WORKERFS, { blobs: req.files.map((f) => ({ name: f.name, data: f.blob })) }, IN);
   FS.chdir(IN);
   const top = [...new Set(req.files.map((f) => f.name.split('/')[0]))];
-  const args = ['a', '-t7z', `-mx${req.level}`, '-bsp1', '-bb0', '-y', '-spd'];
-  if (req.password) args.push(`-p${req.password}`, '-mhe=on');
+  const args = ['a', `-t${req.format}`, `-mx${req.level}`, '-bsp1', '-bb0', '-y', '-spd'];
+  // 7z also encrypts the file names; ZIP gets AES-256 instead of the weak legacy ZipCrypto.
+  if (req.password) args.push(`-p${req.password}`, req.format === '7z' ? '-mhe=on' : '-mem=AES256');
   // -spd: no wildcard matching; "--": everything after it is a file name, never a switch.
-  const rc = run([...args, `${JOB}/out.7z`, '--', ...top]);
+  const out = `${JOB}/out.${req.format}`;
+  const rc = run([...args, out, '--', ...top]);
   if (rc !== 0) return explain();
-  const data = FS.readFile(`${JOB}/out.7z`).buffer as ArrayBuffer;
+  const data = FS.readFile(out).buffer as ArrayBuffer;
   return { type: 'created', data };
 }
 

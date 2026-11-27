@@ -1,5 +1,5 @@
 export type Mode = 'local' | 'cloud';
-export type Category = 'images' | 'pdf' | 'audio' | 'files';
+export type Category = 'images' | 'pdf' | 'audio' | 'files' | 'text' | 'gpx';
 
 export interface Tool {
   slug: string; // path below base, e.g. "images/convert"
@@ -25,7 +25,9 @@ export const categories: { id: Category; label: string; blurb: string; app: stri
   { id: 'images', label: 'Images', blurb: 'Edit, resize, convert and compress photos and graphics.', app: 'images/editor' },
   { id: 'pdf', label: 'PDF', blurb: 'View, merge, split, reorder and optimize PDF documents.', app: 'pdf' },
   { id: 'audio', label: 'Audio', blurb: 'Trim, convert and shrink recordings and music.', app: 'audio/convert' },
-  { id: 'files', label: 'Files & text', blurb: 'Archives, compression, JSON and JavaScript.', app: 'files' },
+  { id: 'files', label: 'Files', blurb: 'Explore, bulk rename, zip and extract files and folders.', app: 'files' },
+  { id: 'text', label: 'Text', blurb: 'Edit, format, minify and compare JSON, JavaScript and Markdown.', app: 'text' },
+  { id: 'gpx', label: 'GPX', blurb: 'Merge, trim, clean up and edit GPS tracks from runs, rides and watches.', app: 'gpx' },
 ];
 
 export const tools: Tool[] = [
@@ -161,7 +163,7 @@ export const tools: Tool[] = [
   {
     slug: 'text/json',
     appMode: 'json',
-    category: 'files',
+    category: 'text',
     title: 'Format & minify JSON',
     short: 'JSON',
     summary: 'Validate, pretty-print or compact JSON without changing numbers.',
@@ -171,7 +173,7 @@ export const tools: Tool[] = [
   {
     slug: 'text/js-minify',
     appMode: 'js',
-    category: 'files',
+    category: 'text',
     title: 'Minify JavaScript',
     short: 'JavaScript',
     summary: 'Parser-based minification with Terser.',
@@ -181,11 +183,25 @@ export const tools: Tool[] = [
   ...[
     ['extract', 'Extract archives', 'Unpack ZIP, 7z, RAR, tar, gz, xz and bz2 files.'],
     ['7z', 'Create 7z archive', '7-Zip archives with optional AES-256 password.'],
-    ['compare', 'Compare text', 'Side-by-side diff with highlighted changes; JSON-aware.'],
-    ['markdown', 'Markdown preview', 'Write or open Markdown and see it rendered.'],
+    ['rename', 'Bulk rename files', 'Rename many files at once with a pattern, numbering and case rules.'],
   ].map(([m, title, summary]): Tool => ({
     slug: `files/${m}`, appMode: m, page: false, category: 'files', title, short: title, summary, mode: 'local',
     limits: 'Runs in your browser',
+  })),
+  ...[
+    ['compare', 'Compare text', 'Side-by-side diff with highlighted changes; JSON-aware.'],
+    ['markdown', 'Markdown preview', 'Write or open Markdown and see it rendered.'],
+  ].map(([m, title, summary]): Tool => ({
+    slug: `text/${m}`, appMode: m, page: false, category: 'text', title, short: title, summary, mode: 'local',
+    limits: 'Runs in your browser',
+  })),
+  ...[
+    ['edit', 'Edit GPX tracks', 'Trim, cut, split and clean up tracks point by point on the map and elevation profile.'],
+    ['merge', 'Merge GPX files', 'Join several activities or track parts into one GPX, in time order.'],
+    ['clean', 'Clean up GPS tracks', 'Remove pauses, GPS spikes and private start/end zones; simplify.'],
+  ].map(([m, title, summary]): Tool => ({
+    slug: `gpx/${m}`, appMode: m, page: false, category: 'gpx', title, short: title, summary, mode: 'local',
+    limits: 'GPX 1.0/1.1 files · up to 50 MB each',
   })),
   ...[
     ['crop', 'Crop images', 'Crop to a ratio or a free selection.'],

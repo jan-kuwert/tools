@@ -1,0 +1,691 @@
+---
+// Text app: an editor-style workspace for JSON, JavaScript, Markdown and plain text. Behaviour: src/lib/text-app.ts.
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import AppBar from '../../components/AppBar.astro';
+import ModeBadge from '../../components/ModeBadge.astro';
+import { categories, href } from '../../tools';
+
+const cat = categories.find((c) => c.id === 'text')!;
+// Cloned into client-built rows (explorer, tabs, output).
+const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'download', 'trash', 'xmark', 'warning', 'check', 'compare'] as const;
+
+// Decorative, faint "file" behind the empty editor: a small sample tokenised at build time.
+const sample = `// text: everything stays in your browser
+import { format, minify } from './json';
+import { render } from './markdown';
+
+export interface Doc {
+  name: string;
+  text: string;
+  size: number;
+}
+
+const MAX_TEXT = 50 * 1024 * 1024; // 50 MB
+
+export async function open(files: File[]): Promise<Doc[]> {
+  const docs: Doc[] = [];
+  for (const file of files) {
+    if (file.size > MAX_TEXT) continue;
+    docs.push({ name: file.name, text: await file.text(), size: file.size });
+  }
+  return docs;
+}
+
+export function pretty(doc: Doc, indent = 2): string {
+  // big integers keep every digit
+  return format(doc.text, ' '.repeat(indent));
+}
+
+export function preview(doc: Doc): string {
+  return render(doc.text);
+}
+
+/* drop a file, paste text, or start a new one */
+const settings = {
+  "theme": "system",
+  "indent": 2,
+  "languages": ["json", "js", "markdown"],
+  "highlight": true
+};
+
+export default { open, pretty, preview, settings };`;
+const KW = /^(import|from|export|interface|const|async|function|for|of|if|continue|await|return|new|default|let)$/;
+const ghost = sample.split('\n').map((line) =>
+  [...line.matchAll(/(\/\/.*|\/\*.*\*\/)|('[^']*'|"[^"]*")|(\b\d[\d_]*\b)|([A-Za-z_$][\w$]*)|(\s+|.)/g)].map((m): [string, string] => {
+    if (m[1]) return ['comment', m[1]];
+    if (m[2]) return ['string', m[2]];
+    if (m[3]) return ['number', m[3]];
+    if (m[4]) return [KW.test(m[4]) ? 'keyword' : /^[A-Z]/.test(m[4]) ? 'title' : '', m[4]];
+    return ['', m[5]];
+  }),
+);
+---
+<Base title={`${cat.label} · Tools`} description={cat.blurb}>
+  <div class="tool-shell" data-wide>
+    <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#text'}>{cat.label}</a></div>
+    <div class="tool-head">
+      <h1>{cat.label}</h1>
+      <ModeBadge mode="local" />
+    </div>
+    <p class="tool-summary">{cat.blurb}</p>
+    <div class="privacy-note privacy-local" role="note">
+      <Icon name="lock" />
+      <p><strong>Runs in your browser; nothing is uploaded.</strong> Formatting, minifying and comparing all happen on this device. <a href={href('privacy')}>How we check</a></p>
+    </div>
+
+    <section class="fx" data-fx aria-label="Text">
+      <header class="fx-top">
+        <AppBar part="switch" current="text" />
+        <button class="fx-ib fx-side-toggle" type="button" data-toggle-explorer aria-expanded="true" aria-controls="fx-explorer" aria-label="Explorer" title="Show or hide the Explorer"><Icon name="sidebar" /></button>
+        <span class="fx-msg" data-msg role="status" aria-live="polite"></span>
+        <progress data-progress max="1" hidden aria-label="Progress"></progress>
+        <div class="fx-top-actions">
+          <button class="fx-btn" type="button" data-new title="New text document"><Icon name="new-file" /><span>New</span></button>
+          <button class="fx-btn" type="button" data-open title="Open files"><Icon name="folder" /><span>Open</span></button>
+          <button class="fx-btn" type="button" data-paste title="Paste text from the clipboard"><Icon name="paste" /><span>Paste</span></button>
+          <button class="fx-ib fx-side-toggle fx-tools-toggle" type="button" data-toggle-tools aria-expanded="true" aria-controls="fx-tools" aria-label="Tools" title="Show or hide the Tools"><Icon name="sidebar" /></button>
+          <AppBar part="actions" />
+        </div>
+        <input type="file" multiple data-input hidden />
+      </header>
+
+      <div class="fx-body">
+        <aside class="fx-side fx-explorer" id="fx-explorer" aria-label="Explorer">
+          <div class="pane-resizer fx-resize-side" role="separator" aria-orientation="vertical" aria-label="Resize Explorer" aria-controls="fx-explorer" tabindex="0" data-resize-side title="Drag or use arrow keys to resize; double-click to reset"></div>
+          <div class="fx-pane-head">
+            <input type="checkbox" data-select-all aria-label="Select all files" />
+            <span class="fx-pane-title">Explorer</span>
+            <span class="fx-note" data-count></span>
+          </div>
+          <ul class="fx-files" data-files aria-label="Files"></ul>
+          <p class="fx-files-empty" data-files-empty>No files yet. Open, drop or paste files.</p>
+          <div class="fx-selbar" data-selbar hidden>
+            <span data-sel-count></span>
+            <button class="fx-btn" type="button" data-sel-compare hidden>Compare</button>
+            <button class="fx-ib" type="button" data-sel-clear aria-label="Clear selection" title="Clear selection"><Icon name="xmark" /></button>
+          </div>
+        </aside>
+
+        <div class="fx-main">
+          <div class="fx-split" data-split-area>
+            {[0, 1].map((i) => (
+              <section class={`fx-pane fx-pane-${i}`} data-pane={i} data-active={i === 0 ? '' : undefined} hidden={i === 1} aria-label={i === 0 ? 'Editor' : 'Second editor'}>
+                <div class="fx-tabbar">
+                  <div class="fx-tabs" role="tablist" aria-label="Open documents" data-tabs></div>
+                  <button class="fx-ib fx-tab-new" type="button" data-tab-new aria-label="New file" title="New file (Ctrl/Cmd+Alt+N)"><Icon name="plus" /></button>
+                  <span class="fx-grow"></span>
+                  <div class="fx-doc-info">
+                    <span data-sb-hl></span>
+                    <span data-sb-pos></span>
+                    <span data-sb-size></span>
+                    <button class="fx-sb-btn" type="button" data-sb-type title="File type (change it in Tools)" hidden></button>
+                  </div>
+                  <div class="fx-doc-actions">
+                    <button class="fx-ib" type="button" data-close aria-label="Close tab" title="Close tab (Alt+W)"><Icon name="xmark" /></button>
+                    {i === 0 ? (
+                      <span class="fx-split-btns">
+                        <button class="fx-ib" type="button" data-split-btn="right" aria-pressed="false" aria-label="Split right" title="Split right: two files side by side">
+                          <svg class="fx-glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M12 4.5v15" /></svg>
+                        </button>
+                        <button class="fx-ib" type="button" data-split-btn="down" aria-pressed="false" aria-label="Split down" title="Split down: two files stacked">
+                          <svg class="fx-glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M3.5 12h17" /></svg>
+                        </button>
+                      </span>
+                    ) : (
+                      <button class="fx-ib" type="button" data-split-close aria-label="Close split" title="Close split">
+                        <svg class="fx-glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9.5 9.5l5 5M14.5 9.5l-5 5" /></svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div class="fx-editor" id={`fx-editor-${i}`} role="tabpanel" data-editor>
+                  <div class="fx-code" data-code hidden>
+                    <div class="fx-curline" data-curline aria-hidden="true"></div>
+                    <div class="fx-gutter" aria-hidden="true"><div data-gutter></div></div>
+                    <div class="fx-ta">
+                      <pre class="fx-hl" aria-hidden="true"><code data-hl></code></pre>
+                      <textarea data-text spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="Document text" aria-describedby="fx-keys"></textarea>
+                    </div>
+                  </div>
+                  <article class="fx-md" data-md tabindex="0" aria-label="Markdown preview" hidden></article>
+                  {i === 0 && (
+                    <section class="fx-diff" data-diff hidden aria-label="Comparison">
+                      <div class="fx-diff-head">
+                        <span class="fx-diff-names" data-diff-names></span>
+                        <span class="fx-diff-sum" data-diff-sum></span>
+                        <span class="fx-grow"></span>
+                        <span class="fx-note" data-diff-pos></span>
+                        <button class="fx-ib" type="button" data-diff-prev aria-label="Previous change (P or Alt+Up)" title="Previous change (P)"><Icon name="arrow-up" /></button>
+                        <button class="fx-ib" type="button" data-diff-next aria-label="Next change (N or Alt+Down)" title="Next change (N)"><Icon name="arrow-down" /></button>
+                      </div>
+                      <p class="fx-diff-notice" data-diff-notice hidden></p>
+                      <div class="fx-diff-body" data-diff-body tabindex="0" role="region" aria-label="Differences. N and P move between changes."></div>
+                    </section>
+                  )}
+                  <div class="fx-hex" data-hex hidden tabindex="0" role="region" aria-label="File preview">
+                    <dl class="fx-info" data-info></dl>
+                    <pre data-hexdump></pre>
+                  </div>
+                  {i === 0 && (
+                    <div class="fx-empty" data-empty-state>
+                      <div class="fx-bg-doc" aria-hidden="true">
+                        <div class="fx-bg-gutter">{Array.from({ length: 60 }, (_, n) => <span>{n + 1}</span>)}</div>
+                        <pre class="fx-bg-code">{ghost.map((line) => <>{line.map(([cls, text]) => (cls ? <span class={`hljs-${cls}`}>{text}</span> : text))}{'\n'}</>)}</pre>
+                      </div>
+                      <div class="fx-drop-card">
+                        <svg class="fx-drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 30H11a7 7 0 0 1-1-13.9A11 11 0 0 1 31.4 13 9 9 0 1 1 36 30h-2" /><path d="M24 22v16M18 28l6-6 6 6" /></svg>
+                        <p class="fx-empty-title">Drop files here</p>
+                        <button class="btn btn-primary fx-new-big" type="button" data-new><Icon name="new-file" />New file</button>
+                        <div class="fx-empty-actions">
+                          <button class="btn" type="button" data-open><Icon name="upload" />Choose files</button>
+                          <button class="btn" type="button" data-paste><Icon name="paste" />Paste from clipboard</button>
+                        </div>
+                        <p class="fx-empty-hint">Text up to 50 MB · JavaScript up to 10 MB · drop folders to add every file inside.</p>
+                        <p class="fx-empty-hint" id="fx-keys">Tab inserts two spaces; press Esc, then Tab, to leave the editor. Ctrl/Cmd+S downloads, Ctrl/Cmd+Shift+F formats JSON, Alt+W closes the tab, Ctrl/Cmd+Alt+N opens a new file.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            ))}
+            <div class="pane-resizer fx-split-handle" role="separator" aria-orientation="vertical" aria-label="Resize split" tabindex="0" data-split-handle="right" hidden title="Drag or use arrow keys to resize; double-click to reset"></div>
+            <div class="pane-resizer fx-split-handle" role="separator" aria-orientation="horizontal" aria-label="Resize split" tabindex="0" data-split-handle="down" hidden title="Drag or use arrow keys to resize; double-click to reset"></div>
+            <button class="fx-seam" type="button" data-seam-compare aria-label="Compare these two files" title="Compare these two files" hidden><Icon name="compare" /><span>Compare</span></button>
+          </div>
+
+          <section class="fx-panel" aria-labelledby="fx-out-title" data-out-panel hidden>
+            <div class="pane-resizer fx-resize-out" role="separator" aria-orientation="horizontal" aria-label="Resize Output panel" aria-controls="fx-out" tabindex="0" data-resize-out hidden></div>
+            <div class="fx-panel-head">
+              <button class="fx-panel-toggle" type="button" aria-expanded="false" aria-controls="fx-out" data-out-toggle>
+                <span class="fx-chev" aria-hidden="true"></span><span id="fx-out-title">Output</span><span class="fx-badge" data-problems hidden></span>
+              </button>
+              <button class="fx-ib" type="button" data-out-clear aria-label="Clear output" title="Clear output"><Icon name="trash" /></button>
+            </div>
+            <ol class="fx-out" id="fx-out" data-out hidden></ol>
+          </section>
+        </div>
+
+        <aside class="fx-side fx-toolbox" id="fx-tools" aria-label="Tools">
+          <div class="pane-resizer fx-resize-tools" role="separator" aria-orientation="vertical" aria-label="Resize Tools" aria-controls="fx-tools" tabindex="0" data-resize-tools title="Drag or use arrow keys to resize; double-click to reset"></div>
+          <div class="fx-pane-head"><span class="fx-pane-title">Tools</span></div>
+          <div class="fx-tools-scroll">
+            <div class="fx-sec">
+              <label class="fx-stack"><span class="fx-label">File type</span><select data-type disabled></select></label>
+              <p class="fx-side-note" data-type-note></p>
+            </div>
+
+            <section class="fx-sec" data-panel="json" aria-labelledby="fx-h-json" hidden>
+              <h2 class="fx-sec-title" id="fx-h-json">JSON</h2>
+              <div class="fx-line">
+                <span class="fx-label" id="fx-indent">Indent</span>
+                <div class="segmented fx-seg" role="radiogroup" aria-labelledby="fx-indent">
+                  <label><input type="radio" name="indent" value="2" checked /><span>2</span></label>
+                  <label><input type="radio" name="indent" value="4" /><span>4</span></label>
+                  <label><input type="radio" name="indent" value="tab" /><span>Tab</span></label>
+                </div>
+              </div>
+              <div class="fx-btns">
+                <button class="fx-btn fx-primary" type="button" data-act="format" title="Format JSON (Ctrl/Cmd+Shift+F)"><Icon name="braces" /><span>Format</span></button>
+                <button class="fx-btn" type="button" data-act="minify-json">Minify</button>
+                <button class="fx-btn" type="button" data-act="validate"><Icon name="check" /><span>Validate</span></button>
+              </div>
+              <p class="fx-json-info"><button class="fx-sb-btn" type="button" data-json-state></button><span data-json-size></span></p>
+            </section>
+
+            <section class="fx-sec" data-panel="javascript" aria-labelledby="fx-h-js" hidden>
+              <h2 class="fx-sec-title" id="fx-h-js">JavaScript</h2>
+              <label class="fx-check"><input type="checkbox" name="mangle" checked /> Mangle names</label>
+              <label class="fx-check"><input type="checkbox" name="keepConsole" /> Keep console</label>
+              <label class="fx-check"><input type="checkbox" name="module" /> ES module</label>
+              <div class="fx-btns">
+                <button class="fx-btn fx-primary" type="button" data-act="minify-js"><Icon name="code" /><span>Minify</span></button>
+              </div>
+              <p class="fx-side-note">The result opens as a new file; Output shows the size saved and a gzip estimate. Up to 10 MB.</p>
+            </section>
+
+            <section class="fx-sec" data-panel="markdown" aria-labelledby="fx-h-md" hidden>
+              <h2 class="fx-sec-title" id="fx-h-md">Markdown</h2>
+              <div class="fx-line">
+                <span class="fx-label" id="fx-mdview">View</span>
+                <div class="segmented fx-seg" role="radiogroup" aria-labelledby="fx-mdview">
+                  <label><input type="radio" name="mdView" value="edit" checked /><span>Editor</span></label>
+                  <label><input type="radio" name="mdView" value="split" /><span>Split</span></label>
+                  <label><input type="radio" name="mdView" value="preview" /><span>Preview</span></label>
+                </div>
+              </div>
+              <div class="fx-btns">
+                <button class="fx-btn" type="button" data-md-html><Icon name="code" /><span>Download as HTML</span></button>
+              </div>
+            </section>
+
+            <section class="fx-sec" data-panel="text" aria-labelledby="fx-h-text" hidden>
+              <h2 class="fx-sec-title" id="fx-h-text">Text</h2>
+              <dl class="fx-counts">
+                <div><dt>Words</dt><dd data-count-words></dd></div>
+                <div><dt>Lines</dt><dd data-count-lines></dd></div>
+                <div><dt>Characters</dt><dd data-count-chars></dd></div>
+              </dl>
+            </section>
+
+            <section class="fx-sec" aria-labelledby="fx-h-doc">
+              <h2 class="fx-sec-title" id="fx-h-doc">Document</h2>
+              <div class="fx-btns">
+                <button class="fx-btn" type="button" data-copy><Icon name="copy" /><span>Copy</span></button>
+                <button class="fx-btn" type="button" data-download title="Download (Ctrl/Cmd+S)"><Icon name="download" /><span>Download</span></button>
+              </div>
+            </section>
+
+            <details class="fx-sec fx-cmp" data-compare-sec>
+              <summary class="fx-sec-title"><span class="fx-chev" aria-hidden="true"></span>Compare</summary>
+              <label class="fx-stack"><span class="fx-label">Left</span><select name="cmpA"></select></label>
+              <label class="fx-stack"><span class="fx-label">Right</span><select name="cmpB"></select></label>
+              <label class="fx-check"><input type="checkbox" name="ignoreWs" /> Ignore whitespace</label>
+              <label class="fx-check" data-norm-json hidden><input type="checkbox" name="normJson" /> Normalize JSON</label>
+              <div class="fx-btns">
+                <button class="fx-btn fx-primary" type="button" data-act="compare"><Icon name="compare" /><span>Compare</span></button>
+                <button class="fx-btn" type="button" data-act="compare-clip"><Icon name="paste" /><span>Compare with clipboard</span></button>
+              </div>
+            </details>
+          </div>
+        </aside>
+      </div>
+
+      <dialog class="fx-confirm" data-del-dialog aria-labelledby="fx-del-title" aria-describedby="fx-del-text">
+        <h2 id="fx-del-title" data-del-title></h2>
+        <p id="fx-del-text">Its contents are lost unless you downloaded it.</p>
+        <form method="dialog">
+          <button class="btn" value="cancel" autofocus>Cancel</button>
+          <button class="btn fx-danger" value="delete">Delete</button>
+        </form>
+      </dialog>
+
+      <template data-icons>
+        {rowIcons.map((n) => <span data-i={n}><Icon name={n} /></span>)}
+      </template>
+    </section>
+  </div>
+</Base>
+
+<style is:global>
+  .fx {
+    --fx-w: min(100vw - 2rem, 1280px);
+    --fx-line: 20px;
+    --fx-hover: var(--app-hover);
+    --fx-sel: var(--app-selected);
+    --fx-add-bg: light-dark(#e7f5ec, #13281b);
+    --fx-add-mark: light-dark(#b4e5c3, #1f5433);
+    --fx-add-fg: light-dark(#0f6b2f, #6fdc8c);
+    --fx-del-bg: light-dark(#fdeeed, #2e1717);
+    --fx-del-mark: light-dark(#f6c2bd, #6b2626);
+    --fx-del-fg: light-dark(#b42318, #ff8a80);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: var(--fx-w);
+    height: clamp(560px, calc(100dvh - 140px), 920px);
+    margin: 1.5rem calc((100% - var(--fx-w)) / 2) 0;
+    background: var(--surface);
+    border: 1px solid var(--app-line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    font-size: 0.875rem;
+    position: relative;
+  }
+  .fx .icon svg { width: 17px; height: 17px; }
+  /* Dragging files over open documents: the same dashed drop border as the empty state, over the whole editor area. */
+  .fx.fx-over:not(:has(.fx-empty:not([hidden]))) .fx-split::after {
+    content: ''; position: absolute; inset: 1rem; z-index: 30; pointer-events: none; border: 2px dashed var(--accent); border-radius: 14px;
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  /* Buttons */
+  .fx-btn, .fx-ib, .fx-sb-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; flex: none;
+    border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--fg);
+    font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .fx-btn { height: 30px; padding: 0 0.65rem; }
+  .fx-ib { width: 30px; height: 30px; color: var(--muted); }
+  .fx-btn:hover:not(:disabled), .fx-ib:hover:not(:disabled) { background: var(--fx-hover); color: var(--fg); }
+  .fx-btn:disabled, .fx-ib:disabled { opacity: 0.4; cursor: default; }
+  .fx-primary { background: var(--accent); color: var(--accent-fg); }
+  .fx-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); color: var(--accent-fg); }
+  .fx :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
+
+  /* Top bar */
+  .fx-top { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem 0.4rem 0.75rem; background: var(--app-bar); border-bottom: 1px solid var(--app-line); }
+  .fx .segmented span { padding: 0.2rem 0.65rem; border-radius: 7px; font-size: 0.84rem; }
+  .fx-top-actions { display: flex; align-items: center; gap: 0.15rem; margin-left: 0.5rem; }
+  /* Last status message, muted, between the switcher and the actions. */
+  .fx-top .fx-msg { margin-left: auto; font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+  .fx-top progress { width: 80px; height: 6px; accent-color: var(--accent); }
+  .fx-side-toggle[aria-expanded='true'] { background: var(--fx-hover); color: var(--fg); }
+  /* The Tools sidebar sits on the right: mirror the sidebar glyph. */
+  .fx-tools-toggle { margin-left: 0.25rem; }
+  .fx-tools-toggle .icon { transform: scaleX(-1); }
+  /* Only the Explorer collapses; the Tools toggle exists for the narrow-screen drawer. */
+  @media (min-width: 861px) { .fx-tools-toggle { display: none; } }
+  .fx-label { color: var(--muted); font-size: 0.75rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; }
+  .fx-grow { flex: 1; }
+  .fx-note { color: var(--muted); font-size: 0.82rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-check { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .fx-check[hidden] { display: none; }
+  .fx-check input, .fx-pane-head input, .fx-row input { accent-color: var(--accent); margin: 0; }
+
+  /* Explorer (left), editor, Tools (right); both sidebars sit below the top bar. */
+  .fx-body { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 0; position: relative; }
+  .fx-side { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--app-side); }
+  .fx-side[hidden] { display: none; }
+  .fx-explorer { grid-column: 1; width: var(--fx-sw, 260px); border-right: 1px solid var(--app-line); }
+  .fx-main { grid-column: 2; }
+  .fx-toolbox { grid-column: 3; width: var(--fx-tw, 280px); border-left: 1px solid var(--app-line); }
+
+  /* Shared .pane-resizer handles, positioned on the pane edges here. */
+  .fx .fx-resize-side { position: absolute; top: 0; bottom: 0; right: -3px; z-index: 2; margin: 0; }
+  .fx .fx-resize-tools { position: absolute; top: 0; bottom: 0; left: -3px; z-index: 2; margin: 0; }
+  .fx-panel { position: relative; }
+  .fx .fx-resize-out { position: absolute; left: 0; right: 0; top: -3px; margin: 0; }
+
+  /* Tools sidebar: File type on top, the active document's tools, then Document and Compare. */
+  .fx-tools-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 0.75rem 1rem; }
+  .fx-sec { display: grid; gap: 0.55rem; padding: 0.75rem 0; border-top: 1px solid var(--app-line); }
+  .fx-sec:first-child { border-top: 0; padding-top: 0.25rem; }
+  .fx-sec[hidden] { display: none; }
+  .fx-sec-title { margin: 0; font-size: 0.8rem; font-weight: 700; }
+  .fx-cmp > summary { display: flex; align-items: center; gap: 0.45rem; cursor: pointer; list-style: none; }
+  .fx-cmp > summary::-webkit-details-marker { display: none; }
+  .fx-cmp[open] > summary { margin-bottom: 0.1rem; }
+  .fx-cmp[open] > summary > .fx-chev { transform: rotate(45deg); }
+  .fx-stack { display: grid; gap: 0.3rem; min-width: 0; }
+  .fx-stack select { width: 100%; height: 32px; padding: 0 0.5rem; border-radius: 7px; font-size: 0.86rem; }
+  .fx-line { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+  .fx-btns { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .fx-btns .fx-btn:not(.fx-primary) { border-color: var(--app-line); background: var(--surface); }
+  .fx-btns .fx-primary { flex: 1 1 auto; }
+  .fx-side-note { margin: 0; color: var(--muted); font-size: 0.78rem; }
+  .fx-side-note:empty { display: none; }
+  .fx-json-info { display: flex; align-items: center; gap: 0.5rem; margin: 0; color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+  .fx-json-info .fx-sb-btn { height: 24px; margin-left: -0.35rem; }
+  .fx-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; margin: 0; }
+  .fx-counts > div { padding: 0.4rem 0.5rem; border-radius: 8px; background: var(--surface); border: 1px solid var(--app-line); min-width: 0; }
+  .fx-counts dt { color: var(--muted); font-size: 0.7rem; }
+  .fx-counts dd { margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+  .fx-pane-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.75rem 0.4rem; }
+  .fx-pane-title { margin: 0; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .fx-pane-head .fx-note { margin-left: auto; font-size: 0.75rem; }
+  .fx-files { position: relative; list-style: none; margin: 0; padding: 0 0.35rem 0.35rem; overflow-y: auto; flex: 1; min-height: 3rem; }
+  .fx-files:empty { display: none; }
+  .fx-files-empty { flex: 1; margin: 0; padding: 0.4rem 0.75rem; color: var(--muted); font-size: 0.8rem; }
+  .fx-row { display: flex; align-items: center; gap: 0.15rem; padding-left: 0.4rem; border-radius: 6px; }
+  .fx-row:hover { background: var(--fx-hover); }
+  .fx-row[data-active] { background: var(--fx-sel); }
+  .fx-open { display: flex; align-items: center; gap: 0.45rem; flex: 1; min-width: 0; height: 28px; padding: 0 0.3rem; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .fx-open .icon { color: var(--muted); }
+  .fx-row[data-kind='json'] .fx-open .icon { color: light-dark(#a16207, #f2c14e); }
+  .fx-row:is([data-kind='javascript'], [data-kind='typescript']) .fx-open .icon { color: light-dark(#0f766e, #4fd1c5); }
+  .fx-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-dir { color: var(--muted); }
+  .fx-size { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+  .fx-acts { display: none; }
+  .fx-row:is(:hover, :focus-within) .fx-acts { display: flex; }
+  .fx-row:is(:hover, :focus-within) .fx-size { display: none; }
+  .fx-acts .fx-ib { width: 24px; height: 24px; }
+  .fx-acts .fx-ib .icon svg { width: 15px; height: 15px; }
+  .fx-rename { flex: 1; min-width: 0; height: 26px; padding: 0 0.4rem; border-radius: 5px; font-size: 0.85rem; }
+  .fx-selbar { display: flex; align-items: center; gap: 0.35rem; margin: 0 0.35rem 0.4rem; padding: 0.2rem 0.2rem 0.2rem 0.6rem; border-radius: 8px; background: var(--fx-sel); font-size: 0.8rem; }
+  .fx-selbar > span { margin-right: auto; color: var(--muted); }
+  .fx-selbar .fx-btn { height: 26px; padding: 0 0.55rem; background: var(--surface); border-color: var(--border); }
+
+  .fx-confirm h2 { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+  .fx-confirm p { margin: 0; color: var(--muted); }
+  .fx-danger { background: var(--error); border-color: var(--error); color: var(--surface); }
+  .fx-danger:hover { background: color-mix(in srgb, var(--error) 88%, var(--fg)); }
+
+  .fx-main { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+
+  /* Editor panes: one, or two side by side ("right") or stacked ("down") around a draggable divider. */
+  .fx-split { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .fx-split[data-split='right'] { grid-template-columns: var(--fx-split, 50%) auto minmax(0, 1fr); }
+  .fx-split[data-split='down'] { grid-template-rows: var(--fx-split, 50%) auto minmax(0, 1fr); }
+  .fx-split[data-split='right'] .fx-pane-1 { grid-column: 3; grid-row: 1; border-left: 1px solid var(--app-line); }
+  .fx-split[data-split='down'] .fx-pane-1 { grid-row: 3; grid-column: 1; border-top: 1px solid var(--app-line); }
+  .fx-split[data-split='right'] [data-split-handle='right'] { grid-column: 2; grid-row: 1; }
+  .fx-split[data-split='down'] [data-split-handle='down'] { grid-row: 2; grid-column: 1; }
+  .fx-pane { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .fx-pane[hidden] { display: none; }
+  /* The inactive pane keeps its content but quiets its chrome. */
+  .fx-split[data-split] .fx-pane:not([data-active]) .fx-tab[aria-selected='true'] { box-shadow: inset 0 2px 0 color-mix(in srgb, var(--muted) 45%, transparent); }
+  .fx-split[data-split] .fx-pane:not([data-active]) .fx-doc-info { display: none; }
+  .fx-glyph { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+  .fx-split-btns { display: contents; }
+  .fx-ib[aria-pressed='true'] { background: var(--fx-sel); color: var(--accent); }
+  .fx-seam {
+    position: absolute; z-index: 7; display: inline-flex; align-items: center; gap: 0.35rem; height: 28px; padding: 0 0.7rem;
+    border: 1px solid var(--app-line); border-radius: 999px; background: var(--surface); color: var(--fg); box-shadow: var(--shadow);
+    font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; transform: translate(-50%, -50%);
+  }
+  .fx-seam[hidden] { display: none; }
+  .fx-seam:is(:hover, :focus-visible) { border-color: var(--accent); color: var(--accent); }
+  .fx-seam .icon svg { width: 15px; height: 15px; }
+  .fx-split[data-split='right'] .fx-seam { left: var(--fx-split, 50%); top: 50%; }
+  .fx-split[data-split='down'] .fx-seam { top: var(--fx-split, 50%); left: 50%; }
+  .fx-tabbar { display: flex; align-items: center; background: var(--app-bar); border-bottom: 1px solid var(--app-line); min-height: 36px; }
+  .fx-tabs { position: relative; display: flex; align-self: stretch; flex: 0 1 auto; min-width: min(7rem, 30%); overflow-x: auto; scrollbar-width: thin; }
+  .fx-tabs:empty { min-width: 0; }
+  .fx .pane-resizer:focus-visible { outline: none; }
+  .fx-tab-new { flex: none; width: 28px; height: 28px; margin-left: 0.2rem; }
+  .fx-tab {
+    display: inline-flex; align-items: center; gap: 0.4rem; flex: none; max-width: 15rem; padding: 0 0.4rem 0 0.75rem;
+    border: 0; border-right: 1px solid var(--app-line); background: transparent; color: var(--muted); font: inherit; font-size: 0.84rem; cursor: pointer;
+    box-shadow: inset 0 2px 0 transparent;
+  }
+  .fx-tab[aria-selected='true'] { background: var(--surface); color: var(--fg); box-shadow: inset 0 2px 0 var(--accent); }
+  .fx-tab:focus-visible { outline-offset: -2px; }
+  .fx-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Close button: subdued and soft on inactive tabs, sharp on the selected or hovered/focused tab. */
+  .fx-tab-x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; opacity: 0.45; filter: blur(0.6px); transition: opacity 0.12s, filter 0.12s; }
+  .fx-tab:is([aria-selected='true'], :hover, :focus-visible) .fx-tab-x { opacity: 1; filter: none; }
+  .fx-tab-x:hover { background: var(--fx-hover); }
+  @media (prefers-reduced-motion: reduce) { .fx-tab-x { transition: none; } }
+  .fx-tab-x .icon svg { width: 14px; height: 14px; }
+  .fx-doc-actions { display: flex; flex: none; align-items: center; gap: 0.1rem; padding: 0 0.35rem; }
+  /* Document info (was a status bar): compact and muted at the right of the tab row. */
+  .fx-doc-info { display: flex; align-items: center; gap: 0.15rem 0.75rem; flex: 0 100 auto; min-width: 0; max-width: 60%; padding-left: 0.6rem; color: var(--muted); font-size: 0.76rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+  .fx-doc-info > span:empty { display: none; }
+  .fx-doc-info progress { width: 80px; height: 6px; accent-color: var(--accent); }
+
+  .fx-editor { position: relative; min-height: 0; background: var(--surface); }
+  .fx-code { position: absolute; inset: 0; display: flex; overflow: hidden; }
+  .fx-code[hidden], .fx-hex[hidden], .fx-empty[hidden] { display: none; }
+  .fx-gutter {
+    flex: none; width: var(--fx-gw, 5ch); overflow: hidden; padding-right: 0.9ch; text-align: right; user-select: none;
+    font: 13px/var(--fx-line) var(--mono); color: color-mix(in srgb, var(--muted) 70%, transparent); border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    box-sizing: content-box;
+  }
+  .fx-gutter > div { white-space: pre; padding-top: 8px; will-change: transform; }
+  .fx-curline { position: absolute; left: 0; right: 0; height: var(--fx-line); top: 8px; background: color-mix(in srgb, var(--fg) 4.5%, transparent); pointer-events: none; }
+  /* Highlight overlay: the textarea (transparent text, visible caret) sits exactly over a highlighted <pre>. */
+  .fx-ta { position: relative; flex: 1; min-width: 0; }
+  .fx-hl, .fx-code textarea {
+    margin: 0; padding: 8px 12px 8px 10px; border: 0; border-radius: 0;
+    font: 13px/var(--fx-line) var(--mono); letter-spacing: 0; font-variant-ligatures: none; tab-size: 4;
+    white-space: pre; overflow-wrap: normal;
+  }
+  .fx-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: var(--fg); }
+  .fx-hl code { display: block; font: inherit; will-change: transform; }
+  .fx-code:not([data-hl-on]) .fx-hl { display: none; }
+  .fx-code textarea { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; resize: none; background: transparent; color: var(--fg); overflow: auto; }
+  .fx-code[data-hl-on] textarea { color: transparent; caret-color: var(--fg); }
+  .fx-code[data-hl-on] textarea::selection { color: transparent; background: color-mix(in srgb, var(--accent) 26%, transparent); }
+  .fx-code textarea:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -1px; border-radius: 0; }
+
+  /* Syntax colours (GitHub-like, ≥ 4.5:1 on --surface in both themes). */
+  .fx {
+    --hl-keyword: light-dark(#8250df, #d2a8ff); --hl-string: light-dark(#0a3069, #a5d6ff); --hl-number: light-dark(#0550ae, #79c0ff);
+    --hl-comment: light-dark(#5f6770, #8b949e); --hl-title: light-dark(#6639ba, #d2a8ff); --hl-attr: light-dark(#0550ae, #79c0ff);
+    --hl-builtin: light-dark(#953800, #ffa657); --hl-tag: light-dark(#116329, #7ee787); --hl-meta: light-dark(#5f6770, #8b949e);
+  }
+  .hljs-keyword, .hljs-doctag, .hljs-template-tag { color: var(--hl-keyword); }
+  .hljs-string, .hljs-regexp, .hljs-template-variable, .hljs-link { color: var(--hl-string); }
+  .hljs-number, .hljs-literal, .hljs-attr, .hljs-attribute, .hljs-property, .hljs-selector-attr, .hljs-selector-pseudo, .hljs-section { color: var(--hl-number); }
+  .hljs-comment, .hljs-quote, .hljs-meta, .hljs-code { color: var(--hl-comment); }
+  .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: var(--hl-title); }
+  .hljs-built_in, .hljs-type, .hljs-variable, .hljs-params, .hljs-bullet, .hljs-symbol, .hljs-subst { color: var(--hl-builtin); }
+  .hljs-tag, .hljs-name, .hljs-selector-tag, .hljs-selector-class, .hljs-selector-id, .hljs-addition { color: var(--hl-tag); }
+  .hljs-deletion { color: var(--error); }
+  .hljs-section, .hljs-strong { font-weight: 700; }
+  .hljs-emphasis { font-style: italic; }
+
+  /* Markdown preview (Preview or Split view) */
+  .fx-md { position: absolute; inset: 0; overflow: auto; padding: 1.25rem 2rem 3rem; background: var(--surface); font: 15px/1.65 var(--font); overflow-wrap: anywhere; }
+  .fx-md[hidden] { display: none; }
+  .fx-md:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -1px; border-radius: 0; }
+  .fx-editor[data-md-view='split'] .fx-code { right: 50%; }
+  .fx-editor[data-md-view='split'] .fx-md { left: 50%; border-left: 1px solid var(--app-line); }
+  .fx-md > :first-child { margin-top: 0; }
+  .fx-md h1, .fx-md h2, .fx-md h3 { margin: 1.4em 0 0.5em; line-height: 1.25; }
+  .fx-md h1 { font-size: 1.7rem; padding-bottom: 0.3em; border-bottom: 1px solid var(--app-line); }
+  .fx-md h2 { font-size: 1.35rem; padding-bottom: 0.25em; border-bottom: 1px solid var(--app-line); }
+  .fx-md h3 { font-size: 1.12rem; }
+  .fx-md p, .fx-md ul, .fx-md ol, .fx-md table, .fx-md pre, .fx-md blockquote { margin: 0 0 1em; }
+  .fx-md code { font: 0.88em var(--mono); padding: 0.1em 0.35em; border-radius: 5px; background: var(--surface-2); }
+  .fx-md pre { padding: 0.8rem 1rem; overflow: auto; border-radius: 9px; background: var(--surface-2); }
+  .fx-md pre code { padding: 0; background: none; font-size: 0.85rem; line-height: 1.55; }
+  .fx-md blockquote { padding-left: 1rem; border-left: 3px solid var(--app-line); color: var(--muted); }
+  .fx-md table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .fx-md th, .fx-md td { padding: 0.35rem 0.7rem; border: 1px solid var(--app-line); }
+  .fx-md th { background: var(--surface-2); text-align: left; }
+  .fx-md li:has(> input[type='checkbox']) { list-style: none; margin-left: -1.3em; }
+  .fx-md input[type='checkbox'] { margin: 0 0.45em 0 0; accent-color: var(--accent); vertical-align: -0.1em; }
+  .fx-md hr { border: 0; border-top: 1px solid var(--app-line); margin: 1.5em 0; }
+  .fx-md .md-img-off { color: var(--muted); font-style: italic; }
+
+  /* Comparison view */
+  .fx-diff { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  .fx-diff[hidden] { display: none; }
+  .fx-diff-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.75rem; min-height: 38px; padding: 0.2rem 0.4rem 0.2rem 0.75rem; border-bottom: 1px solid var(--app-line); }
+  .fx-diff-names { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .fx-diff-sum { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.82rem; white-space: nowrap; }
+  .fx-sum-add { color: var(--fx-add-fg); font-weight: 700; }
+  .fx-sum-del { color: var(--fx-del-fg); font-weight: 700; }
+  .fx-diff-notice { margin: 0; padding: 0.4rem 0.75rem; background: var(--cloud-bg); color: color-mix(in srgb, var(--cloud) 60%, var(--fg)); font-size: 0.8rem; }
+  .fx-diff-body { position: relative; flex: 1; min-height: 0; overflow: auto; padding-bottom: 1rem; font: 12.5px/1.6 var(--mono); }
+  .fx-diff-body:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -1px; border-radius: 0; }
+  .fx-dl { display: grid; grid-template-columns: var(--fx-dn) 1.6em minmax(0, 1fr) var(--fx-dn) 1.6em minmax(0, 1fr); }
+  .fx-diff[data-unified] .fx-dl { grid-template-columns: var(--fx-dn) var(--fx-dn) 1.6em minmax(0, 1fr); }
+  .fx-dl > span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .fx-dn { padding-right: 0.5ch; text-align: right; color: color-mix(in srgb, var(--muted) 75%, transparent); user-select: none; }
+  .fx-dm { text-align: center; font-weight: 700; user-select: none; }
+  .fx-dt { padding-right: 0.75rem; }
+  .fx-diff:not([data-unified]) .fx-dn:nth-child(4) { border-left: 1px solid var(--app-line); }
+  .fx-dl [data-s='del'] { background: var(--fx-del-bg); }
+  .fx-dl [data-s='add'] { background: var(--fx-add-bg); }
+  .fx-dm[data-s='del'] { color: var(--fx-del-fg); }
+  .fx-dm[data-s='add'] { color: var(--fx-add-fg); }
+  .fx-dl[data-s='del'] > * { background: var(--fx-del-bg); }
+  .fx-dl[data-s='add'] > * { background: var(--fx-add-bg); }
+  .fx-dl [data-s='none'] { background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--border) 55%, transparent) 5px 6px); }
+  .fx-dt[data-s='del'] mark { background: var(--fx-del-mark); color: inherit; border-radius: 2px; }
+  .fx-dt[data-s='add'] mark { background: var(--fx-add-mark); color: inherit; border-radius: 2px; }
+  .fx-dl[data-cur] > :first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .fx-fold { display: block; width: 100%; padding: 0.2rem 0.75rem; border: 0; border-block: 1px dashed var(--app-line); background: var(--app-stage); color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
+  .fx-fold:hover { color: var(--fg); }
+  .fx-diff-same { margin: 0; padding: 1rem 0.75rem; color: var(--local); font-family: var(--font); }
+
+  .fx-hex { position: absolute; inset: 0; overflow: auto; padding: 1rem 1.25rem; }
+  .fx-info { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0 0 1rem; }
+  .fx-info dt { color: var(--muted); }
+  .fx-info dd { margin: 0; font-weight: 600; word-break: break-all; }
+  .fx-hex pre { margin: 0; font: 12.5px/1.6 var(--mono); color: var(--muted); }
+
+  /* Empty state: the whole area looks like a faint code file behind a full-area dashed drop border, prompt on top. */
+  .fx-empty { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
+  .fx-empty::before {
+    content: ''; position: absolute; inset: 1rem; z-index: 1; pointer-events: none; border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+  .fx.fx-over .fx-empty::before { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .fx-bg-doc {
+    position: absolute; inset: calc(1rem + 2px); border-radius: 12px; display: flex; padding-top: 8px; overflow: hidden; pointer-events: none; user-select: none;
+    font: 13px/var(--fx-line) var(--mono); opacity: 0.32;
+    -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 0 35%, #000 85%); mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 0 35%, #000 85%);
+  }
+  .fx-bg-gutter { flex: none; width: 4ch; padding-right: 0.9ch; box-sizing: content-box; text-align: right; color: var(--muted); border-right: 1px solid var(--border); }
+  .fx-bg-gutter span { display: block; height: var(--fx-line); }
+  .fx-bg-code { margin: 0; padding: 0 12px 0 10px; font: inherit; color: var(--muted); }
+  .fx-drop-card {
+    position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; width: min(30rem, calc(100% - 3rem));
+    padding: 1.5rem; text-align: center; border-radius: 16px; background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(2px);
+  }
+  .fx-drop-icon { width: 44px; height: 44px; fill: none; stroke: color-mix(in srgb, var(--muted) 80%, transparent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .fx-empty-title { margin: 0; font-size: 1.1rem; font-weight: 650; }
+  .fx-new-big { padding: 0.6rem 1.3rem; font-size: 0.98rem; }
+  .fx-empty-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+  .fx-empty-actions .btn { padding: 0.45rem 0.9rem; font-size: 0.88rem; }
+  .fx-empty-hint { margin: 0; max-width: 54ch; color: var(--muted); font-size: 0.8rem; }
+
+  /* Output panel */
+  .fx-panel { border-top: 1px solid var(--app-line); background: var(--surface); }
+  .fx-panel-head { display: flex; align-items: center; padding: 0 0.35rem 0 0.25rem; height: 32px; }
+  .fx-panel-toggle { display: inline-flex; align-items: center; gap: 0.45rem; height: 26px; padding: 0 0.4rem; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; margin-right: auto; }
+  .fx-panel-toggle:hover { color: var(--fg); }
+  .fx-chev { width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform 0.12s; }
+  [aria-expanded='true'] > .fx-chev { transform: rotate(45deg); }
+  .fx-badge { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--error); color: var(--surface); font-size: 0.7rem; letter-spacing: 0; line-height: 18px; text-align: center; }
+  .fx-out { list-style: none; margin: 0; padding: 0 0.75rem 0.5rem; height: var(--fx-out-h, 132px); overflow-y: auto; font: 12.5px/1.5 var(--mono); }
+  .fx-out li { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.15rem 0; }
+  .fx-out .icon { margin-top: 2px; color: var(--muted); }
+  .fx-out .icon svg { width: 15px; height: 15px; }
+  .fx-out [data-kind='error'] .icon, .fx-out [data-kind='error'] .fx-out-text { color: var(--error); }
+  .fx-out [data-kind='warn'] .icon { color: var(--cloud); }
+  .fx-out [data-kind='ok'] .icon { color: var(--local); }
+  .fx-out-text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+  .fx-out-jump { flex: none; border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+
+  .fx-msg { overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 20rem; flex: 0 1 auto; }
+  .fx-msg[data-kind='error'] { color: var(--error); }
+  .fx-msg[data-kind='ok'] { color: var(--local); }
+  .fx-sb-btn { height: 20px; padding: 0 0.35rem; color: inherit; font-weight: 500; border-radius: 4px; }
+  .fx-sb-btn:hover { background: var(--fx-hover); color: var(--fg); }
+  .fx-sb-btn[data-state='valid'] { color: var(--local); }
+  .fx-sb-btn[data-state='invalid'] { color: var(--error); }
+  .fx-sb-btn .icon svg { width: 14px; height: 14px; }
+  .fx-sb-btn:disabled { cursor: default; background: none; }
+
+  @media (max-width: 860px) {
+    .fx-body { grid-template-columns: minmax(0, 1fr); }
+    .fx-main { grid-column: 1; }
+    /* Sidebars become drawers over the editor: Explorer from the left, Tools from the right. */
+    .fx-side { position: absolute; top: 0; bottom: 0; z-index: 20; width: min(88%, 320px); }
+    .fx-explorer { left: 0; box-shadow: 8px 0 24px rgb(0 0 0 / 0.18); }
+    .fx-toolbox { right: 0; box-shadow: -8px 0 24px rgb(0 0 0 / 0.18); }
+    .fx .fx-side > .pane-resizer { display: none; }
+  }
+  @media (max-width: 760px) {
+    .fx-editor[data-md-view='split'] .fx-code { right: 0; bottom: 50%; }
+    .fx-editor[data-md-view='split'] .fx-md { left: 0; top: 50%; border-left: 0; border-top: 1px solid var(--app-line); }
+    .fx-md { padding: 1rem 1rem 2rem; }
+    .fx { height: clamp(520px, calc(100dvh - 2rem), 900px); }
+    .fx-top-actions .fx-btn > span:not(.icon) { display: none; }
+    .fx-top-actions .fx-btn { width: 32px; padding: 0; }
+    .fx-doc-info :is([data-sb-pos], [data-sb-size], [data-sb-hl]) { display: none; }
+    .fx-top .fx-msg { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    /* Phones: only "split down"; side by side would be too narrow. */
+    [data-split-btn='right'] { display: none; }
+    .fx-drop-card { padding: 1.25rem 1rem; }
+    .fx-diff-names { flex-basis: 100%; }
+  }
+
+  /* Embedded in the home hub: the app is the whole frame, edge to edge. */
+  :root[data-embed] main#main:has(.fx) { width: 100%; padding: 0; }
+  :root[data-embed] .tool-shell:has(.fx) > :not(.fx) { display: none; }
+  :root[data-embed] .fx { width: 100%; height: 100dvh; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+</style>
+
+<script>
+  import { initTextApp } from '../../lib/text-app';
+
+  initTextApp();
+</script>

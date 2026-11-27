@@ -25,6 +25,13 @@
   --app-line: var(--border);                           /* dividers between panes */
   --app-hover: light-dark(rgb(0 0 0 / 0.045), rgb(255 255 255 / 0.05));
   --app-selected: color-mix(in srgb, var(--accent) 14%, transparent);
+  /* One colour per app; becomes --accent inside that app (AppBar.astro, ToolShell.astro) and marks it on the start page. */
+  --c-images: light-dark(#c026d3, #e879f9);
+  --c-pdf: light-dark(#dc2626, #f87171);
+  --c-audio: var(--local);
+  --c-files: light-dark(#b45309, #fbbf24);
+  --c-text: light-dark(#2563eb, #60a5fa);
+  --c-gpx: light-dark(#0e7490, #22d3ee);
 }
 :root[data-theme='light'] { color-scheme: light; }
 :root[data-theme='dark'] { color-scheme: dark; }
@@ -53,8 +60,7 @@ a { color: var(--accent); }
 .muted { color: var(--muted); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-/* Corner chrome: title top-left, theme top-right; on the home page also privacy/settings in the bottom corners.
-   Content pages: top corners sit at the top of the page; home: all four float over the full-viewport hub. */
+/* Content pages: the site title in the top-left corner. The home page has its own header bar. */
 .corner {
   position: absolute; z-index: 40; display: inline-flex; align-items: center; gap: 0.4rem;
   color: var(--muted); text-decoration: none; font-size: 0.9rem; font-weight: 550;
@@ -63,19 +69,7 @@ a { color: var(--accent); }
 .corner:hover { color: var(--fg); }
 .corner .icon svg { width: 18px; height: 18px; }
 .corner-tl { top: 1rem; left: 1.25rem; }
-.corner-tr { top: 0.6rem; right: 1rem; }
-.corner-bl { bottom: 1rem; left: 1.25rem; }
-.corner-br { bottom: 1rem; right: 1.25rem; }
-.is-wide .corner { position: fixed; transition: color 0.12s, opacity 0.15s, visibility 0.15s; }
-/* Chrome belongs to the hub's start screen only. */
-.is-wide:has(.home:not([data-at='centre'])) .corner { opacity: 0; visibility: hidden; pointer-events: none; }
 .brand { font-weight: 750; font-size: 1rem; color: var(--fg); letter-spacing: -0.01em; }
-.theme-toggle { width: 40px; height: 40px; display: grid; place-items: center; }
-.theme-toggle .icon svg { width: 20px; height: 20px; }
-.theme-toggle .icon { display: none; }
-:root:not([data-theme]) .theme-toggle .t-system,
-:root[data-theme='light'] .theme-toggle .t-light,
-:root[data-theme='dark'] .theme-toggle .t-dark { display: inline-flex; }
 
 .site-footer { border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; }
 .site-footer .inner { width: min(100% - 2rem, 960px); margin: 0 auto; padding: 1.5rem 0; display: flex; gap: 1rem; flex-wrap: wrap; justify-content: space-between; align-items: end; }
@@ -189,7 +183,7 @@ a { color: var(--accent); }
 .field { display: grid; gap: 0.35rem; }
 .field small { color: var(--muted); }
 .row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: end; }
-input[type='text'], input[type='number'], select, textarea {
+input[type='text'], input[type='number'], input[type='date'], input[type='time'], select, textarea {
   font: inherit; padding: 0.5rem 0.7rem; border-radius: 10px; border: 1px solid var(--border);
   background: var(--surface); color: var(--fg); min-width: 0;
 }

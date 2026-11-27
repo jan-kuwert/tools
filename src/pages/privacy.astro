@@ -1,7 +1,8 @@
 ---
 import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
 import ModeBadge from '../components/ModeBadge.astro';
-import { tools } from '../tools';
+import { categories, tools } from '../tools';
 ---
 <Base title="Privacy · Tools">
   <div class="prose">
@@ -22,12 +23,29 @@ import { tools } from '../tools';
     </ul>
 
     <h2>Which tools use the cloud?</h2>
-    <table>
+    <table class="tool-table">
       <thead><tr><th>Tool</th><th>Processing</th></tr></thead>
-      <tbody>{tools.map((t) => <tr><td>{t.title}</td><td><ModeBadge mode={t.mode} label /></td></tr>)}</tbody>
+      {categories.map((c) => (
+        <tbody style={`--cat: var(--c-${c.id})`}>
+          <tr class="cat-row"><th colspan="2" scope="rowgroup"><Icon name={c.id} />{c.label}</th></tr>
+          {tools.filter((t) => t.category === c.id).map((t) => <tr><td>{t.title}</td><td><ModeBadge mode={t.mode} label /></td></tr>)}
+        </tbody>
+      ))}
     </table>
 
     <h2>Stored on your device</h2>
     <p>Only preferences you set (theme, default image format and quality) are stored in your browser's local storage. You can reset them on the <a href="../settings/">settings page</a>. No cookies, no tracking.</p>
   </div>
 </Base>
+
+<style>
+  .prose { margin-inline: auto; }
+  .prose h2 { margin-top: 2.5rem; }
+  .tool-table tbody td:first-child { border-left: 3px solid var(--cat); padding-left: 0.75rem; }
+  .cat-row th {
+    padding: 1.1rem 0.75rem 0.4rem; border-bottom: 0; color: var(--cat);
+    font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .cat-row :global(.icon) { margin-right: 0.4rem; vertical-align: -0.2em; }
+  .cat-row :global(.icon svg) { width: 16px; height: 16px; }
+</style>

@@ -6,8 +6,8 @@ import arrowLeft from 'iconoir/icons/regular/arrow-left.svg?raw';
 import arrowRight from 'iconoir/icons/regular/arrow-right.svg?raw';
 import arrowUp from 'iconoir/icons/regular/arrow-up.svg?raw';
 import cloud from 'iconoir/icons/regular/cloud.svg?raw';
-import computer from 'iconoir/icons/regular/computer.svg?raw';
 import laptop from 'iconoir/icons/regular/laptop.svg?raw';
+import mapIcon from 'iconoir/icons/regular/map.svg?raw';
 import code from 'iconoir/icons/regular/code.svg?raw';
 import home from 'iconoir/icons/regular/home-simple-door.svg?raw';
 import download from 'iconoir/icons/regular/download.svg?raw';
@@ -18,7 +18,6 @@ import skipPrev from 'iconoir/icons/regular/skip-prev.svg?raw';
 import zoomIn from 'iconoir/icons/regular/zoom-in.svg?raw';
 import zoomOut from 'iconoir/icons/regular/zoom-out.svg?raw';
 import flip from 'iconoir/icons/regular/flip.svg?raw';
-import halfMoon from 'iconoir/icons/regular/half-moon.svg?raw';
 import lock from 'iconoir/icons/regular/lock.svg?raw';
 import mediaImage from 'iconoir/icons/regular/media-image.svg?raw';
 import music from 'iconoir/icons/regular/music-double-note.svg?raw';
@@ -28,7 +27,6 @@ import redo from 'iconoir/icons/regular/redo.svg?raw';
 import search from 'iconoir/icons/regular/search.svg?raw';
 import settings from 'iconoir/icons/regular/settings.svg?raw';
 import shield from 'iconoir/icons/regular/shield-check.svg?raw';
-import sun from 'iconoir/icons/regular/sun-light.svg?raw';
 import undo from 'iconoir/icons/regular/undo.svg?raw';
 import upload from 'iconoir/icons/regular/upload.svg?raw';
 import viewGrid from 'iconoir/icons/regular/view-grid.svg?raw';
@@ -51,18 +49,27 @@ import restart from 'iconoir/icons/regular/restart.svg?raw';
 import rotateLeft from 'iconoir/icons/regular/rotate-camera-left.svg?raw';
 import rotateRight from 'iconoir/icons/regular/rotate-camera-right.svg?raw';
 import crop from 'iconoir/icons/regular/crop.svg?raw';
+import eye from 'iconoir/icons/regular/eye.svg?raw';
+import eyeClosed from 'iconoir/icons/regular/eye-closed.svg?raw';
+import gitMerge from 'iconoir/icons/regular/git-merge.svg?raw';
+import magicWand from 'iconoir/icons/regular/magic-wand.svg?raw';
+import scaleFrameReduce from 'iconoir/icons/regular/scale-frame-reduce.svg?raw';
+import mapPin from 'iconoir/icons/regular/map-pin.svg?raw';
+import menu from 'iconoir/icons/regular/menu.svg?raw';
+import graphUp from 'iconoir/icons/regular/graph-up.svg?raw';
+import heart from 'iconoir/icons/regular/heart.svg?raw';
 
 const icons = {
   // Local-mode marker; distinct from the theme's computer icon.
   device: laptop, code, home, cloud, lock, upload, plus, undo, redo, flip, search, settings, shield, xmark, grid: viewGrid,
   'arrow-up': arrowUp, 'arrow-down': arrowDown, 'arrow-left': arrowLeft, 'arrow-right': arrowRight,
   download, play, pause, scissor, 'skip-prev': skipPrev, 'zoom-in': zoomIn, 'zoom-out': zoomOut,
-  'theme-system': computer, 'theme-light': sun, 'theme-dark': halfMoon,
-  images: mediaImage, pdf: page, audio: music, files: archive,
+  images: mediaImage, pdf: page, audio: music, files: archive, text: code, gpx: mapIcon,
   braces: codeBrackets, check: checkCircle, copy, doc: pageEdit, edit: editPencil, folder, 'new-file': pagePlus, paste: pasteClipboard,
   sidebar: sidebarCollapse, trash, warning: warningCircle, compare: gitCompare,
   open: openInWindow, restart, reverse: arrowSeparateVertical,
   'rotate-left': rotateLeft, 'rotate-right': rotateRight, crop,
+  eye, 'eye-off': eyeClosed, merge: gitMerge, clean: magicWand, fit: scaleFrameReduce, pin: mapPin, grip: menu, profile: graphUp, heart,
 };
 type IconName = keyof typeof icons;
 

@@ -2,6 +2,7 @@
 // Markup and styles live in src/pages/audio/convert.astro (data-* hooks).
 
 const RULER = 18; // CSS px reserved for the time ruler above the waveform.
+const BAR_PITCH = 5; // CSS px per waveform bar.
 const NUDGE = 0.01;
 const BIG_NUDGE = 1;
 const MAX_ZOOM = 1024;
@@ -135,7 +136,6 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
   const handles = { start: q<HTMLElement>('[data-handle=start]'), end: q<HTMLElement>('[data-handle=end]') };
   const inputs = { start: q<HTMLInputElement>('[data-time=start]'), end: q<HTMLInputElement>('[data-time=end]') };
   const playBtn = q<HTMLButtonElement>('[data-play]');
-  const pauseBtn = q<HTMLButtonElement>('[data-pause]');
   const playAllBtn = q<HTMLButtonElement>('[data-play-all]');
   const zoomIn = q<HTMLButtonElement>('[data-zoom=in]');
   const zoomOut = q<HTMLButtonElement>('[data-zoom=out]');
@@ -194,19 +194,22 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     else g.clearRect(0, 0, cw, ch);
     if (!channels || !w) return;
 
-    const columns = Math.round(w * zoom * dpr);
-    let p = peaks.get(columns);
-    if (!p) peaks.set(columns, (p = computePeaks(channels, columns)));
-    const x0 = Math.round(scroll.scrollLeft * dpr);
+    // Discrete bars like the empty display's placeholder: one bar per BAR_PITCH CSS px, 60% of the pitch wide.
+    const bars = Math.max(1, Math.round((w * zoom) / BAR_PITCH));
+    let p = peaks.get(bars);
+    if (!p) peaks.set(bars, (p = computePeaks(channels, bars)));
+    const x0 = scroll.scrollLeft * dpr;
+    const pitch = (w * zoom * dpr) / bars;
+    const barW = Math.max(dpr, pitch * 0.6);
     const top = RULER * dpr;
     const half = (ch - top) / 2;
     const mid = top + half;
     g.fillStyle = getComputedStyle(canvas).color;
     g.beginPath();
-    for (let x = 0; x < cw && x0 + x < columns; x++) {
-      const y1 = mid - p[2 * (x0 + x) + 1] * half;
-      const y2 = mid - p[2 * (x0 + x)] * half;
-      g.rect(x, y1, 1, Math.max(1, y2 - y1));
+    for (let i = Math.max(0, Math.floor(x0 / pitch)); i < bars && i * pitch - x0 < cw; i++) {
+      const y1 = mid - p[2 * i + 1] * half;
+      const y2 = mid - p[2 * i] * half;
+      g.rect(i * pitch - x0 + (pitch - barW) / 2, y1, barW, Math.max(dpr, y2 - y1));
     }
     g.fill();
 
@@ -330,6 +333,11 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
   let startedAt = 0;
   let pausedAt: number | undefined;
   let raf = 0;
+  // While audio plays the play key is a pause key: `data-playing` swaps its icon and label in CSS.
+  const setPlaying = (on: boolean) => {
+    playBtn.toggleAttribute('data-playing', on);
+    playLed?.toggleAttribute('data-on', on);
+  };
   const position = () => Math.min(playTo, playFrom + audio!.currentTime - startedAt);
   const stop = () => {
     cancelAnimationFrame(raf);
@@ -341,8 +349,7 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     }
     pausedAt = undefined;
     playhead.hidden = true;
-    pauseBtn.disabled = true;
-    playLed?.removeAttribute('data-on');
+    setPlaying(false);
     show(readouts.pos);
   };
   const follow = () => {
@@ -367,8 +374,7 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     source.start(0, from, to - from);
     playhead.hidden = false;
     follow();
-    pauseBtn.disabled = false;
-    playLed?.setAttribute('data-on', '');
+    setPlaying(true);
   };
   const pause = () => {
     if (!source) return;
@@ -379,15 +385,12 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     playhead.hidden = false;
     show(readouts.pos, at);
   };
-  const playSelection = () => play(pausedAt !== undefined && pausedAt >= start && pausedAt < end ? pausedAt : start, end);
-  playBtn.onclick = playSelection;
-  pauseBtn.onclick = pause;
+  playBtn.onclick = () => (source ? pause() : play(pausedAt !== undefined && pausedAt >= start && pausedAt < end ? pausedAt : start, end));
   playAllBtn.onclick = () => play(0, duration);
   root.addEventListener('keydown', (e) => {
     if (e.key !== ' ' || !channels || (e.target as Element).closest('input, button, select, textarea, a, label')) return;
     e.preventDefault();
-    if (source) pause();
-    else playSelection();
+    playBtn.click();
   });
 
   const setTransport = (on: boolean) => {

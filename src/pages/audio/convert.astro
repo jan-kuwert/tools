@@ -2,6 +2,7 @@
 // Audio editor/converter as one console: display (waveform), transport, edit, local output, cloud export, output tray.
 import Base from '../../layouts/Base.astro';
 import Icon from '../../components/Icon.astro';
+import AppBar from '../../components/AppBar.astro';
 import ModeBadge from '../../components/ModeBadge.astro';
 import ProgressDial from '../../components/ProgressDial.astro';
 import { href, toolBySlug } from '../../tools';
@@ -40,13 +41,14 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
     <section class="deck" data-deck data-empty aria-label="Audio editor">
       <div class="dk-display" data-screen-state="empty">
         <div class="dk-head">
-          <h2 class="dk-title"><Icon name="audio" />Audio</h2>
+          <AppBar part="switch" current="audio" />
           <span class="lamps" aria-hidden="true">
             <span class="lamp" data-on><i></i>Local</span>
             <span class="lamp" data-led="play"><i></i>Play</span>
             <span class="lamp lamp-amber" data-led="cloud"><i></i>Cloud</span>
           </span>
           <span class="dk-source" data-source></span>
+          <AppBar part="actions" />
         </div>
 
         <div class="screen">
@@ -77,7 +79,17 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
             </div>
           </div>
           <label class="screen-empty">
-            <svg class="screen-ghost" viewBox="0 0 360 100" preserveAspectRatio="none" aria-hidden="true"><path d={ghost} /></svg>
+            <svg class="screen-ghost" viewBox="0 0 360 100" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <!-- Two bright bands per 720 units: sliding the 720-wide rect by 360 loops seamlessly. -->
+                <linearGradient id="ghost-sweep">
+                  <stop offset="0" stop-color="#fff" stop-opacity="0.35" /><stop offset="0.25" stop-color="#fff" /><stop offset="0.5" stop-color="#fff" stop-opacity="0.35" />
+                  <stop offset="0.75" stop-color="#fff" /><stop offset="1" stop-color="#fff" stop-opacity="0.35" />
+                </linearGradient>
+                <mask id="ghost-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="360" height="100"><rect class="ghost-sweep" x="-360" width="720" height="100" fill="url(#ghost-sweep)" /></mask>
+              </defs>
+              <path class="ghost-wave" d={ghost} mask="url(#ghost-mask)" />
+            </svg>
             <span class="screen-title">Drop audio or choose a file</span>
             <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
             <span class="screen-hint">{tool.limits}. You can also paste from the clipboard.</span>
@@ -88,8 +100,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
 
         <div class="transport" role="group" aria-label="Transport">
           <button class="key" type="button" data-play-all disabled><Icon name="skip-prev" /><span>From start</span></button>
-          <button class="key" type="button" data-play disabled><Icon name="play" /><span>Play selection</span></button>
-          <button class="key" type="button" data-pause disabled><Icon name="pause" /><span>Pause</span></button>
+          <button class="key" type="button" data-play disabled><Icon name="play" class="if-paused" /><Icon name="pause" class="if-playing" /><span class="key-swap"><span class="if-paused">Play selection</span><span class="if-playing">Pause</span></span></button>
           <span class="transport-zoom">
             <span class="cap" aria-hidden="true">Zoom</span>
             <button class="key key-sq" type="button" data-zoom="out" aria-label="Zoom out" title="Zoom out" disabled><Icon name="zoom-out" /></button>
@@ -323,14 +334,10 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   @keyframes lamp-blink { 50% { opacity: 0.45; } }
 
   /* Display */
-  .dk-display { grid-area: display; display: flex; flex-direction: column; gap: 10px; }
+  /* Transport and file strip share the bottom row, so a loaded file keeps the empty display's footprint. */
+  .dk-display { grid-area: display; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px 16px; }
+  .dk-head, .screen, .dk-display:has(> .tracks[hidden]) > .transport { grid-column: 1 / -1; }
   .dk-head { display: flex; align-items: center; gap: 14px; min-height: 18px; }
-  .dk-title {
-    display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 3px 9px 3px 7px; border: 1px solid var(--engrave); border-radius: 4px;
-    font: 800 0.74rem/1 var(--font); letter-spacing: 0.22em; text-transform: uppercase; color: var(--engrave);
-    text-shadow: 0 1px 0 var(--bevel);
-  }
-  .deck .dk-title .icon svg { width: 15px; height: 15px; }
   .dk-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 0.74rem/1.2 var(--mono); color: var(--engrave); }
   .screen {
     position: relative; display: flex; flex-direction: column; height: 270px; overflow: hidden; border-radius: 8px;
@@ -366,6 +373,13 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   }
   .deck[data-empty] .screen-empty { display: flex; }
   .screen-ghost { position: absolute; inset: 10px 0; width: 100%; height: calc(100% - 20px); fill: none; stroke: var(--phos); stroke-width: 1.1; opacity: 0.1; }
+  @media (prefers-reduced-motion: no-preference) {
+    /* Slow life in the empty display: a soft brightness band drifts across while the bars breathe. */
+    .screen-ghost .ghost-sweep { animation: ghost-sweep 14s linear infinite; }
+    .screen-ghost .ghost-wave { transform-box: fill-box; transform-origin: center; animation: ghost-breathe 7s ease-in-out infinite alternate; }
+  }
+  @keyframes ghost-sweep { to { transform: translateX(360px); } }
+  @keyframes ghost-breathe { from { transform: scaleY(0.82); } to { transform: scaleY(1.04); } }
   .screen-empty > :not(svg, input) { position: relative; }
   .screen-title { font: 600 1.15rem/1.2 var(--font); letter-spacing: 0.02em; text-shadow: 0 0 10px var(--phos-glow); }
   .screen-hint { max-width: 46ch; font-size: 0.78rem; color: var(--phos-dim); }
@@ -411,9 +425,14 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
 
   .transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .transport-zoom { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  /* Both labels share one cell so the key keeps its width when it flips to Pause. */
+  .key-swap { display: grid; }
+  .key-swap > * { grid-area: 1 / 1; }
+  .key:not([data-playing]) .icon.if-playing, .key[data-playing] .icon.if-paused { display: none; }
+  .key:not([data-playing]) .key-swap > .if-playing, .key[data-playing] .key-swap > .if-paused { visibility: hidden; }
 
   /* Track list ("cassettes") */
-  .tracks { display: flex; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--edge); }
+  .tracks { display: flex; gap: 8px; align-items: center; padding-left: 16px; border-left: 1px solid var(--edge); }
   .tracks[hidden] { display: none; }
   .track-list { display: flex; gap: 6px; flex: 1; min-width: 0; margin: 0; padding: 2px 2px 4px; list-style: none; overflow-x: auto; }
   .track-list li { display: flex; flex: none; max-width: 260px; border-radius: 6px; border: 1px solid var(--edge); background: light-dark(#f4f2ea, #2a2b2f); box-shadow: inset 0 1px 0 var(--bevel); }
@@ -558,13 +577,13 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   }
   @media (max-width: 760px) {
     .deck { --deck-w: calc(100vw - 1rem); grid-template-columns: minmax(0, 1fr); grid-template-areas: 'display' 'edit' 'out' 'cloud' 'tray'; padding: 8px; gap: 8px; }
-    /* The waveform keeps its height; readouts and the silence prompt add to the display instead of squeezing it. */
-    .screen { height: auto; }
-    .wave-scroll { flex: none; height: 160px; }
-    .deck[data-empty] .screen { height: auto; min-height: 260px; }
+    /* Same footprint loaded or empty; the waveform keeps at least 160px when readouts wrap or the silence prompt shows. */
+    .screen { height: auto; min-height: 260px; }
+    .wave-scroll { flex: 1 0 160px; }
     .readouts { gap: 2px 14px; padding: 6px 10px 4px; }
     .seg { font-size: 0.85rem; }
-    .tracks { flex-wrap: wrap; }
+    .dk-display { grid-template-columns: minmax(0, 1fr); }
+    .tracks { flex-wrap: wrap; padding: 10px 0 0; border-left: 0; border-top: 1px solid var(--edge); }
     .track-list { flex-basis: 100%; }
     .transport .key { flex: 1 1 auto; padding: 0 0.6rem; }
     .transport-zoom { margin-left: 0; }
@@ -581,11 +600,10 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
      modules out of view; extra content (tray) scrolls inside the deck. */
   :root[data-embed] .deck { width: 100%; height: 100dvh; overflow-y: auto; margin: 0; border: 0; border-radius: 0; box-shadow: none; grid-template-rows: minmax(220px, 1fr) auto auto; }
   :root[data-embed] .dk-display { min-height: 0; }
-  :root[data-embed] .screen { flex: 1; height: auto; min-height: 180px; }
-  @media (max-width: 1120px) { :root[data-embed] .deck { height: auto; min-height: 100dvh; overflow: visible; grid-template-rows: auto; } :root[data-embed] .screen { flex: none; height: 270px; } }
+  :root[data-embed] .screen { height: auto; min-height: 180px; }
+  @media (max-width: 1120px) { :root[data-embed] .deck { height: auto; min-height: 100dvh; overflow: visible; grid-template-rows: auto; } :root[data-embed] .screen { height: 270px; } }
   @media (max-width: 760px) {
-    :root[data-embed] .screen { height: auto; }
-    :root[data-embed] .deck[data-empty] .screen { height: auto; min-height: 260px; }
+    :root[data-embed] .screen { height: auto; min-height: 260px; }
   }
 </style>
 
@@ -594,7 +612,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   import oggWasm from 'wasm-media-encoders/wasm/ogg?url';
   import { API_URL, uploadForResult } from '../../lib/api';
   import { applyEdit, decodeAudio, encodeLossy, encodeWav, growthReason, MAX_SECONDS, planOutput, probeAudio, sourceKbps, TOO_LONG, type AudioInfo, type Edit, type Format, type Plan } from '../../lib/audio';
-  import { confirmUpload, el, formatBytes, setDial, throwIfAborted, UserError } from '../../lib/tool';
+  import { confirmUpload, el, formatBytes, publishOutput, setDial, throwIfAborted, UserError } from '../../lib/tool';
   import { createWaveform, detectSilence, formatTime, type Silence } from '../../lib/waveform';
 
   interface Result {
@@ -902,6 +920,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
     clearResults();
     trayList.replaceChildren(
       ...items.map((r) => {
+        publishOutput(r.blob, r.name);
         const url = URL.createObjectURL(r.blob);
         urls.push(url);
         const pct = Math.round((r.blob.size / r.inputSize - 1) * 100);

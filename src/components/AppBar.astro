@@ -1,0 +1,122 @@
+---
+// Pieces every app puts into its own toolbar: the app switcher (left, replaces the title) and Outputs/Settings (far right).
+// Inside the home hub (data-embed) they talk to the hub by postMessage; standalone they are plain links.
+import Icon from './Icon.astro';
+import { categories, href, type Category } from '../tools';
+
+interface Props { part: 'switch' | 'actions'; current?: Category }
+const { part, current = 'images' } = Astro.props;
+const cat = categories.find((c) => c.id === current)!;
+---
+{part === 'switch' ? (
+  <div class="ab-switch">
+    <style is:inline set:html={`:root { --accent: var(--c-${current}); }`} />
+    <button class="ab-btn ab-current" type="button" popovertarget="ab-menu" aria-haspopup="true" aria-expanded="false" title="Switch to another app">
+      <Icon name={cat.id} /><span>{cat.label}</span><svg class="ab-chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" /></svg>
+    </button>
+    <nav class="ab-menu" id="ab-menu" popover aria-label="Apps">
+      <a class="ab-item" href={href()} data-app-go="centre"><Icon name="home" /><span><strong>Start</strong><small>Drop any file, see all tools</small></span></a>
+      {categories.map((c) => (
+        <a class="ab-item" href={href(c.app)} data-app-go={c.id} aria-current={c.id === current ? 'page' : undefined} style={`--cat: var(--c-${c.id})`}>
+          <Icon name={c.id} /><span><strong>{c.label}</strong><small>{c.blurb}</small></span>
+        </a>
+      ))}
+    </nav>
+  </div>
+) : (
+  <div class="ab-actions">
+    <button class="ab-btn" type="button" data-ab-outputs hidden aria-label="Outputs" title="Outputs: every file you created">
+      <Icon name="download" /><span class="ab-label">Outputs</span><span class="ab-count" data-ab-count hidden></span>
+    </button>
+    <a class="ab-btn" href={href('settings')} data-ab-settings aria-label="Settings" title="Settings"><Icon name="settings" /></a>
+  </div>
+)}
+
+<style is:global>
+  .ab-switch, .ab-actions { display: flex; align-items: center; gap: 0.1rem; flex: none; }
+  .ab-actions { margin-left: auto; }
+  .ab-btn {
+    position: relative; display: inline-flex; align-items: center; gap: 0.4rem; height: 32px; padding: 0 0.55rem; border: 0; border-radius: 8px;
+    background: none; color: var(--muted); font: inherit; font-size: 0.88rem; font-weight: 600; text-decoration: none; white-space: nowrap; cursor: pointer;
+  }
+  .ab-btn:hover, .ab-btn:focus-visible, .ab-current[aria-expanded='true'] { background: var(--app-hover); color: var(--fg); }
+  .ab-btn .icon svg { width: 18px; height: 18px; }
+  .ab-current { color: var(--fg); font-size: 0.98rem; font-weight: 700; letter-spacing: -0.01em; padding-left: 0.4rem; }
+  .ab-current > .icon { color: var(--accent); }
+  .ab-chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); transition: transform 0.12s; }
+  .ab-current[aria-expanded='true'] .ab-chev { transform: rotate(180deg); }
+  .ab-count {
+    min-width: 1.2rem; height: 1.2rem; padding: 0 0.3rem; border-radius: 999px; background: var(--accent); color: var(--accent-fg);
+    font-size: 0.7rem; font-weight: 700; line-height: 1.2rem; text-align: center; font-variant-numeric: tabular-nums;
+  }
+  @media (max-width: 860px) { .ab-label { display: none; } }
+
+  .ab-menu {
+    position: fixed; inset: auto; margin: 0; width: min(22rem, calc(100vw - 16px)); max-height: min(80dvh, 34rem); overflow-y: auto; padding: 0.35rem;
+    border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--fg); box-shadow: 0 16px 40px -12px rgb(0 0 0 / 0.3);
+  }
+  .ab-menu:popover-open { animation: ab-in 0.12s ease-out; }
+  @keyframes ab-in { from { opacity: 0; transform: translateY(-4px); } }
+  @media (prefers-reduced-motion: reduce) { .ab-menu:popover-open { animation: none; } }
+  .ab-item { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.6rem; border-radius: 10px; color: var(--fg); text-decoration: none; }
+  .ab-item:hover, .ab-item:focus-visible { background: var(--surface-2); }
+  .ab-item:focus-visible { outline-offset: -2px; }
+  .ab-item[aria-current='page'] { background: var(--app-selected); }
+  .ab-item > .icon { display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: 9px; background: color-mix(in srgb, var(--cat, var(--muted)) 14%, transparent); color: var(--cat, var(--muted)); }
+  .ab-item[aria-current='page'] > .icon { background: var(--surface); }
+  .ab-item .icon svg { width: 19px; height: 19px; }
+  .ab-item > span:last-child { display: grid; min-width: 0; line-height: 1.3; font-size: 0.9rem; }
+  .ab-item small { color: var(--muted); font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+
+<script>
+  // Hub protocol (src/pages/index.astro): send { type: 'tools:go', to } and { type: 'tools:open', what: 'outputs' | 'settings' };
+  // receive { type: 'tools:outputs', count }.
+  const embedded = document.documentElement.hasAttribute('data-embed');
+  const send = (msg: object) => parent.postMessage(msg, location.origin);
+  const plainClick = (e: MouseEvent) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+
+  const menu = document.querySelector<HTMLElement>('#ab-menu');
+  const current = document.querySelector<HTMLButtonElement>('.ab-current');
+  if (menu && current) {
+    menu.addEventListener('toggle', (e) => {
+      const open = (e as ToggleEvent).newState === 'open';
+      current.setAttribute('aria-expanded', String(open));
+      if (!open) return;
+      const r = current.getBoundingClientRect();
+      menu.style.top = `${r.bottom + 6}px`;
+      menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
+      menu.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
+    });
+    if (embedded) {
+      menu.addEventListener('click', (e) => {
+        const a = (e.target as Element).closest<HTMLAnchorElement>('a[data-app-go]');
+        if (!a || !plainClick(e)) return;
+        e.preventDefault();
+        menu.hidePopover();
+        send({ type: 'tools:go', to: a.dataset.appGo });
+      });
+    }
+  }
+
+  const outputs = document.querySelector<HTMLButtonElement>('[data-ab-outputs]');
+  const settings = document.querySelector<HTMLAnchorElement>('[data-ab-settings]');
+  if (embedded && outputs && settings) {
+    // Outputs exist only in the hub, so the button appears only there.
+    outputs.hidden = false;
+    outputs.addEventListener('click', () => send({ type: 'tools:open', what: 'outputs' }));
+    settings.addEventListener('click', (e) => {
+      if (!plainClick(e)) return;
+      e.preventDefault();
+      send({ type: 'tools:open', what: 'settings' });
+    });
+    const count = outputs.querySelector<HTMLElement>('[data-ab-count]')!;
+    addEventListener('message', (e) => {
+      if (e.origin !== location.origin || e.data?.type !== 'tools:outputs') return;
+      const n = Number(e.data.count) || 0;
+      count.hidden = !n;
+      count.textContent = String(n);
+      outputs.ariaLabel = n ? `Outputs, ${n}` : 'Outputs';
+    });
+  }
+</script>

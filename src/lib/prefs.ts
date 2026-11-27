@@ -34,10 +34,3 @@ export const applyTheme = (theme: Prefs['theme']): void => {
   if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
 };
-
-export const cycleTheme = (): void => {
-  const order: NonNullable<Prefs['theme']>[] = ['system', 'light', 'dark'];
-  const next = order[(order.indexOf(loadPrefs().theme ?? 'system') + 1) % order.length];
-  savePrefs({ theme: next });
-  applyTheme(next);
-};

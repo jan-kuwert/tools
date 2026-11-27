@@ -2,14 +2,9 @@
 import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import ModeBadge from '../components/ModeBadge.astro';
-import { categories, href, toolHref, tools, type Category, type Tool } from '../tools';
+import SettingsForm from '../components/SettingsForm.astro';
+import { categories, href, toolHref, tools, type Category } from '../tools';
 
-type Dir = 'n' | 'e' | 's' | 'w';
-// Each category screen sits one move away from the start screen; from a category the only way is back to the start.
-const placement: Record<Category, Dir> = { files: 'n', pdf: 'e', images: 's', audio: 'w' };
-const OPPOSITE: Record<Dir, Dir> = { n: 's', s: 'n', e: 'w', w: 'e' };
-const ARROW = { n: 'arrow-up', e: 'arrow-right', s: 'arrow-down', w: 'arrow-left' } as const;
-const toolIcon = (t: Tool) => (t.slug.startsWith('text/') ? 'code' : t.category);
 const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
 ---
 <Base title="Tools · fast, private file tools" wide>
@@ -21,7 +16,7 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
           <h1>A collection of tools that respect your privacy.</h1>
           <nav class="jump" aria-label="Categories">
             {categories.map((c) => (
-              <a class="jump-chip" href={`#${c.id}`} data-go={c.id} data-dir={placement[c.id]}><Icon name={c.id} />{c.label}</a>
+              <a class="jump-chip" href={`#${c.id}`} data-go={c.id} title={c.blurb} style={`--cat: var(--c-${c.id})`}><Icon name={c.id} />{c.label}</a>
             ))}
           </nav>
           <label class="drop hero-drop" data-hero-drop>
@@ -32,89 +27,80 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
           </label>
           <p class="status" data-drop-status role="status" aria-live="polite"></p>
           <div class="centre-actions">
-            <button class="btn all-tools" type="button" data-all-tools aria-haspopup="dialog"><Icon name="grid" />Show all tools</button>
-            <button class="btn btn-ghost keys-btn" type="button" data-help-open aria-haspopup="dialog" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+            <button class="btn all-tools" type="button" data-all-tools><Icon name="arrow-down" />See all tools</button>
           </div>
         </div>
+        <section class="cats" id="all-tools" aria-labelledby="cats-title">
+          <h2 id="cats-title">Everything you can do</h2>
+          <div class="cat-grid">
+            {categories.map((c) => (
+              <article class="cat-card" style={`--cat: var(--c-${c.id})`}>
+                <a class="cc-head" href={`#${c.id}`} data-go={c.id}>
+                  <span class="tile"><Icon name={c.id} /></span>
+                  <span class="cc-title"><strong>{c.label}</strong><small>{c.blurb}</small></span>
+                  <Icon name="arrow-right" class="cc-go" />
+                </a>
+                <ul class="cc-tools">
+                  {toolsIn(c.id).map((t) => (
+                    <li>
+                      <a href={toolHref(t)} data-open-screen={c.id} data-open-slug={t.slug}>
+                        <span class="cc-text"><strong>{t.title}</strong><small>{t.summary}</small></span>
+                        {t.mode === 'cloud' && <ModeBadge mode={t.mode} />}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+          <dl class="cats-legend">
+            <div><dt><Icon name="device" />On your device</dt><dd>Every tool runs in your browser and uploads nothing, unless it is marked:</dd></div>
+            <div><dt><Icon name="cloud" />Cloud · EU</dt><dd>Uploaded to our server in Belgium only after you confirm. Nothing is stored.</dd></div>
+          </dl>
+          <p class="cats-more"><a href={href('privacy')}><Icon name="shield" />Privacy: how we check</a></p>
+        </section>
       </div>
-      {categories.map((c) => (
-        <a class={`edge-pill ep-${placement[c.id]}`} href={`#${c.id}`} data-go={c.id} data-dir={placement[c.id]} aria-label={`Go to ${c.label}`}>
-          <Icon name={ARROW[placement[c.id]]} class="ep-chev" />
-          <Icon name={c.id} class="ep-icon" />
-          <span class="ep-label">{c.label}</span>
-        </a>
-      ))}
     </section>
 
-    {categories.map((c) => {
-      const back = OPPOSITE[placement[c.id]];
-      return (
-        <section class="screen screen-cat" data-screen={c.id} data-app={href(c.app)} {...{ [`data-${back}`]: 'centre' }} data-back={back} aria-label={c.label}>
-          <div class="cat-body" data-panel></div>
-          <button class={`back-bar bb-${back}`} type="button" data-go="centre" data-dir={back} aria-label="Back to start">
-            <Icon name={ARROW[back]} class="bb-chev" />
-            <span class="bb-label" aria-hidden="true"><Icon name="home" />Back to start</span>
-          </button>
-        </section>
-      );
-    })}
+    {categories.map((c) => (
+      <section class="screen screen-cat" data-screen={c.id} data-app={href(c.app)} aria-label={c.label}>
+        <div class="cat-body" data-panel></div>
+      </section>
+    ))}
   </div>
   <div class="hub-veil" aria-hidden="true"><span>Drop to open the right tool</span></div>
+  <div class="drag-glow" data-drag-glow aria-hidden="true"></div>
+  <p class="out-toast" data-out-toast role="status" aria-live="polite" hidden></p>
 
-  <dialog class="picker" data-picker aria-labelledby="picker-title">
+  <dialog class="picker settings-dialog" data-settings-dialog aria-labelledby="settings-title">
     <div class="picker-head">
-      <h2 id="picker-title">All tools</h2>
+      <h2 id="settings-title">Settings</h2>
       <button class="icon-btn" type="button" data-dialog-close aria-label="Close"><Icon name="xmark" /></button>
     </div>
-    <div class="picker-search">
-      <label class="visually-hidden" for="picker-search">Search tools</label>
-      <Icon name="search" class="picker-search-icon" />
-      <input id="picker-search" class="search" type="search" placeholder="Search tools… (e.g. pdf, mp3, resize)" autocomplete="off" autofocus aria-controls="picker-list" data-picker-search />
+    <div class="dialog-body">
+      <p class="muted">Saved in this browser only. Documents and upload consent are never saved.</p>
+      <SettingsForm />
     </div>
-    <div class="picker-list" id="picker-list">
-      {categories.map((c) => (
-        <section data-picker-group>
-          <h3><Icon name={c.id} />{c.label}</h3>
-          <ul>
-            {toolsIn(c.id).map((t) => (
-              <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
-                <a href={toolHref(t)} data-open-screen={c.id} data-open-slug={t.slug}>
-                  <span class="tile"><Icon name={toolIcon(t)} /></span>
-                  <span class="pk-text"><strong>{t.title}</strong><small>{t.summary}</small></span>
-                  <ModeBadge mode={t.mode} />
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-      <p class="muted pk-empty" data-picker-empty hidden>No tool matches that search.</p>
-    </div>
-    <dl class="picker-legend">
-      <div><dt><Icon name="device" />On your device</dt><dd>Runs in your browser; nothing is uploaded.</dd></div>
-      <div><dt><Icon name="cloud" />Cloud · EU</dt><dd>Uploaded to our server in Belgium only after you confirm. Nothing is stored.</dd></div>
-    </dl>
   </dialog>
 
-  <dialog class="picker help" data-help aria-labelledby="help-title">
+  <dialog class="picker outputs" data-outputs aria-labelledby="outputs-title">
     <div class="picker-head">
-      <h2 id="help-title">Keyboard shortcuts</h2>
+      <h2 id="outputs-title">Outputs <span class="muted out-total" data-out-total></span></h2>
       <button class="icon-btn" type="button" data-dialog-close aria-label="Close"><Icon name="xmark" /></button>
     </div>
-    <dl class="keys">
-      <div><dt><kbd>←</kbd><kbd>↓</kbd><kbd>↑</kbd><kbd>→</kbd> <span>or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>From the start: open the category in that direction. In a category: the direction back to the start.</dd></div>
-      <div><dt><kbd>Alt</kbd> + <span>arrow or</span> <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></dt><dd>The same, even from inside a field</dd></div>
-      <div><dt><kbd>Esc</kbd> <span>or</span> <kbd>0</kbd></dt><dd>Back to the start</dd></div>
-      <div><dt><kbd>/</kbd></dt><dd>Search all tools</dd></div>
-      <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
-    </dl>
-    <p class="keys-note">Shortcuts pause while you type in a field or work in the image editor or waveform.</p>
+    <ul class="out-list" data-out-list aria-label="Created files"></ul>
+    <p class="muted out-empty" data-out-empty>Files you create in any tool are collected here until you leave or reload this page. Nothing is uploaded.</p>
+    <div class="out-acts">
+      <button class="btn" type="button" data-out-clear><Icon name="trash" />Remove all</button>
+      <button class="btn btn-primary" type="button" data-out-all><Icon name="download" />Download all</button>
+    </div>
   </dialog>
+  <template data-out-icons><span data-i="download"><Icon name="download" /></span><span data-i="trash"><Icon name="trash" /></span></template>
 </div>
 </Base>
 
 <style is:global>
-  /* Home only. Neutral surfaces; --accent only on the primary button, focus, hover and direction arrows. */
+  /* Home only. Neutral surfaces; --accent only on the primary button, focus and hover. */
   main.wide { width: 100%; padding: 0; }
   .home { position: relative; }
   .home .tile {
@@ -122,46 +108,33 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     color: var(--muted); background: var(--surface-2);
   }
 
-  /* Hub: screens stacked in one full-viewport stage; JS slides them in and out (transform/opacity only).
-     Site chrome (title, theme, privacy, settings) floats in the corners of the start screen (Base.astro, wide).
+  /* Hub: screens stacked in one full-viewport stage; only the active one is visible.
      clip, not hidden: focus moving into a tool frame must not scroll the stage. */
-  .hub { position: relative; isolation: isolate; overflow: clip; touch-action: none; height: 100dvh; }
+  .hub { position: relative; isolation: isolate; overflow: clip; height: calc(100dvh - var(--tb-h)); }
   .hub:focus { outline: none; }
-  .hub.dragging { user-select: none; }
-  /* While a gesture runs or its momentum drains, the frames must not receive the wheel. */
-  .hub.wheeling .tool-frame { pointer-events: none; }
   .screen { position: absolute; inset: 0; overflow: clip; background: var(--bg); visibility: hidden; }
-  .screen[data-active], .screen.leaving, .screen.peek { visibility: visible; }
+  .screen[data-active], .screen.leaving { visibility: visible; }
   .screen[data-active] { z-index: 1; }
 
   /* Start screen */
-  .screen-centre::before {
-    --edge: color-mix(in srgb, var(--accent) 6%, transparent);
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    background:
-      linear-gradient(var(--edge), transparent 5rem), linear-gradient(to top, var(--edge), transparent 5rem),
-      linear-gradient(to right, var(--edge), transparent 5rem), linear-gradient(to left, var(--edge), transparent 5rem);
-  }
   .cell-scroll {
-    position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: none;
-    display: flex; flex-direction: column; padding: 5.25rem clamp(5.5rem, 12vw, 10rem); scrollbar-width: thin;
+    position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
+    display: flex; flex-direction: column; padding: 2.5rem clamp(1.25rem, 8vw, 6rem) 3.5rem; scrollbar-width: thin;
   }
-  /* Tall content (small screens) scrolls natively; horizontal swipes still reach the hub. */
-  .scrolls > .cell-scroll { touch-action: pan-y; }
-  /* Auto margins centre short content but keep tall content scrollable from its top. */
-  .cell-inner { margin: auto; width: min(100%, 46rem); text-align: center; }
-  @media (max-width: 600px) { .cell-scroll { padding: 4.75rem 3.75rem; } }
-  .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.03em; margin: 0 auto 1.25rem; max-width: 22ch; }
-  .jump { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.45rem; margin-bottom: 1rem; }
+  /* The hero fills the first screen; the tool cards follow below the fold. */
+  .cell-inner { width: min(100%, 46rem); margin: 0 auto; text-align: center; }
+  .centre-inner { display: flex; flex-direction: column; justify-content: center; min-height: calc(100dvh - var(--tb-h) - 6rem); }
+  .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.03em; margin: 0 auto 1.4rem; max-width: 22ch; }
+  .jump { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.55rem; margin-bottom: 1.25rem; }
   .jump-chip {
-    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.8rem 0.3rem 0.55rem;
-    border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
-    color: var(--fg); font-size: 0.88rem; font-weight: 600; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1.05rem 0.55rem 0.8rem;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow);
+    color: var(--fg); font-size: 0.98rem; font-weight: 600; text-decoration: none;
     transition: border-color 0.1s, transform 0.1s ease-out;
   }
-  .jump-chip:hover { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); transform: translateY(-1px); }
+  .jump-chip:hover, .jump-chip:focus-visible { border-color: color-mix(in srgb, var(--cat) 55%, var(--border)); transform: translateY(-1px); }
   .jump-chip:active { transform: scale(0.97); }
-  .jump-chip .icon svg { width: 16px; height: 16px; color: var(--muted); }
+  .jump-chip .icon svg { width: 18px; height: 18px; color: var(--cat); }
   .home .hero-drop {
     min-height: clamp(11rem, 30vh, 17rem); align-content: center; gap: 0.8rem;
     padding: 1.75rem 1rem; border-radius: 24px; border: 2px dashed var(--border);
@@ -179,130 +152,74 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   .centre-actions { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem; }
   .all-tools { border-radius: 999px; }
   .all-tools .icon svg { width: 18px; height: 18px; color: var(--muted); }
-  .keys-btn { width: 2.6rem; padding-inline: 0; border-radius: 999px; font-weight: 700; }
 
-  /* Edge pills on the start screen: icon, name and an arrow toward the edge they lead to. */
-  .edge-pill {
-    position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 0.45rem;
-    padding: 0.5rem 0.95rem; border-radius: 999px; border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); box-shadow: var(--shadow);
-    color: var(--fg); font-size: 0.92rem; font-weight: 600; text-decoration: none; white-space: nowrap;
-    transition: transform 0.1s ease-out, scale 0.1s ease-out, border-color 0.1s;
-  }
-  .ep-icon svg { width: 18px; height: 18px; color: var(--muted); transition: color 0.1s; }
-  .ep-chev svg { width: 16px; height: 16px; color: var(--accent); stroke-width: 2.2; }
-  .ep-n .ep-chev, .ep-w .ep-chev { order: -1; }
-  .ep-s .ep-chev, .ep-e .ep-chev { order: 1; }
-  .edge-pill:hover, .edge-pill:focus-visible { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
-  .edge-pill:hover .ep-icon svg, .edge-pill:focus-visible .ep-icon svg { color: var(--fg); }
-  .edge-pill:active { scale: 0.96; }
-  .ep-n { top: 1.25rem; left: 50%; translate: -50% 0; }
-  .ep-s { bottom: 1.25rem; left: 50%; translate: -50% 0; }
-  .ep-e { right: 1.25rem; top: 50%; translate: 0 -50%; }
-  .ep-w { left: 1.25rem; top: 50%; translate: 0 -50%; }
-  .ep-n:hover { transform: translateY(-2px); }
-  .ep-s:hover { transform: translateY(2px); }
-  .ep-e:hover { transform: translateX(2px); }
-  .ep-w:hover { transform: translateX(-2px); }
-  @media (max-width: 600px) {
-    .edge-pill { padding: 0.45rem 0.75rem; font-size: 0.88rem; }
-    /* Side pills keep only their icons here; the accessible name stays "Go to …". */
-    .ep-e .ep-label, .ep-w .ep-label { display: none; }
-    .ep-e, .ep-w { flex-direction: column; gap: 0.3rem; padding: 0.6rem 0.45rem; }
-    .ep-e { right: 0.6rem; } .ep-w { left: 0.6rem; }
-    .ep-n { top: 0.9rem; } .ep-s { bottom: 0.9rem; }
-  }
+  /* Tool cards: one per category, each listing what its app can do. */
+  .cats { width: min(100%, 74rem); margin: 3rem auto 0; }
+  .cats h2 { margin: 0 0 1.25rem; font-size: clamp(1.4rem, 3vw, 1.9rem); letter-spacing: -0.02em; text-align: center; }
+  .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr)); gap: 1rem; }
+  .cat-card { display: flex; flex-direction: column; border: 1px solid var(--border); border-top: 3px solid var(--cat); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+  .cc-head { display: flex; align-items: center; gap: 0.8rem; padding: 1rem 1rem 0.9rem; border-bottom: 1px solid var(--border); color: var(--fg); text-decoration: none; }
+  .cc-head:hover, .cc-head:focus-visible { background: var(--surface-2); }
+  .cc-head:focus-visible { outline-offset: -3px; }
+  .cc-head .tile { color: var(--cat); background: color-mix(in srgb, var(--cat) 14%, transparent); }
+  .cc-head .tile svg { width: 22px; height: 22px; }
+  .cc-title { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
+  .cc-title strong { font-size: 1.08rem; }
+  .cc-title small { color: var(--muted); font-size: 0.85rem; }
+  .cc-go svg { width: 18px; height: 18px; color: var(--muted); transition: transform 0.12s, color 0.12s; }
+  .cc-head:hover .cc-go svg { color: var(--cat); transform: translateX(2px); }
+  .cc-tools { list-style: none; margin: 0; padding: 0.4rem; }
+  .cc-tools a { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-radius: 10px; color: var(--fg); text-decoration: none; }
+  .cc-tools a:hover, .cc-tools a:focus-visible { background: var(--surface-2); }
+  .cc-tools a:focus-visible { outline-offset: -2px; }
+  .cc-text { display: grid; flex: 1; min-width: 0; line-height: 1.35; text-align: left; }
+  .cc-text strong { font-size: 0.92rem; font-weight: 600; }
+  .cc-text small { color: var(--muted); font-size: 0.8rem; }
+  .cats-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem 2rem; margin: 1.5rem 0 0; font-size: 0.85rem; color: var(--muted); }
+  .cats-legend div { display: flex; align-items: center; gap: 0.5rem; }
+  .cats-legend dt { display: flex; align-items: center; gap: 0.35rem; font-weight: 600; color: var(--fg); }
+  .cats-legend .icon svg { width: 16px; height: 16px; color: var(--muted); }
+  .cats-legend dd { margin: 0; }
+  .cats-more { margin: 0.75rem 0 0; text-align: center; font-size: 0.85rem; }
+  .cats-more a { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); }
+  .cats-more a:hover { color: var(--fg); }
+  .cats-more .icon svg { width: 16px; height: 16px; }
 
-  /* Category screens: the app fills the screen; a slim back bar on the side facing the start screen. */
-  .screen-cat { --bb: 16px; }
-  @media (pointer: coarse) { .screen-cat { --bb: 22px; } }
+  /* Category screens: the app fills the screen below the header. */
   .cat-body { position: absolute; inset: 0; overflow: clip; }
-  [data-back='n'] > .cat-body { top: var(--bb); }
-  [data-back='s'] > .cat-body { bottom: var(--bb); }
-  [data-back='w'] > .cat-body { left: var(--bb); }
-  [data-back='e'] > .cat-body { right: var(--bb); }
   .tool-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); color-scheme: normal; }
-  .back-bar {
-    position: absolute; z-index: 3; isolation: isolate; display: grid; place-items: center;
-    margin: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer;
-  }
-  /* The strip's surface grows a little on hover/focus (transform only) without moving the app. */
-  .back-bar::before {
-    content: ''; position: absolute; inset: 0; z-index: -1; background: var(--surface-2);
-    transition: transform 0.12s ease-out, background 0.12s;
-  }
-  .bb-n { top: 0; left: 0; right: 0; height: var(--bb); }
-  .bb-s { bottom: 0; left: 0; right: 0; height: var(--bb); }
-  .bb-w { left: 0; top: 0; bottom: 0; width: var(--bb); }
-  .bb-e { right: 0; top: 0; bottom: 0; width: var(--bb); }
-  .bb-n::before { border-bottom: 1px solid var(--border); transform-origin: top; }
-  .bb-s::before { border-top: 1px solid var(--border); transform-origin: bottom; }
-  .bb-w::before { border-right: 1px solid var(--border); transform-origin: left; }
-  .bb-e::before { border-left: 1px solid var(--border); transform-origin: right; }
-  .back-bar:hover, .back-bar:focus-visible { color: var(--accent); outline: none; }
-  .back-bar:hover::before, .back-bar:focus-visible::before { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
-  .bb-n:is(:hover, :focus-visible)::before, .bb-s:is(:hover, :focus-visible)::before { transform: scaleY(1.6); }
-  .bb-w:is(:hover, :focus-visible)::before, .bb-e:is(:hover, :focus-visible)::before { transform: scaleX(1.6); }
-  .back-bar:focus-visible::before { box-shadow: inset 0 0 0 2px var(--accent); }
-  .bb-chev svg { width: 13px; height: 13px; stroke-width: 2.4; }
-  .bb-label {
-    position: absolute; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; border-radius: 999px;
-    background: var(--fg); color: var(--bg); font-size: 0.82rem; font-weight: 600; white-space: nowrap;
-    opacity: 0; pointer-events: none; transition: opacity 0.12s, transform 0.12s ease-out;
-  }
-  .bb-label .icon svg { width: 15px; height: 15px; }
-  .bb-n .bb-label { top: calc(100% + 10px); transform: translateY(-4px); }
-  .bb-s .bb-label { bottom: calc(100% + 10px); transform: translateY(4px); }
-  .bb-w .bb-label { left: calc(100% + 10px); transform: translateX(-4px); }
-  .bb-e .bb-label { right: calc(100% + 10px); transform: translateX(4px); }
-  .back-bar:is(:hover, :focus-visible) .bb-label { opacity: 1; transform: none; }
 
-  /* Dialogs: all tools and keyboard shortcuts */
+  /* Dialogs: all tools, settings, outputs */
   dialog.picker { width: min(94vw, 40rem); max-width: none; max-height: min(86dvh, 46rem); padding: 0; overflow: hidden; }
   dialog.picker[open] { display: flex; flex-direction: column; animation: picker-in 0.16s ease-out; }
   @keyframes picker-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
   .picker-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1rem 0 1.25rem; }
   .picker-head h2 { margin: 0; }
-  .picker-search { position: relative; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
-  .picker-search-icon { position: absolute; left: 1.85rem; top: 50%; translate: 0 -50%; color: var(--muted); pointer-events: none; }
-  .picker-search-icon svg { width: 18px; height: 18px; }
-  .home .search { width: 100%; margin: 0; border-radius: 999px; padding: 0.6rem 1rem 0.6rem 2.6rem; font-size: 1rem; background: var(--surface); }
-  .picker-list { overflow-y: auto; overscroll-behavior: contain; padding: 0.25rem 0.6rem 1rem; }
-  .picker-list h3 {
-    display: flex; align-items: center; gap: 0.45rem; margin: 0.9rem 0.6rem 0.35rem;
-    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
-  }
-  .picker-list h3 .icon svg { width: 16px; height: 16px; }
-  .picker-list ul { list-style: none; margin: 0; padding: 0; }
-  .picker-list a {
-    display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.6rem; border-radius: 12px;
-    color: var(--fg); text-decoration: none; transition: background 0.1s;
-  }
-  .picker-list a:hover, .picker-list a:focus-visible { background: var(--surface-2); }
-  .picker-list a:focus-visible { outline-offset: -2px; }
-  .picker-list .tile { width: 2.25rem; height: 2.25rem; border-radius: 10px; }
-  .pk-text { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
-  .pk-text small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pk-empty { padding: 1rem 0.6rem; margin: 0; }
-  /* Arrow-key focus moves through rows; their mode tooltips would cover the next row. */
-  .picker :focus-visible .mode::after { opacity: 0; transform: translateY(-3px); }
-  .picker .mode:hover::after { opacity: 1; transform: none; }
-  .picker-legend, .keys-note { margin: 0; padding: 0.75rem 1.25rem 0.9rem; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); }
-  .picker-legend { display: grid; gap: 0.4rem; }
-  .picker-legend div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0.5rem; }
-  .picker-legend dt { display: flex; align-items: center; gap: 0.35rem; font-weight: 600; color: var(--fg); }
-  .picker-legend .icon svg { width: 16px; height: 16px; color: var(--muted); }
-  .picker-legend dd { margin: 0; }
-  @media (max-width: 520px) { .picker-legend div, .keys div { grid-template-columns: 1fr; gap: 0.2rem; } }
-  .keys { display: grid; gap: 0.15rem; margin: 0; padding: 0.75rem 1.25rem 1rem; overflow-y: auto; }
-  .keys div { display: grid; grid-template-columns: 18rem 1fr; gap: 1rem; align-items: center; padding: 0.45rem 0; }
-  .keys div + div { border-top: 1px solid var(--border); }
-  .keys dt { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; color: var(--muted); font-size: 0.85rem; }
-  .keys dd { margin: 0; }
-  kbd {
-    display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.4rem;
-    border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; background: var(--surface-2);
-    color: var(--fg); font: 600 0.8rem/1 var(--mono);
+
+  .dialog-body { overflow-y: auto; overscroll-behavior: contain; padding: 0.25rem 1.25rem 1.25rem; }
+  .dialog-body > .muted { margin: 0.25rem 0 1rem; font-size: 0.88rem; }
+  /* The global `dialog form` rule lays out button rows; the settings form is a regular form. */
+  .settings-dialog form.settings-form { display: grid; justify-content: stretch; margin: 0; }
+
+  .out-total { font-size: 0.9rem; font-weight: 500; }
+  .out-list { list-style: none; margin: 0.75rem 0 0; padding: 0 0.6rem; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+  .out-list:empty { display: none; }
+  .out-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0.4rem 0.4rem 0.6rem; border-radius: 10px; }
+  .out-row:hover { background: var(--surface-2); }
+  .out-text { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
+  .out-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .out-text small { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .out-row .icon-btn { display: grid; place-items: center; text-decoration: none; }
+  .out-row .icon svg { width: 18px; height: 18px; }
+  .out-empty { margin: 0; padding: 1rem 1.25rem 0.5rem; font-size: 0.9rem; }
+  .out-list:not(:empty) + .out-empty { display: none; }
+  .out-acts { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.9rem 1.25rem 1rem; border-top: 1px solid var(--border); margin-top: 0.75rem; }
+
+  .out-toast {
+    position: fixed; z-index: 50; bottom: 1.25rem; left: 50%; translate: -50% 0; max-width: min(90vw, 28rem); margin: 0;
+    padding: 0.55rem 1rem; border-radius: 999px; background: var(--fg); color: var(--bg); box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
+    font-size: 0.88rem; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
+    animation: picker-in 0.16s ease-out;
   }
 
   /* Shown while dragging files over a category screen (the start screen has its own drop zone). */
@@ -313,93 +230,161 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     font-size: 1.4rem; font-weight: 650; opacity: 0; transition: opacity 0.12s;
   }
   .home[data-dragging]:not([data-at='centre']) .hub-veil { opacity: 1; }
+
+  /* Spotlight under the cursor while files are dragged (positioned by followDrag). */
+  .drag-glow {
+    position: fixed; left: 0; top: 0; z-index: 60; width: 0; height: 0; pointer-events: none;
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .drag-glow[data-on] { opacity: 1; }
+  .drag-glow::before, .drag-glow::after { content: ''; position: absolute; border-radius: 50%; translate: -50% -50%; }
+  .drag-glow::before { width: 320px; height: 320px; background: radial-gradient(circle, color-mix(in srgb, var(--accent) 28%, transparent), transparent 65%); }
+  .drag-glow::after { width: 56px; height: 56px; border: 2px solid var(--accent); box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .drag-glow::after { animation: drag-ring 1.2s ease-out infinite; }
+  }
+  @keyframes drag-ring { from { scale: 0.6; opacity: 1; } to { scale: 1.8; opacity: 0; } }
 </style>
 
 <script>
-  import { el, sniff } from '../lib/tool';
+  import { zip } from 'fflate';
+  import { el, formatBytes, sniff } from '../lib/tool';
   import { categories, tools } from '../tools';
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
   // ---------- Dialogs ----------
-  const picker = $<HTMLDialogElement>('[data-picker]');
-  const help = $<HTMLDialogElement>('[data-help]');
-  const pickSearch = $<HTMLInputElement>('[data-picker-search]');
-  const pickRows = [...picker.querySelectorAll<HTMLElement>('li[data-keywords]')];
-  const pickGroups = [...picker.querySelectorAll<HTMLElement>('[data-picker-group]')];
-  const pickEmpty = $('[data-picker-empty]');
-  const visiblePicks = () => [...picker.querySelectorAll<HTMLAnchorElement>('li[data-keywords]:not([hidden]) a')];
+  const settings = $<HTMLDialogElement>('[data-settings-dialog]');
+  const outputs = $<HTMLDialogElement>('[data-outputs]');
+  const dialogs = [settings, outputs];
+  const centreScroll = $('.screen-centre .cell-scroll');
 
-  function filterPicks() {
-    const terms = pickSearch.value.toLowerCase().split(/\s+/).filter(Boolean);
-    for (const li of pickRows) li.hidden = !terms.every((t) => li.dataset.keywords!.includes(t));
-    for (const g of pickGroups) g.hidden = !g.querySelector('li:not([hidden])');
-    pickEmpty.hidden = pickRows.some((li) => !li.hidden);
+  function open(d: HTMLDialogElement) {
+    for (const other of dialogs) if (other !== d) other.close();
+    if (!d.open) d.showModal();
   }
-  function openPicker() {
-    help.close();
-    pickSearch.value = '';
-    filterPicks();
-    if (!picker.open) picker.showModal();
-  }
-  function openHelp() {
-    picker.close();
-    if (!help.open) help.showModal();
-  }
-  pickSearch.addEventListener('input', filterPicks);
-  $('[data-all-tools]').addEventListener('click', openPicker);
-  $('[data-help-open]').addEventListener('click', openHelp);
-  for (const d of [picker, help]) {
+  $('[data-all-tools]').addEventListener('click', () => $('#all-tools').scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth' }));
+  for (const b of document.querySelectorAll('[data-settings-open]')) b.addEventListener('click', () => open(settings));
+  for (const b of document.querySelectorAll('[data-outputs-open]')) b.addEventListener('click', () => open(outputs));
+  for (const d of dialogs) {
     d.querySelector('[data-dialog-close]')!.addEventListener('click', () => d.close());
     // The dialogs have no padding, so a click on the element itself is a click on the backdrop.
     d.addEventListener('click', (e) => e.target === d && d.close());
   }
-  picker.addEventListener('keydown', (e) => {
-    const links = visiblePicks();
-    const i = links.indexOf(document.activeElement as HTMLAnchorElement);
-    if (e.key === 'Enter' && e.target === pickSearch) {
-      e.preventDefault();
-      links[0]?.click();
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const next = e.key === 'ArrowDown' ? Math.min(i + 1, links.length - 1) : i - 1;
-      (next < 0 ? pickSearch : links[next])?.focus();
+
+  // ---------- Outputs: every file any app creates, in memory until the page is left ----------
+  type Output = { id: number; name: string; blob: Blob; url: string; source: string; time: Date };
+  const outList = $('[data-out-list]');
+  const outIcons = $<HTMLTemplateElement>('[data-out-icons]').content;
+  const outIcon = (n: string) => outIcons.querySelector(`[data-i="${n}"]`)!.firstElementChild!.cloneNode(true);
+  const toast = $('[data-out-toast]');
+  let items: Output[] = [];
+  let nextId = 1;
+  let toastTimer = 0;
+
+  function renderOutputs() {
+    const total = items.reduce((n, o) => n + o.blob.size, 0);
+    for (const c of document.querySelectorAll<HTMLElement>('[data-out-count]')) {
+      c.hidden = !items.length;
+      c.textContent = String(items.length);
+    }
+    for (const r of frames.values()) r.el.contentWindow?.postMessage({ type: 'tools:outputs', count: items.length }, location.origin);
+    $('[data-out-total]').textContent = items.length ? `· ${items.length} · ${formatBytes(total)}` : '';
+    $<HTMLButtonElement>('[data-out-all]').disabled = $<HTMLButtonElement>('[data-out-clear]').disabled = !items.length;
+    outList.replaceChildren(
+      ...items.map((o) => {
+        const remove = el('button', { type: 'button', className: 'icon-btn', ariaLabel: `Remove ${o.name}`, title: 'Remove' }, outIcon('trash'));
+        remove.onclick = () => removeOutputs([o]);
+        const time = o.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return el(
+          'li',
+          { className: 'out-row' },
+          el('span', { className: 'out-text' }, el('strong', { textContent: o.name, title: o.name }), el('small', { textContent: `${formatBytes(o.blob.size)} · ${o.source} · ${time}` })),
+          el('a', { className: 'icon-btn', href: o.url, download: o.name, ariaLabel: `Download ${o.name}`, title: 'Download' }, outIcon('download')),
+          remove,
+        );
+      }),
+    );
+  }
+  function removeOutputs(list: Output[]) {
+    list.forEach((o) => URL.revokeObjectURL(o.url));
+    items = items.filter((o) => !list.includes(o));
+    renderOutputs();
+  }
+  function addOutput(blob: Blob, name: string, source: string) {
+    items.unshift({ id: nextId++, name, blob, url: URL.createObjectURL(blob), source, time: new Date() });
+    renderOutputs();
+    for (const c of document.querySelectorAll<HTMLElement>('[data-out-count]')) {
+      c.classList.remove('pulse');
+      void c.offsetWidth;
+      c.classList.add('pulse');
+    }
+    toast.textContent = `Saved to Outputs: ${name}`;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => (toast.hidden = true), 2600);
+  }
+  /** `a.txt`, `a.txt` → `a.txt`, `a (2).txt`: archive entries must be unique. */
+  function uniqueNames(names: string[]) {
+    const used = new Set<string>();
+    return names.map((n) => {
+      let name = n;
+      for (let i = 2; used.has(name.toLowerCase()); i++) name = n.replace(/(\.[^./]*)?$/, (ext) => ` (${i})${ext}`);
+      used.add(name.toLowerCase());
+      return name;
+    });
+  }
+  $('[data-out-clear]').addEventListener('click', () => {
+    if (confirm(`Remove all ${items.length} outputs? Download anything you still need first.`)) removeOutputs([...items]);
+  });
+  $('[data-out-all]').addEventListener('click', async () => {
+    if (items.length === 1) return outList.querySelector<HTMLAnchorElement>('a[download]')!.click();
+    const btn = $<HTMLButtonElement>('[data-out-all]');
+    btn.disabled = true;
+    try {
+      const names = uniqueNames(items.map((o) => o.name));
+      const entries = Object.fromEntries(await Promise.all(items.map(async (o, i) => [names[i], new Uint8Array(await o.blob.arrayBuffer())] as const)));
+      // Outputs are mostly compressed already (images, audio, PDFs, archives): store only.
+      const data = await new Promise<Uint8Array>((res, rej) => zip(entries, { level: 0 }, (err, out) => (err ? rej(err) : res(out))));
+      const url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'application/zip' }));
+      el('a', { href: url, download: 'outputs.zip' }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (err) {
+      console.error(err);
+      alert('Could not build the ZIP. Download the files one by one instead.');
+    } finally {
+      btn.disabled = !items.length;
     }
   });
-  // Picking a tool opens its category app in that mode; modified clicks still open the standalone page.
-  picker.addEventListener('click', (e) => {
-    const a = (e.target as Element).closest<HTMLAnchorElement>('a[data-open-slug]');
-    if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    e.preventDefault();
-    picker.close();
-    openTool(a.dataset.openScreen!, a.dataset.openSlug!);
+  addEventListener('message', (e: MessageEvent) => {
+    if (e.origin !== location.origin) return;
+    const d = e.data;
+    if (d?.type === 'tools:output' && d.blob instanceof Blob) {
+      const from = [...frames].find(([, r]) => r.el.contentWindow === e.source)?.[0];
+      addOutput(d.blob, String(d.name || 'output'), categories.find((c) => c.id === from)?.label ?? 'Tool');
+    } else if (d?.type === 'tools:open') open(d.what === 'settings' ? settings : outputs);
+    else if (d?.type === 'tools:go' && screens.has(d.to)) {
+      if (d.to === 'centre') go('centre');
+      else openTool(d.to, selected.get(d.to));
+    }
   });
 
   // ---------- Hub: screens and app frames ----------
-  type Dir = 'n' | 'e' | 's' | 'w';
   type Frame = { src: string; el: HTMLIFrameElement; loaded: boolean };
   const home = $('.home');
   const hub = $('[data-hub]');
   const screens = new Map([...hub.querySelectorAll<HTMLElement>('[data-screen]')].map((s) => [s.dataset.screen!, s]));
-  const centreScroll = $('.screen-centre .cell-scroll');
-  const DIRS: Dir[] = ['n', 'e', 's', 'w'];
-  const VEC: Record<Dir, [number, number]> = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
-  const EASE = 'cubic-bezier(0.33, 1, 0.68, 1)';
   let active = 'centre';
   let running: Animation[] = [];
   let leaving: HTMLElement | undefined;
-  let peeking: HTMLElement | undefined;
   const frames = new Map<string, Frame>();
   // The tool each category screen shows (decides the app mode); none = the app's default.
   const selected = new Map<string, string>();
   // Files from the last drop, in memory only, and the screen they were routed to.
   let held: { screen: string; files: File[] } | undefined;
 
-  const neighbour = (from: string, dir: Dir) => screens.get(from)?.dataset[dir];
-  const dirTo = (from: string, to: string) => DIRS.find((d) => neighbour(from, d) === to);
   const toolBySlug = (slug: string) => tools.find((t) => t.slug === slug);
-  const tf = (xPct: number, yPct: number, x = 0, y = 0) => `translate(calc(${xPct}% + ${x}px), calc(${yPct}% + ${y}px))`;
 
   function frameSrc(id: string) {
     const mode = toolBySlug(selected.get(id) ?? '')?.appMode;
@@ -416,7 +401,7 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     const tool = toolBySlug(selected.get(id) ?? '');
     return tool?.appMode ? `#${id}/${tool.slug.split('/')[1]}` : `#${id}`;
   }
-  /** Keep the URL shareable without adding history entries for moves and mode changes. */
+  /** Keep the URL shareable without adding history entries for mode changes. */
   function syncUrl() {
     const want = hashFor(active);
     if (location.hash !== want) history.replaceState(history.state, '', want || location.pathname + location.search);
@@ -433,18 +418,15 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     syncUrl();
   }
 
-  /** Jump every running transition to its end state. */
   function settle() {
     running.forEach((a) => a.cancel());
     running = [];
     leaving?.classList.remove('leaving');
-    peeking?.classList.remove('peek');
-    leaving = peeking = undefined;
-    for (const s of screens.values()) s.style.transform = '';
+    leaving = undefined;
   }
 
-  /** Show `to`, sliding it in from the `dir` edge; otherwise cross-fade. (x, y): current gesture offset in px. */
-  function navigate(to: string, dir = dirTo(active, to), x = 0, y = 0) {
+  /** Show `to` with a short cross-fade. */
+  function navigate(to: string) {
     if (to === active) return;
     const from = screens.get(active)!;
     const target = screens.get(to)!;
@@ -453,32 +435,20 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     if (reduceMotion.matches) return;
     leaving = from;
     from.classList.add('leaving');
-    const opts: KeyframeAnimationOptions = { duration: 280, easing: EASE };
-    if (dir) {
-      const [vx, vy] = VEC[dir];
-      running = [
-        from.animate([{ transform: tf(0, 0, x, y), opacity: 1 }, { transform: tf(-vx * 100, -vy * 100), opacity: 0.4 }], opts),
-        target.animate([{ transform: tf(vx * 100, vy * 100, x, y) }, { transform: tf(0, 0) }], opts),
-      ];
-    } else {
-      running = [
-        from.animate([{ opacity: 1 }, { opacity: 0 }], opts),
-        target.animate([{ opacity: 0, transform: 'scale(0.98)' }, { opacity: 1, transform: 'none' }], opts),
-      ];
-    }
+    const opts: KeyframeAnimationOptions = { duration: 220, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' };
+    running = [
+      from.animate([{ opacity: 1 }, { opacity: 0 }], opts),
+      target.animate([{ opacity: 0, transform: 'scale(0.985)' }, { opacity: 1, transform: 'none' }], opts),
+    ];
     running[0].onfinish = () => leaving === from && settle();
   }
 
   /** Navigate and, when focus is inside the hub (or a frame), carry it along so it isn't lost in an inert screen. */
-  function go(to: string, dir?: Dir) {
+  function go(to: string) {
     const focusInside = hub.contains(document.activeElement) && document.activeElement !== hub;
-    navigate(to, dir);
+    navigate(to);
     if (focusInside) (to === 'centre' ? hub : frames.get(to)?.el ?? hub).focus({ preventScroll: true });
   }
-  const move = (dir: Dir) => {
-    const next = neighbour(active, dir);
-    if (next) go(next, dir);
-  };
 
   /** Create the app frame for a screen in its selected mode, unless it already shows exactly that. */
   function ensureFrame(id: string) {
@@ -550,6 +520,7 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     if (!doc) return;
     syncTheme(doc);
     inject(id, rec);
+    rec.el.contentWindow?.postMessage({ type: 'tools:outputs', count: items.length }, location.origin);
     doc.addEventListener('keydown', (e) => onShortcut(e, doc));
     // Site links (privacy, settings, standalone pages) leave the hub instead of navigating inside the frame.
     doc.addEventListener('click', (e) => {
@@ -560,6 +531,9 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     });
     // Files dropped outside the app's own drop zone are routed like drops on the hub (and never open in the frame).
     doc.addEventListener('dragover', (e) => hasFiles(e) && e.preventDefault());
+    // Capture phase: apps may stop the event in their own drop zones; the glow follows the cursor regardless.
+    doc.addEventListener('dragover', (e) => hasFiles(e) && followDrag(e, rec.el), true);
+    doc.addEventListener('drop', () => glow.removeAttribute('data-on'), true);
     doc.addEventListener('drop', (e) => {
       if (!hasFiles(e) || e.defaultPrevented) return;
       e.preventDefault();
@@ -567,7 +541,7 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     });
   }
 
-  // Prefetch a category's app when the pointer or focus reaches a control that leads there.
+  // Prefetch a category's app when the pointer or focus reaches its badge.
   for (const type of ['pointerover', 'focusin'] as const) {
     hub.addEventListener(type, (e) => {
       const a = (e.target as Element).closest?.<HTMLElement>('[data-go]');
@@ -575,339 +549,50 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     });
   }
 
-  // ---------- Keyboard shortcuts (hub document and every app frame) ----------
-  const KEY_DIR: Record<string, Dir> = { ArrowUp: 'n', KeyK: 'n', ArrowDown: 's', KeyJ: 's', ArrowLeft: 'w', KeyH: 'w', ArrowRight: 'e', KeyL: 'e' };
-  // Controls that use these keys themselves: fields, sliders, radio groups, tabs, the image-editor stage and the waveform.
-  const BUSY = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="radiogroup"], [role="application"], canvas[tabindex]';
+  // ---------- Keyboard: Esc back to the start (hub document and every app frame) ----------
+  const BUSY = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="application"], canvas[tabindex]';
 
   function onShortcut(e: KeyboardEvent, doc: Document = document) {
-    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.isComposing) return;
-    if (picker.open || help.open || doc.querySelector('dialog[open]')) return;
-    const dir = KEY_DIR[e.code];
-    if (e.altKey) {
-      if (dir && !e.shiftKey && neighbour(active, dir)) {
-        e.preventDefault();
-        move(dir);
-      }
-      return;
-    }
-    const target = e.target as Element;
-    if (target.closest?.(BUSY) || (dir && e.code.startsWith('Arrow') && target.closest?.('[role="tab"]'))) return;
-    if (dir && !e.shiftKey) {
-      // A tall start screen (small viewports) scrolls before moving on.
-      if (active === 'centre' && (dir === 'n' || dir === 's') && canScroll(dir)) {
-        e.preventDefault();
-        return centreScroll.scrollBy({ top: (dir === 's' ? 1 : -1) * centreScroll.clientHeight * 0.8, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
-      }
-      // In an app, keys that lead nowhere keep their normal meaning (e.g. scrolling the page).
-      if (!neighbour(active, dir)) return;
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+    if (dialogs.some((d) => d.open) || doc.querySelector('dialog[open]')) return;
+    if ((e.target as Element).closest?.(BUSY)) return;
+    if (e.key === 'Escape' && active !== 'centre') {
       e.preventDefault();
-      return move(dir);
-    }
-    if (e.key === 'Escape' || e.key === '0') {
-      if (active === 'centre') return;
-      e.preventDefault();
-      return go('centre');
-    }
-    if (e.key === '/') {
-      e.preventDefault();
-      return openPicker();
-    }
-    if (e.key === '?') {
-      e.preventDefault();
-      return openHelp();
+      go('centre');
     }
   }
   document.addEventListener('keydown', (e) => onShortcut(e));
 
-  // ---------- Start screen: wheel, trackpad and touch move between screens ----------
-  let hubW = innerWidth;
-  let hubH = innerHeight;
-  const centre = screens.get('centre')!;
-  const markTall = () => centre.classList.toggle('scrolls', centreScroll.scrollHeight > centreScroll.clientHeight + 1);
-  new ResizeObserver(([entry]) => {
-    hubW = entry.contentRect.width;
-    hubH = entry.contentRect.height;
-    markTall();
-  }).observe(hub);
-  new ResizeObserver(markTall).observe(centreScroll.firstElementChild!);
-
-  /** True when the start screen's content can still scroll toward `dir` (only vertical content scrolls). */
-  function canScroll(dir: Dir) {
-    if (dir === 's') return centreScroll.scrollTop + centreScroll.clientHeight < centreScroll.scrollHeight - 1;
-    if (dir === 'n') return centreScroll.scrollTop > 0;
-    return false;
-  }
-
-  /** A pull in progress: `d` is the on-screen offset along `axis`; `dir` the direction of travel it points to. */
-  type Pull = { axis: 'x' | 'y'; d: number; dir?: Dir; next?: string };
-  let paintFrame = 0;
-  let pending: Pull | undefined;
-
-  function paint(p: Pull) {
-    pending = p;
-    paintFrame ||= requestAnimationFrame(() => {
-      paintFrame = 0;
-      const g = pending!;
-      const cur = screens.get(active)!;
-      const [x, y] = g.axis === 'x' ? [g.d, 0] : [0, g.d];
-      cur.style.transform = tf(0, 0, x, y);
-      const peek = g.next ? screens.get(g.next) : undefined;
-      if (peeking && peeking !== peek) {
-        peeking.classList.remove('peek');
-        peeking.style.transform = '';
-      }
-      peeking = peek;
-      if (peek && g.dir) {
-        const [vx, vy] = VEC[g.dir];
-        peek.classList.add('peek');
-        peek.style.transform = tf(vx * 100, vy * 100, x, y);
-      }
-    });
-  }
-
-  /** Finish a pull: commit to the neighbour from the current offset, or spring back from it. */
-  function release(p: Pull, commit: boolean) {
-    cancelAnimationFrame(paintFrame);
-    paintFrame = 0;
-    const [x, y] = p.axis === 'x' ? [p.d, 0] : [0, p.d];
-    if (commit && p.next) return navigate(p.next, p.dir, x, y);
-    const cur = screens.get(active)!;
-    const peek = p.next ? screens.get(p.next) : undefined;
-    settle();
-    if (reduceMotion.matches || !p.d) return;
-    const opts: KeyframeAnimationOptions = { duration: 240, easing: EASE };
-    running = [cur.animate([{ transform: tf(0, 0, x, y) }, { transform: 'none' }], opts)];
-    if (peek && p.dir) {
-      const [vx, vy] = VEC[p.dir];
-      peeking = peek;
-      peek.classList.add('peek');
-      running.push(peek.animate([{ transform: tf(vx * 100, vy * 100, x, y) }, { transform: tf(vx * 100, vy * 100) }], { ...opts, fill: 'forwards' }));
-      running[1].onfinish = () => peeking === peek && settle();
-    }
-  }
-
-  const travel = (axis: 'x' | 'y', offset: number): Dir => (axis === 'x' ? (offset < 0 ? 'e' : 'w') : offset < 0 ? 's' : 'n');
-  const rubber = (d: number) => d * 0.3;
-
-  // Wheel input on the start screen.
-  // - Mouse notch: one screen at once.
-  // - Trackpad: the screens follow the fingers 1:1 (light resistance) from the first event; the axis locks after 8 px.
-  //   The gesture ends on 120 ms of silence or when momentum starts decaying, then snaps (commit past 20% or on a
-  //   flick, else spring back from the current offset).
-  // - After a notch or a snap, wheel input is swallowed until 180 ms of silence or until deltas grow again after
-  //   decaying (a new swipe during momentum), so momentum can never trigger a second move.
-  type Gesture = Pull & { sx: number; sy: number; locked: boolean; offset: number; v: number; vmax: number; t: number; peak: number; last: number; falling: number };
-  let gesture: Gesture | undefined;
-  let cooling: { last: number; decayed: number; axis: 'x' | 'y'; sign: number } | undefined;
-  let scrolledContent = false;
-  let silence = 0;
-  let gestureEnd = 0;
-  type LegacyWheel = WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number };
-
-  /** Mouse wheels report line/page units or legacy wheelDelta in multiples of 120 that aren't 3× the pixel delta (trackpads are). */
-  function isNotch(e: LegacyWheel, axis: 'x' | 'y') {
-    if (e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return true;
-    const legacy = axis === 'x' ? e.wheelDeltaX : e.wheelDeltaY;
-    const delta = axis === 'x' ? e.deltaX : e.deltaY;
-    return !!legacy && legacy % 120 === 0 && legacy !== -3 * delta;
-  }
-
-  function endGesture() {
-    clearTimeout(gestureEnd);
-    const g = gesture;
-    if (!g) return;
-    gesture = undefined;
-    const size = g.axis === 'x' ? hubW : hubH;
-    const commit = !!g.next && (Math.abs(g.offset) > size * 0.2 || (g.vmax > 0.8 && Math.abs(g.offset) > 24));
-    // Only a move needs its momentum swallowed; after a spring-back the next swipe must start right away.
-    if (commit) cooling = { last: g.last, decayed: g.falling, axis: g.axis, sign: -Math.sign(g.offset) };
-    release(g, commit);
-  }
-
-  hub.addEventListener(
-    'wheel',
-    (e: LegacyWheel) => {
-      if (e.ctrlKey) return; // pinch zoom
-      clearTimeout(silence);
-      silence = window.setTimeout(() => {
-        cooling = undefined;
-        scrolledContent = false;
-        hub.classList.remove('wheeling');
-      }, 180);
-      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? hubH : 1;
-      const dx = e.deltaX * unit;
-      const dy = e.deltaY * unit;
-      const mag = Math.hypot(dx, dy);
-      if (cooling) {
-        // A fresh swipe during the tail of momentum: deltas grow clearly after having decayed, or reverse direction.
-        const along = cooling.axis === 'x' ? dx : dy;
-        const reversed = along !== 0 && Math.sign(along) === -cooling.sign;
-        const fresh = reversed || (cooling.decayed >= 2 && mag > cooling.last * 1.5 && mag > cooling.last + 4);
-        cooling.decayed = mag < cooling.last ? cooling.decayed + 1 : cooling.decayed;
-        cooling.last = mag;
-        if (!fresh) return e.preventDefault();
-        cooling = undefined;
-        hub.classList.remove('wheeling');
-      }
-      if (active !== 'centre' || !mag) return; // app frames own their wheel
-      if (!gesture) {
-        const axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-        const delta = axis === 'x' ? dx : dy;
-        if (axis === 'y' && canScroll(delta > 0 ? 's' : 'n')) {
-          scrolledContent = true;
-          return;
-        }
-        e.preventDefault();
-        // Content that just scrolled to its edge needs a fresh gesture to move on.
-        if (scrolledContent) return;
-        hub.classList.add('wheeling');
-        if (isNotch(e, axis)) {
-          cooling = { last: mag, decayed: 0, axis, sign: Math.sign(delta) };
-          return move(travel(axis, -delta));
-        }
-        settle();
-        gesture = { axis, d: 0, sx: 0, sy: 0, locked: false, offset: 0, v: 0, vmax: 0, t: e.timeStamp, peak: 0, last: 0, falling: 0 };
-      }
-      e.preventDefault();
-      const g = gesture;
-      g.sx -= dx;
-      g.sy -= dy;
-      // Provisional axis follows the larger travel until 8 px, then stays locked for the gesture.
-      if (!g.locked) {
-        g.axis = Math.abs(g.sx) > Math.abs(g.sy) ? 'x' : 'y';
-        g.locked = Math.hypot(g.sx, g.sy) >= 8;
-      }
-      const delta = g.axis === 'x' ? dx : dy;
-      const along = Math.abs(delta);
-      const dt = e.timeStamp - g.t;
-      g.t = e.timeStamp;
-      g.offset = g.axis === 'x' ? g.sx : g.sy;
-      // The first event has no interval to measure speed against.
-      if (dt > 0) {
-        g.v = 0.7 * (-delta / dt) + 0.3 * g.v;
-        if (Math.sign(g.v) === Math.sign(g.offset)) g.vmax = Math.max(g.vmax, Math.abs(g.v));
-      }
-      // Momentum (fingers lifted) shows up as deltas that keep shrinking after the peak.
-      if (along > g.peak) g.peak = along;
-      g.falling = along < g.last && along < g.peak * 0.6 ? g.falling + 1 : 0;
-      g.last = along;
-      g.dir = travel(g.axis, g.offset);
-      g.next = neighbour(active, g.dir);
-      if (g.next) ensureFrame(g.next);
-      const size = g.axis === 'x' ? hubW : hubH;
-      g.d = g.next ? Math.max(-size, Math.min(size, g.offset * 0.9)) : rubber(g.offset);
-      paint(g);
-      clearTimeout(gestureEnd);
-      if (g.locked && g.falling >= 3) return endGesture();
-      gestureEnd = window.setTimeout(endGesture, 120);
-    },
-    { passive: false },
-  );
-
-  // Touch/pen swipes on the start screen: the screen follows the finger (rubber-banded where there is nothing to go to).
-  type Drag = Pull & { id: number; x0: number; y0: number; v: number; t: number; raw: number };
-  let drag: Drag | undefined;
-  let dragAxis: 'x' | 'y' | undefined;
-  let suppressClick = false;
-  let swiped = false;
-
-  hub.addEventListener('pointerdown', (e) => {
-    suppressClick = swiped = false;
-    if (active !== 'centre' || e.pointerType === 'mouse' || !e.isPrimary) return;
-    settle();
-    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: 'x', d: 0, raw: 0, v: 0, t: e.timeStamp };
-  });
-  hub.addEventListener('pointermove', (e) => {
-    if (!drag || e.pointerId !== drag.id) return;
-    const dx = e.clientX - drag.x0;
-    const dy = e.clientY - drag.y0;
-    if (!dragAxis) {
-      if (Math.hypot(dx, dy) < 10) return;
-      dragAxis = drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-      hub.setPointerCapture(e.pointerId);
-      hub.classList.add('dragging');
-    }
-    const raw = drag.axis === 'x' ? dx : dy;
-    const dt = e.timeStamp - drag.t;
-    if (dt > 0) drag.v = 0.8 * ((raw - drag.raw) / dt) + 0.2 * drag.v;
-    drag.t = e.timeStamp;
-    drag.raw = raw;
-    drag.dir = travel(drag.axis, raw);
-    drag.next = neighbour(active, drag.dir);
-    if (drag.next) ensureFrame(drag.next);
-    drag.d = drag.next ? raw : rubber(raw);
-    paint(drag);
-  });
-  function endDrag(e: PointerEvent) {
-    if (!drag || e.pointerId !== drag.id) return;
-    const done = drag;
-    const locked = dragAxis;
-    drag = dragAxis = undefined;
-    hub.classList.remove('dragging');
-    if (!locked) return;
-    suppressClick = true;
-    // Cancelled: the browser took the gesture for native scrolling; touchend decides edge swipes.
-    swiped = e.type === 'pointerup';
-    release(done, e.type === 'pointerup' && (Math.abs(done.raw) > 50 || (Math.abs(done.v) > 0.4 && Math.abs(done.raw) > 15)));
-  }
-  hub.addEventListener('pointerup', endDrag);
-  hub.addEventListener('pointercancel', endDrag);
-  // A swipe that started on a link or the drop zone must not also click it.
-  hub.addEventListener(
-    'click',
-    (e) => {
-      if (!suppressClick) return;
-      suppressClick = false;
-      e.preventDefault();
-      e.stopPropagation();
-    },
-    true,
-  );
-  // A tall start screen pans vertically natively (the pointer is cancelled), so decide edge swipes on touchend.
-  let touch: { y: number; top: boolean; bottom: boolean } | undefined;
-  hub.addEventListener(
-    'touchstart',
-    (e) => {
-      touch = undefined;
-      if (active !== 'centre' || !centre.classList.contains('scrolls') || e.touches.length > 1) return;
-      touch = { y: e.touches[0].clientY, top: !canScroll('n'), bottom: !canScroll('s') };
-    },
-    { passive: true },
-  );
-  hub.addEventListener(
-    'touchend',
-    (e) => {
-      if (!touch || swiped) return;
-      const dy = e.changedTouches[0].clientY - touch.y;
-      const dir: Dir | undefined = dy > 60 && touch.top && !canScroll('n') ? 'n' : dy < -60 && touch.bottom && !canScroll('s') ? 's' : undefined;
-      touch = undefined;
-      if (dir) move(dir);
-    },
-    { passive: true },
-  );
-
-  // Edge pills, category chips, back bars and the title link move the hub instead of navigating.
+  // Category cards and badges, tool rows and the brand switch screens instead of navigating.
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const target = e.target as Element;
+    if (dialogs.some((d) => d.contains(target))) return;
+    const tool = target.closest<HTMLAnchorElement>('a[data-open-slug]');
+    if (tool) {
+      e.preventDefault();
+      return openTool(tool.dataset.openScreen!, tool.dataset.openSlug!);
+    }
     const control = target.closest<HTMLElement>('[data-go]');
     const a = target.closest<HTMLAnchorElement>('a[href]');
-    if (picker.contains(target)) return;
     const id = control?.dataset.go ?? (a && a.pathname === location.pathname && a.search === location.search ? a.hash.slice(1) || 'centre' : undefined);
     if (!id || !screens.has(id)) return;
     e.preventDefault();
-    if (id === 'centre' || !control) go(id, control?.dataset.dir as Dir | undefined);
-    else openTool(id, selected.get(id));
+    if (id === 'centre') {
+      if (active === 'centre') centreScroll.scrollTo({ top: 0, behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+      go(id);
+    } else openTool(id, selected.get(id));
   });
 
   // ---------- Drops: route files to the matching app and mode ----------
   // Files are handed over in memory only: nothing is persisted or uploaded.
-  type Kind = 'image' | 'pdf' | 'audio' | 'json' | 'js' | 'gzip' | 'other';
+  type Kind = 'image' | 'pdf' | 'audio' | 'gpx' | 'json' | 'js' | 'markdown' | 'text' | 'archive' | 'other';
   const drop = $('[data-hero-drop]');
   const input = $<HTMLInputElement>('[data-hero-input]');
   const status = $('[data-drop-status]');
   const AUDIO_EXT = /\.(m4a|aac|mp3|wav|ogg|oga|opus|flac|weba)$/i;
+  const ARCHIVE_EXT = /\.(zip|7z|rar|tar|tgz|gz|xz|txz|bz2|tbz2?|iso|cab)$/i;
+  const TEXT_EXT = /\.(txt|csv|tsv|log|xml|html?|css|scss|ts|tsx|jsx|ya?ml|toml|ini|env|sh|py|rb|go|rs|java|c|h|cpp|sql|svg)$/i;
   // ISO-BMFF brands that carry audio; excludes HEIC/AVIF (also "ftyp").
   const AUDIO_BRAND = /^(M4A |M4B |M4P |mp4[12]|isom|iso[2-6]|dash|3gp)/;
 
@@ -916,8 +601,9 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     if (t === 'jpeg' || t === 'png' || t === 'webp') return 'image';
     // SVG has no magic bytes; the editor re-checks the content before rasterizing.
     if (f.type === 'image/svg+xml' || /\.svg$/i.test(f.name)) return 'image';
-    if (t === 'pdf' || t === 'gzip') return t;
-    if (t === 'zip') return 'other';
+    if (t === 'pdf') return t;
+    if (f.type === 'application/gpx+xml' || /\.gpx$/i.test(f.name)) return 'gpx';
+    if (t === 'zip' || t === 'gzip' || ARCHIVE_EXT.test(f.name)) return 'archive';
     const b = new Uint8Array(await f.slice(0, 12).arrayBuffer());
     const s = (o: number, str: string) => [...str].every((c, i) => b[o + i] === c.charCodeAt(0));
     const ascii = String.fromCharCode(...b.subarray(8, 12));
@@ -926,14 +612,17 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     if (f.type.startsWith('audio/') || AUDIO_EXT.test(f.name)) return 'audio';
     if (f.type === 'application/json' || /\.json$/i.test(f.name)) return 'json';
     if (/^(text|application)\/javascript$/.test(f.type) || /\.[mc]?js$/i.test(f.name)) return 'js';
+    if (/\.(md|markdown)$/i.test(f.name)) return 'markdown';
+    if (f.type.startsWith('text/') || TEXT_EXT.test(f.name)) return 'text';
     return 'other';
   }
+
+  const TEXTUAL: Kind[] = ['json', 'js', 'markdown', 'text'];
 
   /** Drop → app + mode, as one history entry (Back returns to where the files were dropped). */
   async function handle(list: File[]) {
     if (!list.length) return;
-    picker.close();
-    help.close();
+    dialogs.forEach((d) => d.close());
     status.textContent = '';
     let kinds: Kind[];
     try {
@@ -942,16 +631,19 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
       status.textContent = 'Could not read that file.';
       return;
     }
-    const kind = kinds.every((k) => k === kinds[0]) ? kinds[0] : 'other';
+    const kind = kinds.every((k) => k === kinds[0]) ? kinds[0] : kinds.every((k) => TEXTUAL.includes(k)) ? 'text' : 'other';
     const single = list.length === 1;
     const [screen, slug] =
       kind === 'image' ? ['images', 'images/editor']
       : kind === 'pdf' ? ['pdf', single ? 'pdf/organize' : 'pdf/merge']
       : kind === 'audio' ? ['audio', 'audio/convert']
-      : single && kind === 'json' ? ['files', 'text/json']
-      : single && kind === 'js' ? ['files', 'text/js-minify']
-      : single && kind === 'gzip' ? ['files', 'files/gzip']
-      : ['files', 'files/zip'];
+      : kind === 'json' ? ['text', 'text/json']
+      : kind === 'js' ? ['text', 'text/js-minify']
+      : kind === 'markdown' ? ['text', 'text/markdown']
+      : kind === 'text' ? ['text', undefined]
+      : kind === 'gpx' ? ['gpx', single ? 'gpx/edit' : 'gpx/merge']
+      : kind === 'archive' ? ['files', 'files/extract']
+      : ['files', undefined];
     held = { screen, files: list };
     openTool(screen, slug, true);
   }
@@ -970,7 +662,9 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     if (!hasFiles(e)) return;
     e.preventDefault();
     setDragging(true);
+    followDrag(e);
   });
+  document.addEventListener('drop', () => glow.removeAttribute('data-on'), true);
   document.addEventListener('dragleave', (e) => {
     if (!e.relatedTarget) setDragging(false);
   });
@@ -982,7 +676,7 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   });
   document.addEventListener('paste', (e) => {
     const pasted = [...(e.clipboardData?.files ?? [])];
-    if (!pasted.length) return;
+    if (!pasted.length || (e.target as Element).closest?.('input, textarea')) return;
     e.preventDefault();
     void handle(pasted);
   });
@@ -1006,4 +700,9 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     if (slug) selected.set(screen, slug);
     setActive(screen);
   }
+  renderOutputs();
+  // Outputs live in memory only: warn before they are lost.
+  addEventListener('beforeunload', (e) => {
+    if (items.length) e.preventDefault();
+  });
 </script>
