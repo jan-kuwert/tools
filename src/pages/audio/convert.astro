@@ -57,6 +57,15 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
             <div><dt>Out</dt><dd class="seg" data-readout="out">-:--.---</dd></div>
             <div><dt>Pos</dt><dd class="seg" data-readout="pos">-:--.---</dd></div>
           </dl>
+          <div class="sil-bar" data-silence hidden>
+            <p class="sil-text" data-silence-text></p>
+            <div class="sil-keys">
+              <button class="soft" type="button" data-sil="both">Trim</button>
+              <button class="soft" type="button" data-sil="start">Start only</button>
+              <button class="soft" type="button" data-sil="end">End only</button>
+              <button class="soft" type="button" data-sil="ignore">Ignore</button>
+            </div>
+          </div>
           <div class="wave-scroll" data-scroll>
             <div class="wave-track" data-track>
               <canvas role="img" aria-label="Waveform with time ruler. Drag to select a range."></canvas>
@@ -119,6 +128,13 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
                 <label><input type="radio" name="edit" value="remove" /><span>Remove</span></label>
               </div>
             </div>
+          </div>
+          <div class="sil-row">
+            <button class="key key-sm" type="button" data-detect>Detect silence</button>
+            <fieldset class="pbs pbs-mini">
+              <legend class="cap">Threshold</legend>
+              {[-40, -50, -60].map((db) => <label class="pb"><input type="radio" name="sil-db" value={db} checked={db === -50} aria-label={`−${-db} dBFS`} /><span>−{-db} dB</span></label>)}
+            </fieldset>
           </div>
           <p class="mod-note" id="dk-time">Times as m:ss.mmm (e.g. 0:01.500) or seconds.</p>
           <p class="mod-note" id="dk-hint">On the display, drag to select or drag a handle. On a handle, ←/→ move 10 ms, Shift+←/→ 1 s. Space plays or pauses.</p>
@@ -209,6 +225,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
         <h2 class="mod-title" id="tray-title">Output tray</h2>
         <ul class="tray-list" data-tray-list></ul>
       </section>
+      <p class="visually-hidden" data-announce aria-live="polite"></p>
     </section>
 
     <dialog data-consent aria-labelledby="consent-title">
@@ -359,6 +376,19 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   .screen-msg:empty { display: none; }
   .dk-display[data-screen-state='error'] .screen-msg { color: var(--led-a); }
 
+  /* Silence prompt: a line on the display with soft keys. */
+  .sil-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 12px; border-bottom: 1px solid color-mix(in srgb, var(--phos) 14%, transparent); background: color-mix(in srgb, var(--phos) 6%, transparent); }
+  .sil-bar[hidden] { display: none; }
+  .sil-text { flex: 1 1 18rem; margin: 0; font: 500 0.8rem/1.35 var(--mono); text-shadow: 0 0 6px var(--phos-glow); }
+  .sil-keys { display: flex; flex-wrap: wrap; gap: 6px; }
+  .soft {
+    min-height: 28px; padding: 0 0.6rem; border: 1px solid var(--phos-dim); border-radius: 4px; background: transparent; color: var(--phos);
+    font: 700 0.64rem/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+  }
+  .soft:hover { background: color-mix(in srgb, var(--phos) 12%, transparent); }
+  .soft:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .soft[hidden] { display: none; }
+
   /* Keys */
   .deck .key {
     display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; min-height: 40px; padding: 0 0.85rem;
@@ -459,6 +489,19 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   .pbs-amber .pb input:checked + span::before { background: var(--led-a); box-shadow: 0 0 6px var(--led-a); }
   .pb input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
   .pbs:disabled .pb span { opacity: 0.42; }
+  .sil-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; }
+  .pbs-mini { margin: 0; flex-wrap: nowrap; }
+  .pbs-mini legend { margin-bottom: 5px; padding: 0; }
+  .pbs-mini .pb { flex: none; }
+  .pbs-mini .pb span { gap: 4px; padding: 5px 8px 6px; font-size: 0.6rem; }
+  .pbs-mini .pb span::before { width: 14px; height: 2px; }
+
+  /* Deep links (?mode=…) briefly ring the module they point at. */
+  .deck .flash { outline: 3px solid color-mix(in srgb, var(--accent) 65%, transparent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .deck .flash { animation: flash-ring 1.1s ease-out forwards; }
+  }
+  @keyframes flash-ring { 0%, 55% { outline-color: color-mix(in srgb, var(--accent) 65%, transparent); } 100% { outline-color: transparent; } }
 
   /* Vertical faders */
   .out-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -515,7 +558,9 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   }
   @media (max-width: 760px) {
     .deck { --deck-w: calc(100vw - 1rem); grid-template-columns: minmax(0, 1fr); grid-template-areas: 'display' 'edit' 'out' 'cloud' 'tray'; padding: 8px; gap: 8px; }
-    .screen { height: 230px; }
+    /* The waveform keeps its height; readouts and the silence prompt add to the display instead of squeezing it. */
+    .screen { height: auto; }
+    .wave-scroll { flex: none; height: 160px; }
     .deck[data-empty] .screen { height: auto; min-height: 260px; }
     .readouts { gap: 2px 14px; padding: 6px 10px 4px; }
     .seg { font-size: 0.85rem; }
@@ -539,7 +584,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   :root[data-embed] .screen { flex: 1; height: auto; min-height: 180px; }
   @media (max-width: 1120px) { :root[data-embed] .deck { height: auto; min-height: 100dvh; overflow: visible; grid-template-rows: auto; } :root[data-embed] .screen { flex: none; height: 270px; } }
   @media (max-width: 760px) {
-    :root[data-embed] .screen { height: 230px; }
+    :root[data-embed] .screen { height: auto; }
     :root[data-embed] .deck[data-empty] .screen { height: auto; min-height: 260px; }
   }
 </style>
@@ -550,7 +595,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   import { API_URL, uploadForResult } from '../../lib/api';
   import { applyEdit, decodeAudio, encodeLossy, encodeWav, growthReason, MAX_SECONDS, planOutput, probeAudio, sourceKbps, TOO_LONG, type AudioInfo, type Edit, type Format, type Plan } from '../../lib/audio';
   import { confirmUpload, el, formatBytes, setDial, throwIfAborted, UserError } from '../../lib/tool';
-  import { createWaveform, formatTime } from '../../lib/waveform';
+  import { createWaveform, detectSilence, formatTime, type Silence } from '../../lib/waveform';
 
   interface Result {
     name: string;
@@ -777,6 +822,8 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   async function loadTrack() {
     const id = ++loadId;
     wave.clear();
+    silenceJob?.abort();
+    hideSilence();
     decoded = undefined;
     const file = files[cur];
     const single = files.length === 1;
@@ -784,7 +831,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
     multiNote.hidden = files.length < 2;
     fades.in.set(0, false);
     fades.out.set(0, false);
-    $<HTMLInputElement>('[name=edit][value=keep]').checked = true;
+    $<HTMLInputElement>(`[name=edit][value=${mode === 'cut' ? 'remove' : 'keep'}]`).checked = true;
     sourceOut.textContent = '';
     if (!file) {
       setScreen('empty');
@@ -804,6 +851,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
       setScreen('ready');
       wave.load(channels, info.sampleRate, single);
       editSet.disabled = !single;
+      if (single) afterDecode(file);
     } catch (err) {
       if (id !== loadId) return;
       setScreen('error', `${err instanceof UserError ? err.message : "This file can't be shown as a waveform."} Trimming is unavailable${API_URL && single ? '; cloud export still works.' : '.'}`);
@@ -1058,6 +1106,109 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
     if ((e.target as HTMLInputElement).matches('[name=format], [name=edit], [name=cloud-format]')) refresh();
   });
 
+  // Silence detection: runs after each decode (unless ignored for that file) and from the Detect key.
+  const silBar = $('[data-silence]');
+  const silText = $('[data-silence-text]');
+  const silKeys = {
+    both: $<HTMLButtonElement>('[data-sil=both]'),
+    start: $<HTMLButtonElement>('[data-sil=start]'),
+    end: $<HTMLButtonElement>('[data-sil=end]'),
+    ignore: $<HTMLButtonElement>('[data-sil=ignore]'),
+  };
+  const announce = $('[data-announce]');
+  const ignored = new WeakSet<File>();
+  let silenceJob: AbortController | undefined;
+  let found: Silence | undefined;
+
+  function hideSilence() {
+    silBar.hidden = true;
+    found = undefined;
+  }
+
+  /** Detect on the loaded file and show the prompt; `quiet` shows nothing when there is no silence. */
+  async function runSilence(quiet: boolean): Promise<Silence | undefined> {
+    silenceJob?.abort();
+    hideSilence();
+    const source = decoded;
+    if (!source || files.length !== 1) return;
+    const controller = (silenceJob = new AbortController());
+    const db = Number(checked('sil-db'));
+    const result = await detectSilence(source.channels, source.rate, { thresholdDb: db, signal: controller.signal });
+    if (controller.signal.aborted || decoded !== source) return;
+    silenceJob = undefined;
+    found = result;
+    let text = `No silence found at −${-db} dBFS.`;
+    if (result) {
+      const parts = [result.lead && `${result.lead.toFixed(1)} s at the start`, result.trail && `${result.trail.toFixed(1)} s at the end`].filter(Boolean);
+      text = `Silence detected: ${parts.join(', ')}. Trim it?`;
+    } else if (quiet) return;
+    silText.textContent = text;
+    silKeys.both.hidden = !result;
+    silKeys.start.hidden = silKeys.end.hidden = !result?.lead || !result.trail;
+    silKeys.ignore.textContent = result ? 'Ignore' : 'Close';
+    silBar.hidden = false;
+    announce.textContent = text;
+    return result;
+  }
+
+  function trimSilence(start: boolean, end: boolean) {
+    if (!found) return;
+    const sel = wave.selection;
+    $<HTMLInputElement>('[name=edit][value=keep]').checked = true;
+    wave.select(start ? found.lead : sel.start, end ? sel.duration - found.trail : sel.end);
+    hideSilence();
+    const now = wave.selection;
+    announce.textContent = `Selection set to ${formatTime(now.start)} – ${formatTime(now.end)}. Adjust the handles if needed, then convert.`;
+    $('[data-handle=start]').focus();
+  }
+  silKeys.both.onclick = () => trimSilence(true, true);
+  silKeys.start.onclick = () => trimSilence(true, false);
+  silKeys.end.onclick = () => trimSilence(false, true);
+  silKeys.ignore.onclick = () => {
+    if (found && decoded) ignored.add(decoded.file);
+    hideSilence();
+    announce.textContent = '';
+    $('[data-detect]').focus();
+  };
+  $('[data-detect]').addEventListener('click', async () => {
+    const result = await runSilence(false);
+    if (result) silKeys.both.focus();
+  });
+
+  // Deep links from the tool list: ?mode=trim|cut|fade|silence|cloud preselects and focuses the matching control.
+  const mode = new URLSearchParams(location.search).get('mode');
+  const modeModule: Record<string, HTMLElement> = { trim: $('.mod-edit'), cut: $('.mod-edit'), fade: $('.mod-edit'), silence: $('.mod-edit'), cloud };
+  // Focus waits for the first decoded file, since the edit controls are disabled until then.
+  let pendingMode = mode && mode in modeModule ? mode : undefined;
+
+  function flash(node: HTMLElement) {
+    node.classList.remove('flash');
+    void node.offsetWidth; // restart the animation
+    node.classList.add('flash');
+    setTimeout(() => node.classList.remove('flash'), 1100);
+  }
+
+  function afterDecode(file: File) {
+    const focusMode = pendingMode;
+    pendingMode = undefined;
+    if (focusMode === 'silence' || !ignored.has(file)) {
+      void runSilence(focusMode !== 'silence').then((result) => focusMode === 'silence' && result && silKeys.both.focus());
+    }
+    if (!focusMode) return;
+    flash(modeModule[focusMode]);
+    if (focusMode === 'trim' || focusMode === 'cut') $('[data-handle=start]').focus();
+    else if (focusMode === 'fade') $('[data-knob=in]').focus();
+    else if (focusMode === 'cloud') {
+      const target = cloud.querySelector<HTMLElement>('[name=cloud-format]:checked:not(:disabled)') ?? cloudRun;
+      target.focus();
+    }
+  }
+
   setStatus('idle');
   refresh();
+  if (pendingMode) {
+    const target = modeModule[pendingMode];
+    flash(target);
+    if (pendingMode === 'cloud') target.scrollIntoView({ block: 'nearest' });
+  }
 </script>

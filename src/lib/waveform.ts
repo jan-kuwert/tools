@@ -52,12 +52,71 @@ const rulerLabel = (t: number, step: number) => {
   return `${min}:${(r - min * 60).toFixed(digits).padStart(digits ? 3 + digits : 2, '0')}`;
 };
 
+/** Seconds of leading/trailing silence to trim (the pad next to the sound already excluded); 0 = none on that side. */
+export interface Silence {
+  lead: number;
+  trail: number;
+}
+
+/**
+ * Leading and trailing silence: 10 ms windows whose RMS on every channel stays below `thresholdDb` dBFS.
+ * Keeps `pad` seconds next to the sound so attacks and decays aren't clipped; sides under 50 ms count as none.
+ * Undefined when less than `minTotal` seconds would be trimmed, the audio is silent throughout, or `signal` aborts.
+ * Only the silent stretches are scanned, and the scan yields to the event loop every ~15 ms.
+ */
+export async function detectSilence(
+  channels: Float32Array[],
+  sampleRate: number,
+  { thresholdDb = -50, pad = 0.1, minTotal = 0.3, signal }: { thresholdDb?: number; pad?: number; minTotal?: number; signal?: AbortSignal } = {},
+): Promise<Silence | undefined> {
+  const len = channels[0].length;
+  const win = Math.max(1, Math.round(sampleRate * 0.01));
+  const limit = 10 ** (thresholdDb / 10); // mean square of a signal at thresholdDb dBFS
+  const loud = (from: number, to: number) =>
+    channels.some((ch) => {
+      let sum = 0;
+      for (let i = from; i < to; i++) sum += ch[i] * ch[i];
+      return sum / (to - from) > limit;
+    });
+  let since = performance.now();
+  let windows = 0;
+  const aborted = async () => {
+    if ((++windows & 255) === 0 && performance.now() - since > 15) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve);
+      await promise;
+      since = performance.now();
+    }
+    return !!signal?.aborted;
+  };
+
+  let first = 0;
+  while (first < len && !loud(first, Math.min(len, first + win))) {
+    first += win;
+    if (await aborted()) return;
+  }
+  if (first >= len) return;
+  let last = len;
+  while (last > first && !loud(Math.max(first, last - win), last)) {
+    last -= win;
+    if (await aborted()) return;
+  }
+  const side = (samples: number) => {
+    const s = Math.max(0, samples / sampleRate - pad);
+    return s < 0.05 ? 0 : s;
+  };
+  const found = { lead: side(first), trail: side(len - last) };
+  return found.lead + found.trail < minTotal || signal?.aborted ? undefined : found;
+}
+
 export interface WaveformEditor {
   /** `editable: false` shows and plays the whole file without trim handles (batch mode). */
   load(channels: Float32Array[], sampleRate: number, editable?: boolean): void;
   clear(): void;
   stop(): void;
   readonly selection: { start: number; end: number; duration: number };
+  /** Set the selection (seconds, clamped) as if the user had moved the handles. */
+  select(start: number, end: number): void;
 }
 
 /**
@@ -365,5 +424,6 @@ export function createWaveform(root: HTMLElement, onChange: (committed: boolean)
     get selection() {
       return { start, end, duration };
     },
+    select: (s, e) => setSel(s, e),
   };
 }
