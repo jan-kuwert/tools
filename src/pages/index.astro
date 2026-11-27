@@ -3,17 +3,26 @@ import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import ModeBadge from '../components/ModeBadge.astro';
 import SettingsForm from '../components/SettingsForm.astro';
+import logo from '../../public/logo.svg?raw';
 import { categories, href, toolHref, tools, type Category } from '../tools';
 
 const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
 ---
 <Base title="Tools · fast, private file tools" wide>
 <div class="home" data-at="centre">
-  <div class="hub" data-hub tabindex="-1" role="region" aria-label="Tools. Press question mark for keyboard shortcuts.">
-    <section class="screen screen-centre" data-screen="centre" {...Object.fromEntries(categories.map((c) => [`data-${placement[c.id]}`, c.id]))} aria-label="Start">
+  <header class="topbar">
+    <a class="tb-brand" href="#" data-go="centre" aria-label="tools home"><Fragment set:html={logo} /></a>
+    <div class="tb-acts">
+      <button class="tb-btn" type="button" data-outputs-open aria-haspopup="dialog" aria-label="Outputs" title="Outputs"><Icon name="download" /><span class="tb-label">Outputs</span><span class="out-count" data-out-count hidden></span></button>
+      <button class="tb-btn" type="button" data-settings-open aria-haspopup="dialog" aria-label="Settings" title="Settings"><Icon name="settings" /></button>
+    </div>
+  </header>
+
+  <div class="hub" data-hub tabindex="-1" role="region" aria-label="Tools">
+    <section class="screen screen-centre" data-screen="centre" aria-label="Start">
       <div class="cell-scroll">
         <div class="cell-inner centre-inner">
-          <h1>A collection of tools that respect your privacy.</h1>
+          <h1>A collection of <span class="eye-word">t<span class="visually-hidden">oo</span><svg class="word-eyes" viewBox="58 4 39 25" aria-hidden="true"><g fill="#fff" stroke="currentColor" stroke-width="3.5"><ellipse cx="67.5" cy="17.5" rx="7" ry="8.5"/><ellipse cx="87.5" cy="16.5" rx="7" ry="9.5"/></g><g class="eye-pupils" fill="#17181a"><ellipse cx="67.5" cy="17.5" rx="2.5" ry="4"/><ellipse cx="87.5" cy="16.5" rx="2.5" ry="4"/></g></svg>ls</span> that respect your privacy.</h1>
           <nav class="jump" aria-label="Categories">
             {categories.map((c) => (
               <a class="jump-chip" href={`#${c.id}`} data-go={c.id} title={c.blurb} style={`--cat: var(--c-${c.id})`}><Icon name={c.id} />{c.label}</a>
@@ -107,6 +116,30 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 12px; flex: none;
     color: var(--muted); background: var(--surface-2);
   }
+  /* Header on the start screen: brand, then outputs and settings. Apps carry the same controls in their own toolbar (AppBar.astro). */
+  .topbar {
+    position: relative; z-index: 5; display: flex; align-items: center; gap: 0.75rem; height: var(--tb-h); padding: 0 0.6rem 0 1rem;
+    background: var(--app-bar); border-bottom: 1px solid var(--app-line);
+  }
+  .home { --tb-h: 48px; }
+  .home:not([data-at='centre']) { --tb-h: 0px; }
+  .home:not([data-at='centre']) .topbar { display: none; }
+  .tb-brand { display: flex; flex: none; color: var(--fg); text-decoration: none; }
+  .tb-btn {
+    position: relative; display: inline-flex; align-items: center; gap: 0.4rem; flex: none; height: 34px; padding: 0 0.55rem; border-radius: 9px;
+    border: 0; background: none; color: var(--muted); font: inherit; font-size: 0.9rem; font-weight: 600; white-space: nowrap; cursor: pointer;
+  }
+  .tb-btn:hover, .tb-btn:focus-visible { background: var(--app-hover); color: var(--fg); }
+  .topbar .icon svg { width: 18px; height: 18px; }
+  .tb-acts { display: flex; align-items: center; gap: 0.1rem; flex: none; margin-left: auto; }
+  @media (max-width: 860px) { .tb-label { display: none; } }
+  .out-count {
+    min-width: 1.25rem; height: 1.25rem; padding: 0 0.35rem; border-radius: 999px; background: var(--accent); color: var(--accent-fg);
+    font-size: 0.72rem; font-weight: 700; line-height: 1.25rem; text-align: center; font-variant-numeric: tabular-nums;
+  }
+  .out-count.pulse { animation: out-pulse 0.5s ease-out; }
+  @keyframes out-pulse { 40% { transform: scale(1.35); } }
+  @media (prefers-reduced-motion: reduce) { .out-count.pulse { animation: none; } }
 
   /* Hub: screens stacked in one full-viewport stage; only the active one is visible.
      clip, not hidden: focus moving into a tool frame must not scroll the stage. */
@@ -125,6 +158,21 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   .cell-inner { width: min(100%, 46rem); margin: 0 auto; text-align: center; }
   .centre-inner { display: flex; flex-direction: column; justify-content: center; min-height: calc(100dvh - var(--tb-h) - 6rem); }
   .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.03em; margin: 0 auto 1.4rem; max-width: 22ch; }
+  .eye-word { white-space: nowrap; }
+  .word-eyes { width: 1.15em; height: 0.8em; vertical-align: -0.06em; transform-box: fill-box; transform-origin: center; animation: eye-blink 9s infinite; }
+  @keyframes eye-blink {
+    0%, 43%, 46%, 96%, 100% { transform: scaleY(1); }
+    44.5%, 97.5% { transform: scaleY(0.08); }
+  }
+  .eye-pupils { animation: eye-wander 17s ease-in-out infinite; }
+  .home[data-dragging] .eye-pupils { animation: none; }
+  @keyframes eye-wander {
+    0%, 16%, 100% { transform: translate(1px, 1px); }
+    28%, 44% { transform: translate(-2px, -1px); }
+    56%, 70% { transform: translate(2px, -1px); }
+    82%, 92% { transform: translate(-1px, 2px); }
+  }
+  @media (prefers-reduced-motion: reduce) { .word-eyes, .eye-pupils { animation: none; } }
   .jump { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.55rem; margin-bottom: 1.25rem; }
   .jump-chip {
     display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1.05rem 0.55rem 0.8rem;
@@ -654,24 +702,52 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   });
   // Accept drops anywhere on the hub so a near miss doesn't open the file in the browser.
   const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+  const eyes = document.querySelector<SVGSVGElement>('.word-eyes')!;
+  const pupils = eyes.querySelector<SVGGElement>('.eye-pupils')!;
   const setDragging = (on: boolean) => {
     drop.classList.toggle('over', on);
     home.toggleAttribute('data-dragging', on);
+    if (!on) pupils.removeAttribute('transform');
   };
+  // A soft spotlight follows the cursor while files are dragged over the hub or any app frame.
+  // Browsers repeat dragover at least every ~350 ms while the pointer is over the page, so silence means the drag
+  // left or was cancelled; drops hide it at once.
+  const glow = $('[data-drag-glow]');
+  let glowTimer = 0;
+  function followDrag(e: DragEvent, frame?: HTMLIFrameElement) {
+    const r = frame?.getBoundingClientRect();
+    glow.style.transform = `translate(${e.clientX + (r?.left ?? 0)}px, ${e.clientY + (r?.top ?? 0)}px)`;
+    glow.style.setProperty('--accent', active === 'centre' ? '' : `var(--c-${active})`);
+    glow.toggleAttribute('data-on', true);
+    if (active === 'centre' && !reduceMotion.matches) {
+      const eyeBox = eyes.getBoundingClientRect();
+      const dx = e.clientX - (eyeBox.left + eyeBox.width / 2);
+      const dy = e.clientY - (eyeBox.top + eyeBox.height / 2);
+      const distance = Math.hypot(dx, dy, 70);
+      pupils.setAttribute('transform', `translate(${2.5 * dx / distance} ${2.5 * dy / distance})`);
+    }
+    clearTimeout(glowTimer);
+    glowTimer = window.setTimeout(() => {
+      glow.removeAttribute('data-on');
+      setDragging(false);
+    }, 600);
+  }
   document.addEventListener('dragover', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     setDragging(true);
     followDrag(e);
   });
-  document.addEventListener('drop', () => glow.removeAttribute('data-on'), true);
+  document.addEventListener('drop', () => {
+    glow.removeAttribute('data-on');
+    setDragging(false);
+  }, true);
   document.addEventListener('dragleave', (e) => {
     if (!e.relatedTarget) setDragging(false);
   });
   document.addEventListener('drop', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    setDragging(false);
     void handle([...e.dataTransfer!.files]);
   });
   document.addEventListener('paste', (e) => {

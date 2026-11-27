@@ -15,6 +15,8 @@ Fast, privacy-first file tools. Static Astro site (Netlify) plus one small Cloud
 
 The home page opens each app full screen from its badge or card; inside an app, its name in the toolbar switches to another app, and Outputs and Settings sit at the top right. Further down, the start screen lists every tool in one card per app. Files created in any app are collected in the shared Outputs panel (memory only, until the page is left).
 
+Brand assets: [`public/logo.svg`](public/logo.svg) is the vector wordmark; [`public/favicon.svg`](public/favicon.svg) is the matching modular “t” mark. The inline wordmark inherits the site’s text color in both themes. The headline eyes wander, blink occasionally and follow file drags; all three effects respect reduced motion.
+
 ## Develop
 
 ```sh
@@ -47,7 +49,6 @@ Backend: see [backend/README.md](backend/README.md).
 ## Open decisions
 
 1. **Domain and base path.** Is the existing domain hosted on Netlify? If not, serving `/tools/` needs a proxy on the main host; a dedicated subdomain avoids that. Set `SITE`/`BASE` accordingly.
-2. **Product name.** Header shows the placeholder “Tools”; shortlist in the plan: Pocketmill, Filebench, Byte Orchard.
 3. **Background-removal model.** Default `isnet-general-use` (Apache-2.0). Validate quality/speed/memory on Cloud Run before launch.
 4. **Public endpoint protection.** Pilot uses the direct Cloud Run URL with max 2 instances and concurrency 1. Decide whether to add Load Balancer + Cloud Armor before public launch.
 5. **Split → “Extract into one PDF”.** Pages currently follow the typed order and keep duplicates (`5, 1-2`). Alternative: sort and de-duplicate.

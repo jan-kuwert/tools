@@ -1,6 +1,7 @@
 ---
 import '../styles/global.css';
 import Icon from '../components/Icon.astro';
+import logo from '../../public/logo.svg?raw';
 import { href } from '../tools';
 interface Props { title: string; description?: string; /** Full-viewport home page: chrome floats in the corners, no footer. */ wide?: boolean }
 const { title, description = 'Fast, private file tools that run in your browser.', wide = false } = Astro.props;
@@ -19,12 +20,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
   </head>
   <body>
     <a class="visually-hidden" href="#main">Skip to content</a>
-    <a class="corner corner-tl brand" href={href()}>Tools</a>
-    {wide && (
-      <button class="corner corner-tr icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Colour theme: switch between system, light and dark" title="Theme">
-        <Icon name="theme-system" class="t-system" /><Icon name="theme-light" class="t-light" /><Icon name="theme-dark" class="t-dark" />
-      </button>
-    )}
+    {!wide && <a class="corner corner-tl brand" href={href()} aria-label="tools home"><Fragment set:html={logo} /></a>}
     <main id="main" class={wide ? 'wide' : undefined}><slot /></main>
     {!wide && (
       <footer class="site-footer">
