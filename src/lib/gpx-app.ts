@@ -1,5 +1,6 @@
 // GPX app (src/pages/gpx/index.astro): track list, canvas map and profile, inspector with edits, clean-up, merge and export.
-// No map tiles (CSP and privacy): the map is a Web-Mercator canvas with a graticule, scale bar and north arrow.
+// The map is a Web-Mercator canvas with a graticule, scale bar and north arrow. A background map (OpenStreetMap or
+// Esri satellite tiles) is opt-in only: those servers see the viewed area, so nothing loads until the user picks one.
 import { downloadBlob, el, UserError } from './tool';
 import {
   count,
@@ -332,6 +333,60 @@ export function initGpxApp(): void {
     ctx.clearRect(0, 0, w, h);
   }
 
+  // ---------- Background map (opt-in) ----------
+  const BASEMAPS = {
+    osm: { url: (z: number, x: number, y: number) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`, credit: '© OpenStreetMap contributors', name: 'OpenStreetMap' },
+    sat: { url: (z: number, x: number, y: number) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`, credit: 'Imagery © Esri, Maxar, Earthstar Geographics', name: 'Esri' },
+  };
+  type Basemap = keyof typeof BASEMAPS;
+  const basemapSel = $<HTMLSelectElement>('[data-basemap]');
+  const attr = $('[data-attr]');
+  let basemap: Basemap | '' = '';
+  const tiles = new Map<string, HTMLImageElement>();
+  const loaded = (img?: HTMLImageElement) => (img?.complete && img.naturalWidth ? img : undefined);
+  function tile(z: number, x: number, y: number) {
+    const key = `${basemap}/${z}/${x}/${y}`;
+    let img = tiles.get(key);
+    if (!img) {
+      if (tiles.size >= 400) tiles.delete(tiles.keys().next().value!);
+      img = new Image();
+      // The site sends no Referer; OpenStreetMap's tile policy asks for one, so tiles send the bare origin.
+      img.referrerPolicy = 'strict-origin';
+      img.onload = draw;
+      img.src = BASEMAPS[basemap as Basemap].url(z, x, y);
+      tiles.set(key, img);
+    }
+    return loaded(img);
+  }
+  function drawTiles(c: CanvasRenderingContext2D) {
+    const z = Math.max(0, Math.min(19, Math.round(Math.log2(view.s / 256))));
+    const n = 2 ** z;
+    const size = view.s / n;
+    const x0 = Math.floor((view.x - W / 2 / view.s) * n);
+    const x1 = Math.floor((view.x + W / 2 / view.s) * n);
+    const y0 = Math.max(0, Math.floor((view.y - H / 2 / view.s) * n));
+    const y1 = Math.min(n - 1, Math.floor((view.y + H / 2 / view.s) * n));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const px = sx(x / n);
+        const py = sy(y / n);
+        const wx = ((x % n) + n) % n;
+        const img = tile(z, wx, y);
+        // +0.5 px hides hairline seams between neighbouring tiles.
+        if (img) { c.drawImage(img, px, py, size + 0.5, size + 0.5); continue; }
+        // Until it loads, stretch the nearest already-loaded ancestor so zooming does not flash blank.
+        for (let up = 1; up <= 4 && up <= z; up++) {
+          const k = 2 ** up;
+          const p = loaded(tiles.get(`${basemap}/${z - up}/${wx >> up}/${y >> up}`));
+          if (!p) continue;
+          const s = p.naturalWidth / k;
+          c.drawImage(p, (wx % k) * s, (y % k) * s, s, s, px, py, size + 0.5, size + 0.5);
+          break;
+        }
+      }
+    }
+  }
+
   function drawMap() {
     W = map.clientWidth;
     H = map.clientHeight;
@@ -340,29 +395,32 @@ export function initGpxApp(): void {
     if (!items.length || !W || !H) return;
     if (pendingFit) fit();
 
-    // Graticule: degree lines at a step that keeps them ≥ 90 px apart.
-    const degPx = view.s / 360;
-    const step = [1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30].find((s) => s * degPx >= 90) ?? 45;
-    c.strokeStyle = pal.fg;
-    c.globalAlpha = 0.08;
-    c.lineWidth = 1;
-    c.beginPath();
-    const lonL = lonOf(view.x - W / 2 / view.s);
-    const lonR = lonOf(view.x + W / 2 / view.s);
-    for (let lon = Math.ceil(lonL / step) * step, n = 0; lon <= lonR && n < 400; lon += step, n++) {
-      const x = Math.round(sx(mx(lon))) + 0.5;
-      c.moveTo(x, 0);
-      c.lineTo(x, H);
+    if (basemap) drawTiles(c);
+    else {
+      // Graticule: degree lines at a step that keeps them ≥ 90 px apart.
+      const degPx = view.s / 360;
+      const step = [1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30].find((s) => s * degPx >= 90) ?? 45;
+      c.strokeStyle = pal.fg;
+      c.globalAlpha = 0.08;
+      c.lineWidth = 1;
+      c.beginPath();
+      const lonL = lonOf(view.x - W / 2 / view.s);
+      const lonR = lonOf(view.x + W / 2 / view.s);
+      for (let lon = Math.ceil(lonL / step) * step, n = 0; lon <= lonR && n < 400; lon += step, n++) {
+        const x = Math.round(sx(mx(lon))) + 0.5;
+        c.moveTo(x, 0);
+        c.lineTo(x, H);
+      }
+      const latB = latOf(view.y + H / 2 / view.s);
+      const latT = latOf(view.y - H / 2 / view.s);
+      for (let lat = Math.ceil(latB / step) * step, n = 0; lat <= latT && n < 400; lat += step, n++) {
+        const y = Math.round(sy(my(lat))) + 0.5;
+        c.moveTo(0, y);
+        c.lineTo(W, y);
+      }
+      c.stroke();
+      c.globalAlpha = 1;
     }
-    const latB = latOf(view.y + H / 2 / view.s);
-    const latT = latOf(view.y - H / 2 / view.s);
-    for (let lat = Math.ceil(latB / step) * step, n = 0; lat <= latT && n < 400; lat += step, n++) {
-      const y = Math.round(sy(my(lat))) + 0.5;
-      c.moveTo(0, y);
-      c.lineTo(W, y);
-    }
-    c.stroke();
-    c.globalAlpha = 1;
 
     const a = active();
     const X = (d: Derived, i: number, act: boolean) => sx(act && moving?.i === i ? moving.wx : d.wx[i]);
@@ -1500,6 +1558,13 @@ export function initGpxApp(): void {
   toggles.hr.addEventListener('click', () => {
     showHr = !showHr;
     setToggle(toggles.hr, showHr);
+    draw();
+  });
+  basemapSel.addEventListener('change', () => {
+    basemap = basemapSel.value as Basemap | '';
+    attr.hidden = !basemap;
+    attr.textContent = basemap ? BASEMAPS[basemap].credit : '';
+    notify(basemap ? `Map images now load from ${BASEMAPS[basemap].name}, which can see the map area and your IP address. Your GPX file stays on this device. Choose “No map” to stop.` : '');
     draw();
   });
 

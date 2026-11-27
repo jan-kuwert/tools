@@ -52,6 +52,9 @@ const hills = [
           <button class="gx-tool" type="button" data-toggle="points" aria-pressed="false" title="Show points to select, drag, insert (double-click a line) and delete them (P)"><Icon name="pin" /><span class="gx-label">Edit points</span></button>
           <button class="gx-tool" type="button" data-toggle="profile" aria-pressed="true" title="Elevation profile"><Icon name="profile" /><span class="gx-label">Profile</span></button>
           <button class="gx-tool" type="button" data-toggle="hr" aria-pressed="true" hidden title="Heart rate in the profile"><Icon name="heart" /><span class="gx-label">Heart rate</span></button>
+          <label class="gx-tool gx-base" title="Background map. Off by default: map images load from OpenStreetMap (Map) or Esri (Satellite), which then see the map area and your IP address.">
+            <Icon name="gpx" /><select data-basemap aria-label="Background map"><option value="">No map</option><option value="osm">Map</option><option value="sat">Satellite</option></select>
+          </label>
         </div>
         <div class="gx-end">
           <button class="gx-tool" type="button" data-close-all disabled aria-label="Close all tracks" title="Close all tracks"><Icon name="xmark" /></button>
@@ -78,6 +81,7 @@ const hills = [
           <div class="gx-map" data-map tabindex="0" role="application" aria-roledescription="map" aria-label="Track map. Drag or arrow keys pan, wheel, pinch or +/− zoom, F fits.">
             <canvas data-map-canvas></canvas>
             <div class="gx-tip" data-tip hidden></div>
+            <p class="gx-attr" data-attr hidden></p>
           </div>
           <div class="gx-prof" data-prof>
             <canvas data-prof-canvas role="img" aria-label="Elevation profile. Drag to select a range, click to set the cursor."></canvas>
@@ -352,6 +356,8 @@ const hills = [
     background: color-mix(in srgb, var(--app-bar) 94%, transparent); border: 1px solid var(--app-line); box-shadow: 0 4px 14px rgb(0 0 0 / 0.16);
     font-size: 0.78rem; line-height: 1.45; font-variant-numeric: tabular-nums;
   }
+  .gx-base select { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .gx-attr { position: absolute; z-index: 2; right: 0; bottom: 0; margin: 0; padding: 0.1rem 0.45rem; border-top-left-radius: 6px; background: color-mix(in srgb, var(--app-bar) 85%, transparent); color: var(--muted); font-size: 0.7rem; pointer-events: none; }
   .gx-prof { position: relative; flex: none; height: 170px; border-top: 1px solid var(--app-line); background: var(--app-bar); touch-action: none; cursor: crosshair; }
   .gpx-app:not([data-profile]) .gx-prof { display: none; }
   .gx-prof-read { position: absolute; top: 0.2rem; left: 52px; right: 44px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }

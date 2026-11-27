@@ -4,10 +4,11 @@
 
 # PUBLIC_API_URL (Cloud Run origin) must be set in Netlify env for the cloud tool.
 # connect-src allows *.run.app; narrow it to the exact Cloud Run origin on deploy.
+# img-src allows the opt-in GPX background map tiles (OpenStreetMap, Esri World Imagery).
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' blob: data: https://*.run.app; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://tile.openstreetmap.org https://server.arcgisonline.com; media-src 'self' blob:; connect-src 'self' blob: data: https://*.run.app; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "no-referrer"
     X-Content-Type-Options = "nosniff"

@@ -5,6 +5,7 @@
 // decodes the source at full resolution (SVGs are rasterized at the resolution the output needs).
 // Crop, Cut and background removal replace an image's pixels and are undoable per image.
 // Arrange mode places several images on one canvas (geometry in ./arrange) and merges them into a new image.
+// Metadata: each image's EXIF can be edited in a dialog (./exif); the edited copy is written on export.
 import { zipSync, type Zippable } from 'fflate';
 import { API_URL, uploadForResult } from './api';
 import { attach, bounds, layoutColumn, layoutGrid, layoutRow, nextEdge, overlaps, settle, snap, type Align, type Box, type Dir, type Guides } from './arrange';
@@ -12,6 +13,11 @@ import {
   canvasHasAlpha, canvasOf, decodeImage, drawImage, encodeCanvas, EXT, imageKind, inspectImage, isSvg, keepMetadata, linkQuality, MAX_PIXELS,
   rasterizeSvg, svgSize, uniqueName, type ImageType, type Rect,
 } from './image';
+import {
+  asciiEntry, editable, empty, fromLocalInput, getLocation, parseExif, serializeExif, setLocation, show, tagName, text, toLocalInput, withValue,
+  type Entry, type Exif, type Section,
+} from './exif';
+import { readExif } from './metadata';
 import { loadPrefs } from './prefs';
 import { resizable } from './resize';
 import { confirmUpload, downloadBlob, el, formatBytes, setDial, UserError } from './tool';
@@ -65,6 +71,7 @@ interface Item extends State {
   redo: State[];
   include: boolean; // part of the merge in arrange mode
   merged?: boolean; // made by Merge: undoing past its first state removes it
+  exif?: Uint8Array; // edited EXIF (TIFF); unset: the original file's is kept
 }
 
 let root: HTMLElement | undefined;
@@ -140,6 +147,10 @@ function bind(root: HTMLElement) {
     download: q<HTMLButtonElement>('[data-download]'),
     downloadAll: q<HTMLButtonElement>('[data-download-all]'),
     status: [...root.querySelectorAll<HTMLElement>('[data-status]')],
+    meta: q<HTMLDialogElement>('[data-meta]'),
+    metaFile: q('[data-meta-file]'),
+    metaFields: q('[data-meta-fields]'),
+    metaDel: q<HTMLTemplateElement>('[data-meta-del]'),
   };
 }
 
@@ -407,7 +418,104 @@ async function exportBlob(it: Item): Promise<{ blob: Blob; note?: string }> {
   const canvas = renderOutput(it, await fullOf(it, rasterScale(it)), outSize(it), background());
   const type = format();
   const blob = await encodeCanvas(canvas, type, type === 'image/png' ? undefined : quality());
-  return field('strip').checked ? { blob } : keepMetadata(it.origin, blob);
+  return field('strip').checked ? { blob } : keepMetadata(it.origin, blob, it.exif);
+}
+
+// ---------- Metadata ----------
+
+/** Tags with their own field at the top; everything else is listed per section. */
+const COMMON: [Section, number, string][] = [['ifd0', 0x010e, 'Description'], ['ifd0', 0x013b, 'Artist'], ['ifd0', 0x8298, 'Copyright']];
+const TAKEN = 0x9003;
+const SECTIONS: [Section, string][] = [['ifd0', 'Camera and file'], ['exif', 'Photo'], ['gps', 'Location details']];
+
+async function editMetadata() {
+  const it = items[cur];
+  if (!it) return;
+  let x: Exif;
+  try {
+    const t = it.exif ?? (await readExif(it.origin));
+    x = t ? parseExif(t) : empty();
+  } catch {
+    return setStatus('The metadata in this image could not be read.', 'error');
+  }
+  const le = x.le;
+  const find = (s: Section, tag: number) => x[s].find((e) => e.tag === tag);
+  let n = 0;
+  const row = (box: HTMLElement, label: string, control: HTMLElement, del?: HTMLButtonElement) => {
+    control.id = `ie-meta-${n++}`;
+    box.append(el('label', { htmlFor: control.id }, label), control, del ?? el('span'));
+  };
+  const input = (value: string, props: Partial<HTMLInputElement> = {}) => el('input', { type: 'text', value, autocomplete: 'off', ...props });
+
+  const main = el('fieldset', {}, el('legend', {}, 'Main'));
+  const commons = COMMON.map(([s, tag, label]) => {
+    const e = find(s, tag);
+    const inp = input(e ? text(e) : '');
+    row(main, label, inp);
+    return { s, tag, inp };
+  });
+  const takenEntry = find('exif', TAKEN);
+  const taken = input(takenEntry ? toLocalInput(text(takenEntry)) : '', { type: 'datetime-local', step: '1' });
+  row(main, 'Taken', taken);
+  const at = getLocation(x);
+  const lat = input(at ? `${+at.lat.toFixed(6)}` : '', { type: 'number', step: 'any', min: '-90', max: '90', placeholder: 'e.g. 48.137154' });
+  const lon = input(at ? `${+at.lon.toFixed(6)}` : '', { type: 'number', step: 'any', min: '-180', max: '180', placeholder: 'e.g. 11.576124' });
+  row(main, 'Latitude', lat);
+  row(main, 'Longitude', lon);
+  const pairCheck = () => lat.setCustomValidity(!lat.value !== !lon.value ? 'Enter both latitude and longitude, or clear both.' : '');
+  lat.addEventListener('input', pairCheck);
+  lon.addEventListener('input', pairCheck);
+
+  // Every other tag: editable when it is text or a single number, otherwise shown; each can be removed.
+  const skip = (s: Section, tag: number) => COMMON.some(([cs, ct]) => cs === s && ct === tag) || (s === 'exif' && tag === TAKEN) || (s === 'gps' && tag <= 4);
+  const rest: { s: Section; e: Entry; inp?: HTMLInputElement; del: HTMLButtonElement }[] = [];
+  const sections = SECTIONS.flatMap(([s, legend]) => {
+    const entries = x[s].filter((e) => !skip(s, e.tag));
+    if (!entries.length) return [];
+    const box = el('fieldset', {}, el('legend', {}, legend));
+    for (const e of entries) {
+      const name = tagName(s, e.tag);
+      const del = el('button', { type: 'button', className: 'ie-meta-del', ariaLabel: `Remove ${name}`, title: 'Remove this tag' });
+      del.append(ui.metaDel.content.cloneNode(true));
+      del.setAttribute('aria-pressed', 'false');
+      // Orientation is always written as 1: exported pixels are already upright.
+      const canEdit = editable(e) && !(s === 'ifd0' && e.tag === 0x0112);
+      const inp = canEdit ? input(e.type === 2 ? text(e) : show(e, le)) : undefined;
+      if (inp && e.type !== 2) inp.addEventListener('input', () => inp.setCustomValidity(inp.value === '' || withValue(e, inp.value, le) ? '' : 'Enter a number of the same kind, e.g. 1/250 or 400.'));
+      const control = inp ?? el('output', {}, show(e, le));
+      del.addEventListener('click', () => {
+        const on = del.getAttribute('aria-pressed') !== 'true';
+        del.setAttribute('aria-pressed', String(on));
+        control.toggleAttribute('data-removed', on);
+        if (inp) inp.disabled = on;
+      });
+      row(box, name, control, del);
+      rest.push({ s, e, inp, del });
+    }
+    return [box];
+  });
+
+  ui.metaFile.textContent = it.origin.name;
+  ui.metaFields.replaceChildren(main, ...sections);
+  ui.meta.returnValue = '';
+  ui.meta.showModal();
+  ui.meta.addEventListener('close', () => {
+    if (ui.meta.returnValue !== 'save') return;
+    const next: Exif = { le, ifd0: [], exif: [], gps: [] };
+    for (const { s, e, inp, del } of rest) {
+      if (del.getAttribute('aria-pressed') === 'true') continue;
+      const v = !inp ? e : inp.value === '' ? undefined : withValue(e, inp.value, le);
+      if (v) next[s].push(v);
+    }
+    for (const { s, tag, inp } of commons) if (inp.value.trim()) next[s].push(asciiEntry(tag, inp.value.trim()));
+    if (taken.value) next.exif.push(asciiEntry(TAKEN, fromLocalInput(taken.value)));
+    setLocation(next, lat.value && lon.value ? { lat: Number(lat.value), lon: Number(lon.value) } : undefined);
+    it.exif = serializeExif(next);
+    it.gps = next.gps.length > 0;
+    field('strip').checked = false;
+    changed();
+    setStatus('Metadata updated; it is written into the downloaded image.', 'done');
+  }, { once: true });
 }
 
 const baseName = (it: Item) => it.origin.name.replace(/\.[^./]*$/, '') || 'image';
@@ -1318,6 +1426,7 @@ export function initImageEditor(): void {
   onEach('[data-undo]', () => step(true));
   onEach('[data-redo]', () => step(false));
   onEach('[data-remove-image]', removeCurrent);
+  onEach('[data-meta-open]', () => void editMetadata());
   onEach('[data-remove-bg]', () => void removeBackground());
   onEach('[data-busy-cancel]', () => bgJob?.abort());
   onEach('[data-arrange]', () => setArranging(!arranging));

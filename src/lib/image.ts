@@ -239,10 +239,10 @@ export function inspectImage(file: File, preview?: HTMLCanvasElement): Promise<I
   return info;
 }
 
-/** Copy the EXIF of `from` into `to`. On failure `to` is returned unchanged with a note. */
-export async function keepMetadata(from: File, to: Blob): Promise<{ blob: Blob; note?: string }> {
+/** Copy the EXIF of `from` (or the edited `exif`) into `to`. On failure `to` is returned unchanged with a note. */
+export async function keepMetadata(from: File, to: Blob, exif?: Uint8Array): Promise<{ blob: Blob; note?: string }> {
   try {
-    const exif = await readExif(from);
+    exif ??= await readExif(from);
     return { blob: exif ? await withExif(to, exif) : to };
   } catch {
     return { blob: to, note: 'Metadata could not be kept.' };
