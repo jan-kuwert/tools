@@ -30,6 +30,8 @@ export const MAX_BYTES = 50 * 1024 * 1024;
 const R = 6371008.8;
 const RAD = Math.PI / 180;
 const XSI = 'http://www.w3.org/2001/XMLSchema-instance';
+/** Output is GPX 1.1, so copied GPX 1.0 bindings are rewritten to keep those elements recognizable as GPX. */
+const gpxUri = (uri: string) => (uri === 'http://www.topografix.com/GPX/1/0' ? 'http://www.topografix.com/GPX/1/1' : uri);
 
 // ---------- XML reader ----------
 
@@ -154,7 +156,7 @@ export function parseGpx(text: string): Gpx {
       for (const [key, uri] of Object.entries(n.ns)) {
         // The serializer supplies this binding on every output root.
         if (key === 'xmlns:xsi' && uri === XSI) continue;
-        if (!(key in child.attrs)) out.push(` ${key}="${esc(uri)}"`);
+        if (!(key in child.attrs)) out.push(` ${key}="${esc(gpxUri(uri))}"`);
       }
       from = child.open;
     }
@@ -162,7 +164,7 @@ export function parseGpx(text: string): Gpx {
     return out.join('');
   };
   const ns: Record<string, string> = {};
-  for (const [k, v] of Object.entries(root.attrs)) if (k.startsWith('xmlns:') && k !== 'xmlns:xsi') ns[k.slice(6)] = v;
+  for (const [k, v] of Object.entries(root.attrs)) if (k.startsWith('xmlns:') && k !== 'xmlns:xsi') ns[k.slice(6)] = gpxUri(v);
 
   const point = (n: XNode): Pt | undefined => {
     const lat = num(n.attrs.lat);

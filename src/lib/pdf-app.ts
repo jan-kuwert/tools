@@ -1390,7 +1390,7 @@ export function initPdfApp(): void {
     }
     const { degrees } = await import('@cantoo/pdf-lib');
     // Keep catalog primitives in pdf-lib's lazy chunk rather than loading them at first paint.
-    const { preparePdf } = await import('./pdf-compose');
+    const { preparePdf, finishPdf } = await import('./pdf-compose');
     const documents = [...new Set(items.filter(isPage).map((item) => item.doc))];
     const inputs = await Promise.all(documents.map(async (doc) => ({
       bytes: new Uint8Array(await doc.file.arrayBuffer()),
@@ -1437,6 +1437,7 @@ export function initPdfApp(): void {
       i = j + 1;
     }
     throwIfAborted(signal);
+    finishPdf(out);
     progress?.('Saving…');
     await tick();
     return out.save({ useObjectStreams: true, updateFieldAppearances: false });

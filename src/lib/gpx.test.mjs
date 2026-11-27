@@ -132,6 +132,17 @@ test('GPX 1.0, prefixed elements and invalid input', () => {
   assert.throws(() => parseGpx('hello'), /Not a valid XML/);
 });
 
+test('GPX 1.0 waypoint fields are exported in the GPX 1.1 namespace', () => {
+  for (const src of [
+    gpx('<wpt lat="1" lon="2"><name>Water</name><ele>100</ele></wpt>', '1.0'),
+    '<g:gpx version="1.0" xmlns:g="http://www.topografix.com/GPX/1/0"><g:wpt lat="1" lon="2"><g:name>Water</g:name></g:wpt></g:gpx>',
+  ]) {
+    const out = serializeGpx(parseGpx(src));
+    assert.doesNotMatch(out, /GPX\/1\/0/);
+    assert.match(out, />Water</);
+  }
+});
+
 test('haversine distance and ascent with noise threshold', () => {
   near(haversine({ lat: 0, lon: 0 }, { lat: 0, lon: 1 }), 111195, 1);
   near(haversine({ lat: 47, lon: 8 }, { lat: 47.01, lon: 8 }), 1111.95, 0.1);

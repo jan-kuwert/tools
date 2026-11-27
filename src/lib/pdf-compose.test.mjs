@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString, StandardFonts, degrees } from '@cantoo/pdf-lib';
-import { preparePdf } from './pdf-compose.ts';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, decodePDFRawStream, degrees } from '@cantoo/pdf-lib';
+import { finishPdf, preparePdf } from './pdf-compose.ts';
 
 const N = PDFName.of;
 const D = (owner, key) => owner.lookup(N(key), PDFDict);
@@ -64,6 +64,7 @@ async function composed(inputs, order, rotate = false) {
   const { doc, pages } = await preparePdf(inputs);
   for (const [source, index] of order) doc.addPage(pages[source][index]);
   if (rotate) doc.getPage(0).setRotation(degrees(90));
+  finishPdf(doc);
   return PDFDocument.load(await doc.save({ updateFieldAppearances: false }), { updateMetadata: false });
 }
 
@@ -177,6 +178,27 @@ test('legacy destination dictionaries and name trees share a collision-free dest
   const mergedLink = A(doc.getPage(1).node, 'Annots').asArray().map((ref) => doc.context.lookup(ref, PDFDict)).find((entry) => entry.get(N('Subtype')) === N('Link'));
   assert.equal(D(mergedLink, 'A').get(N('D')), N('first (2)'));
   assertPageReferences(doc);
+});
+
+test('content of omitted pages is not written into the output', async () => {
+  const source = await PDFDocument.load((await fixture('secret')).bytes);
+  source.getPage(1).node.addContentStream(source.context.register(source.context.flateStream('% OMITTED-PAGE-MARKER\n0 0 1 1 re f')));
+  const doc = await composed([{ bytes: await source.save({ updateFieldAppearances: false }), indices: [0] }], [[0, 0]]);
+  const streams = doc.context.enumerateIndirectObjects().map(([, object]) => object).filter((object) => object instanceof PDFRawStream);
+  assert.ok(streams.length > 0);
+  for (const stream of streams) assert.doesNotMatch(new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode()), /OMITTED-PAGE-MARKER/);
+});
+
+test('page labels follow the pages into their new order', async () => {
+  const source = await PDFDocument.load((await fixture('labelled')).bytes);
+  source.catalog.set(N('PageLabels'), source.context.obj({ Nums: [0, { S: 'r' }, 1, { S: 'D', P: PDFString.of('A-') }] }));
+  const bytes = await source.save({ updateFieldAppearances: false });
+  const labels = (doc) => {
+    const nums = A(D(doc.catalog, 'PageLabels'), 'Nums');
+    return Array.from({ length: nums.size() / 2 }, (_, i) => nums.lookup(i * 2 + 1, PDFDict).lookup(N('P')).decodeText());
+  };
+  assert.deepEqual(labels(await composed([{ bytes, indices: [1, 0] }], [[0, 0], [0, 1]])), ['A-1', 'i']);
+  assert.deepEqual(labels(await composed([{ bytes, indices: [1] }], [[0, 0]])), ['A-1']);
 });
 
 const app = ts.createSourceFile('pdf-app.ts', readFileSync(new URL('./pdf-app.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);

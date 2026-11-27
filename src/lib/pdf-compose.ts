@@ -259,6 +259,83 @@ function mergeLayers(out: PDFDocument, incoming: PDFDict) {
   appendArray(target, source, 'Configs');
 }
 
+// ---------- Page labels ----------
+
+/** Each prepared page's visible label in its source document (e.g. "iv", "A-3"), keyed by its node in the output. */
+const labels = new WeakMap<PDFDict, string>();
+
+const roman = (n: number) => {
+  let s = '';
+  for (const [v, r] of [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']] as const) for (; n >= v; n -= v) s += r;
+  return s;
+};
+/** Labels of a document's pages from its /PageLabels number tree, or undefined if it has none. */
+function pageLabels(doc: PDFDocument, count: number): string[] | undefined {
+  const tree = dict(doc.catalog, 'PageLabels');
+  if (!tree) return;
+  const ranges: [number, PDFDict][] = [];
+  const visit = (node: PDFDict, seen: Set<PDFDict>) => {
+    if (seen.has(node)) return;
+    seen.add(node);
+    const nums = array(node, 'Nums');
+    if (nums) for (let i = 0; i + 1 < nums.size(); i += 2) {
+      const key = nums.lookup(i);
+      const value = nums.lookup(i + 1);
+      if (key instanceof PDFNumber && value instanceof PDFDict) ranges.push([key.asNumber(), value]);
+    }
+    const kids = array(node, 'Kids');
+    if (kids) for (let i = 0; i < kids.size(); i++) visit(kids.lookup(i, PDFDict), seen);
+  };
+  visit(tree, new Set());
+  ranges.sort((a, b) => a[0] - b[0]);
+  return Array.from({ length: count }, (_, index) => {
+    const range = ranges.findLast(([start]) => start <= index);
+    if (!range) return String(index + 1);
+    const [start, d] = range;
+    const st = d.lookup(name('St'));
+    const n = (st instanceof PDFNumber ? st.asNumber() : 1) + index - start;
+    const style = d.lookup(name('S'));
+    const letters = () => String.fromCharCode(65 + ((n - 1) % 26)).repeat(Math.ceil(n / 26));
+    const value = style === name('D') ? String(n) : style === name('R') ? roman(n).toUpperCase() : style === name('r') ? roman(n)
+      : style === name('A') ? letters() : style === name('a') ? letters().toLowerCase() : '';
+    return (text(d.lookup(name('P'))) ?? '') + value;
+  });
+}
+
+/**
+ * Call after the pages are in output order, before saving: rewrites /PageLabels so every page keeps its
+ * source label (pages without one get their position), and drops objects no longer reachable, so content
+ * of omitted pages is not written into the file.
+ */
+export function finishPdf(doc: PDFDocument): void {
+  const pages = doc.getPages();
+  const found = pages.map((page) => labels.get(page.node));
+  if (found.some((label) => label !== undefined)) {
+    const nums = doc.context.obj([]);
+    found.forEach((label, i) => {
+      nums.push(PDFNumber.of(i));
+      nums.push(label === undefined ? doc.context.obj({ S: 'D', St: i + 1 }) : doc.context.obj({ P: PDFHexString.fromText(label) }));
+    });
+    doc.catalog.set(name('PageLabels'), doc.context.obj({ Nums: nums }));
+  } else doc.catalog.delete(name('PageLabels'));
+
+  const reached = new Set<PDFRef>();
+  const info = doc.context.trailerInfo;
+  const stack: PDFObject[] = [info.Root, info.Info, info.Encrypt].filter((o): o is PDFObject => !!o);
+  while (stack.length) {
+    const o = stack.pop()!;
+    if (o instanceof PDFRef) {
+      if (reached.has(o)) continue;
+      reached.add(o);
+      const value = doc.context.lookup(o);
+      if (value) stack.push(value);
+    } else if (o instanceof PDFDict) for (const [, v] of o.entries()) stack.push(v);
+    else if (o instanceof PDFArray) stack.push(...o.asArray());
+    else if (o instanceof PDFStream) stack.push(o.dict);
+  }
+  for (const [ref] of doc.context.enumerateIndirectObjects()) if (!reached.has(ref)) doc.context.delete(ref);
+}
+
 /** Return a catalog-preserving document with an empty page tree and mapped pages for insertion in output order. */
 export async function preparePdf(sources: { bytes: Uint8Array; indices: number[] }[]): Promise<{ doc: PDFDocument; pages: PDFPage[][] }> {
   let out: PDFDocument | undefined;
@@ -276,6 +353,7 @@ export async function preparePdf(sources: { bytes: Uint8Array; indices: number[]
     for (const batch of batches) {
       const doc = await PDFDocument.load(source.bytes, { updateMetadata: false, preserveXFA: true });
       const pages = doc.getPages();
+      const sourceLabels = pageLabels(doc, pages.length);
       const selected = new Set(batch.indices);
       for (const index of batch.indices) for (const key of PDFPageLeaf.InheritableEntries) {
         const value = pages[index].node.getInheritableAttribute(name(key));
@@ -302,6 +380,7 @@ export async function preparePdf(sources: { bytes: Uint8Array; indices: number[]
         mergeLayers(out, incoming);
       }
       batch.positions.forEach((position, i) => { result[sourceIndex][position] = imported[i]; });
+      if (sourceLabels) batch.indices.forEach((index, i) => labels.set(imported[i].node, sourceLabels[index]));
     }
   }
   return { doc: out ?? await PDFDocument.create(), pages: result };
