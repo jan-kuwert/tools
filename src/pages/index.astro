@@ -3,15 +3,24 @@ import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import ModeBadge from '../components/ModeBadge.astro';
 import SettingsForm from '../components/SettingsForm.astro';
-import logo from '../../public/logo.svg?raw';
 import { categories, href, toolHref, tools, type Category } from '../tools';
 
 const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
+const debrisExtensions = (
+  'jpg jpeg png webp svg pdf ' +
+  'm4a aac mp3 wav ogg oga opus flac webm ' +
+  'zip 7z rar tar gz tgz xz txz bz2 tbz tbz2 iso cab gpx ' +
+  'txt csv tsv log json js mjs cjs jsx ts tsx htm html css scss xml yaml yml toml ini env sh py rb go rs java c h cpp sql md markdown'
+).split(' ');
+// Upper teeth along the top lip: longest in the middle, clipped by the mouth outline.
+const teeth = Array.from({ length: 11 }, (_, i) => {
+  const w = 688 / 11, x = 24 + i * w, t = (i - 5) / 5, h = 50 + 24 * (1 - t * t);
+  return `M${x + 3} 20h${w - 6}v${h - 14}q0 14-${(w - 6) / 2} 14t-${(w - 6) / 2}-14Z`;
+}).join('');
 ---
 <Base title="Tools · fast, private file tools" wide>
 <div class="home" data-at="centre">
   <header class="topbar">
-    <a class="tb-brand" href="#" data-go="centre" aria-label="tools home"><Fragment set:html={logo} /></a>
     <div class="tb-acts">
       <button class="tb-btn" type="button" data-outputs-open aria-haspopup="dialog" aria-label="Outputs" title="Outputs"><Icon name="download" /><span class="tb-label">Outputs</span><span class="out-count" data-out-count hidden></span></button>
       <button class="tb-btn" type="button" data-settings-open aria-haspopup="dialog" aria-label="Settings" title="Settings"><Icon name="settings" /></button>
@@ -20,6 +29,11 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
 
   <div class="hub" data-hub tabindex="-1" role="region" aria-label="Tools">
     <section class="screen screen-centre" data-screen="centre" aria-label="Start">
+      <div class="extension-field" aria-hidden="true">
+        {debrisExtensions.map((ext) => (
+          <div class="extension-slot" style={`order:${Math.floor(Math.random() * 100000)};--x:${Math.random()};--y:${Math.random()};font-size:${0.62 + Math.random() * 0.13}rem;--speed:${48 + Math.random() * 77}s;--delay:-${Math.random() * 123}s;--tilt:${Math.random() * 16 - 8}deg`}><span>.{ext}</span></div>
+        ))}
+      </div>
       <div class="cell-scroll">
         <div class="cell-inner centre-inner">
           <h1>A collection of <span class="eye-word">t<span class="visually-hidden">oo</span><svg class="word-eyes" viewBox="58 4 39 25" aria-hidden="true"><g fill="#fff" stroke="currentColor" stroke-width="3.5"><ellipse cx="67.5" cy="17.5" rx="7" ry="8.5"/><ellipse cx="87.5" cy="16.5" rx="7" ry="9.5"/></g><g class="eye-pupils" fill="#17181a"><ellipse cx="67.5" cy="17.5" rx="2.5" ry="4"/><ellipse cx="87.5" cy="16.5" rx="2.5" ry="4"/></g></svg>ls</span> that respect your privacy.</h1>
@@ -28,11 +42,25 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
               <a class="jump-chip" href={`#${c.id}`} data-go={c.id} title={c.blurb} style={`--cat: var(--c-${c.id})`}><Icon name={c.id} />{c.label}</a>
             ))}
           </nav>
+          <p class="drop-instruction" id="drop-anywhere">Feed me files<svg class="drop-arrow" viewBox="0 0 60 48" aria-hidden="true"><path d="M4 6c22-4 40 6 42 34m-10-8 10 10 8-13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" /></svg></p>
           <label class="drop hero-drop" data-hero-drop>
-            <input type="file" multiple data-hero-input />
-            <span class="drop-title">Drop any file to start</span>
-            <span class="btn btn-primary drop-btn" aria-hidden="true">Choose files</span>
-            <span class="drop-hint">Or paste from the clipboard. We open the right tool with your files.</span>
+            <input type="file" multiple data-hero-input aria-labelledby="drop-anywhere" aria-describedby="drop-hint" />
+            <svg class="mouth-shape" viewBox="0 0 736 280" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <path id="drop-mouth-outline" d="M34 58C160 30 576 30 702 58C716 61 722 72 718 86C696 196 548 272 368 272C188 272 40 196 18 86C14 72 20 61 34 58Z" />
+                <clipPath id="drop-mouth-clip"><use href="#drop-mouth-outline" /></clipPath>
+                <radialGradient id="drop-throat" cx="50%" cy="42%" r="60%"><stop offset="0" stop-color="#5c0f22" /><stop offset="1" stop-color="#22050c" /></radialGradient>
+              </defs>
+              <use href="#drop-mouth-outline" fill="url(#drop-throat)" />
+              <g clip-path="url(#drop-mouth-clip)">
+                <path fill="#e2667e" d="M176 290C196 222 300 208 368 232C436 208 540 222 560 290Z" />
+                <path d="M368 236V272" fill="none" stroke="#a83a52" stroke-width="3" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+                <path fill="#fff" stroke="#c9c4bc" stroke-width="1.5" vector-effect="non-scaling-stroke" d={teeth} />
+              </g>
+              <use href="#drop-mouth-outline" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+            </svg>
+            <span class="btn btn-primary drop-btn" aria-hidden="true"><Icon name="upload" />Choose files</span>
+            <span class="drop-hint" id="drop-hint">Or paste from the clipboard. We open the right tool with your files.</span>
           </label>
           <p class="status" data-drop-status role="status" aria-live="polite"></p>
           <div class="centre-actions">
@@ -79,6 +107,36 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   </div>
   <div class="hub-veil" aria-hidden="true"><span>Drop to open the right tool</span></div>
   <div class="drag-glow" data-drag-glow aria-hidden="true"></div>
+  <div class="snack" data-snack aria-hidden="true">
+    <svg viewBox="0 0 64 64" data-kind="donut">
+      <g stroke="#17181a" stroke-width="2.2" stroke-linejoin="round" fill-rule="evenodd">
+        <path fill="#dfa35a" d="M4 32a28 28 0 1 0 56 0a28 28 0 1 0-56 0ZM24 32a8 8 0 1 0 16 0a8 8 0 1 0-16 0Z" />
+        <path fill="#f27fa6" d="M32 9C44 9 54 16 55 27C56 33 52 34 52 38C52 44 47 46 42 50C37 54 28 55 22 51C16 48 11 43 10 36C9 30 12 29 11 24C12 15 21 9 32 9ZM22 32a10 10 0 1 0 20 0a10 10 0 1 0-20 0Z" />
+      </g>
+      <g stroke-width="2.6" stroke-linecap="round">
+        <path stroke="#fff" d="M20 18l4 2M41 40l3 3M15 35l1 4" />
+        <path stroke="#ffd43b" d="M33 15l4-1M45 25l2 4M26 46l4 1" />
+        <path stroke="#4dabf7" d="M24 25l-2 3M47 34l-3 2M36 47l3-2" />
+        <path stroke="#69db7c" d="M40 19l3 2M14 28l3-1" />
+      </g>
+    </svg>
+    <svg viewBox="0 0 64 64" data-kind="pretzel">
+      <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path stroke="#17181a" stroke-width="10.5" d="M32 21C27 9 8 9 7 26C6 40 18 50 32 50C46 50 58 40 57 26C56 9 37 9 32 21C30 31 22 37 17 43M32 21C34 31 42 37 47 43" />
+        <path stroke="#a8561f" stroke-width="6.5" d="M32 21C27 9 8 9 7 26C6 40 18 50 32 50C46 50 58 40 57 26C56 9 37 9 32 21C30 31 22 37 17 43M32 21C34 31 42 37 47 43" />
+      </g>
+      <path stroke="#fff" stroke-width="2" stroke-linecap="round" d="M12 22l1 1M20 13l1 0M43 13l1 1M52 22l0 1M9 33l1 0M55 34l0 1M24 49l1 0M40 49l1 0M29 31l1 1M36 30l0 1" />
+    </svg>
+    <svg viewBox="0 0 64 64" data-kind="beer">
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <path fill="none" stroke="#17181a" stroke-width="9" d="M48 25h4q6 0 6 6v8q0 7-7 7h-3" />
+        <path fill="none" stroke="#e6eef2" stroke-width="5" d="M48 25h4q6 0 6 6v8q0 7-7 7h-3" />
+        <rect x="11" y="17" width="38" height="42" rx="5" fill="#f2a91c" stroke="#17181a" stroke-width="2.2" />
+        <g fill="#fff" opacity="0.35"><ellipse cx="20" cy="33" rx="3" ry="5" /><ellipse cx="30" cy="33" rx="3" ry="5" /><ellipse cx="40" cy="33" rx="3" ry="5" /><ellipse cx="20" cy="48" rx="3" ry="5" /><ellipse cx="30" cy="48" rx="3" ry="5" /><ellipse cx="40" cy="48" rx="3" ry="5" /></g>
+        <path fill="#fff" stroke="#17181a" stroke-width="2.2" d="M9 20q0-7 7-7q2-6 9-5q4-5 10-1q6-3 10 3q7 0 7 7q0 5-5 5q-1 4-5 2q-3 3-7 0H14q-5 0-5-4Z" />
+      </g>
+    </svg>
+  </div>
   <p class="out-toast" data-out-toast role="status" aria-live="polite" hidden></p>
 
   <dialog class="picker settings-dialog" data-settings-dialog aria-labelledby="settings-title">
@@ -116,15 +174,10 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 12px; flex: none;
     color: var(--muted); background: var(--surface-2);
   }
-  /* Header on the start screen: brand, then outputs and settings. Apps carry the same controls in their own toolbar (AppBar.astro). */
   .topbar {
-    position: relative; z-index: 5; display: flex; align-items: center; gap: 0.75rem; height: var(--tb-h); padding: 0 0.6rem 0 1rem;
-    background: var(--app-bar); border-bottom: 1px solid var(--app-line);
+    position: absolute; top: 0.5rem; right: 0.6rem; z-index: 5; display: flex; align-items: center;
   }
-  .home { --tb-h: 48px; }
-  .home:not([data-at='centre']) { --tb-h: 0px; }
   .home:not([data-at='centre']) .topbar { display: none; }
-  .tb-brand { display: flex; flex: none; color: var(--fg); text-decoration: none; }
   .tb-btn {
     position: relative; display: inline-flex; align-items: center; gap: 0.4rem; flex: none; height: 34px; padding: 0 0.55rem; border-radius: 9px;
     border: 0; background: none; color: var(--muted); font: inherit; font-size: 0.9rem; font-weight: 600; white-space: nowrap; cursor: pointer;
@@ -143,20 +196,32 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
 
   /* Hub: screens stacked in one full-viewport stage; only the active one is visible.
      clip, not hidden: focus moving into a tool frame must not scroll the stage. */
-  .hub { position: relative; isolation: isolate; overflow: clip; height: calc(100dvh - var(--tb-h)); }
+  .hub { position: relative; isolation: isolate; overflow: clip; height: 100dvh; }
   .hub:focus { outline: none; }
   .screen { position: absolute; inset: 0; overflow: clip; background: var(--bg); visibility: hidden; }
   .screen[data-active], .screen.leaving { visibility: visible; }
   .screen[data-active] { z-index: 1; }
 
   /* Start screen */
+  /* Cells much wider than a label, so each one lands anywhere in its cell (not in visible columns) without overlapping. */
+  .extension-field { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); grid-auto-rows: minmax(4rem, 1fr); padding: 0.5rem; overflow: hidden; pointer-events: none; user-select: none; color: var(--fg); opacity: 0.14; mask-image: linear-gradient(90deg, #000, rgb(0 0 0 / 0.12) 28%, rgb(0 0 0 / 0.12) 72%, #000); }
+  .extension-slot { position: relative; min-width: 0; }
+  .extension-field span { position: absolute; left: calc(10px + (100% - 86px) * var(--x)); top: calc(12px + (100% - 36px) * var(--y)); white-space: nowrap; line-height: 1; font-family: var(--mono); animation: extension-drift var(--speed) ease-in-out var(--delay) infinite alternate; animation-play-state: paused; }
+  .screen-centre[data-active] .extension-field span { animation-play-state: running; }
+  .screen-centre .cell-scroll { z-index: 1; padding-top: 4.5rem; }
+  @keyframes extension-drift {
+    from { transform: translate3d(-3px, 3px, 0) rotate(var(--tilt)); }
+    to { transform: translate3d(3px, -3px, 0) rotate(calc(var(--tilt) + 4deg)); }
+  }
+  @media (prefers-reduced-motion: reduce) { .extension-field span { animation: none; } }
   .cell-scroll {
     position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
     display: flex; flex-direction: column; padding: 2.5rem clamp(1.25rem, 8vw, 6rem) 3.5rem; scrollbar-width: thin;
   }
   /* The hero fills the first screen; the tool cards follow below the fold. */
   .cell-inner { width: min(100%, 46rem); margin: 0 auto; text-align: center; }
-  .centre-inner { display: flex; flex-direction: column; justify-content: center; min-height: calc(100dvh - var(--tb-h) - 6rem); }
+  /* Exactly one viewport below the scroller's 4.5rem top padding, so the tool cards start fully below the fold. */
+  .centre-inner { display: flex; flex-direction: column; justify-content: center; min-height: calc(100dvh - 4.5rem); }
   .centre-inner h1 { font-size: clamp(1.7rem, 4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.03em; margin: 0 auto 1.4rem; max-width: 22ch; }
   .eye-word { white-space: nowrap; }
   .word-eyes { width: 1.15em; height: 0.8em; vertical-align: -0.06em; transform-box: fill-box; transform-origin: center; animation: eye-blink 9s infinite; }
@@ -183,19 +248,34 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   .jump-chip:hover, .jump-chip:focus-visible { border-color: color-mix(in srgb, var(--cat) 55%, var(--border)); transform: translateY(-1px); }
   .jump-chip:active { transform: scale(0.97); }
   .jump-chip .icon svg { width: 18px; height: 18px; color: var(--cat); }
+  .drop-instruction { position: relative; align-self: center; margin: 0.25rem 0 0.6rem; padding-right: 3.2rem; color: var(--fg); font-family: 'Bradley Hand', 'Segoe Print', 'Comic Sans MS', cursive; font-size: clamp(1.5rem, 4vw, 2.1rem); font-weight: 700; line-height: 1.2; transform: rotate(-3deg); }
+  .drop-arrow { position: absolute; right: 0; top: 55%; width: 3rem; height: 2.4rem; color: var(--accent); }
   .home .hero-drop {
-    min-height: clamp(11rem, 30vh, 17rem); align-content: center; gap: 0.8rem;
-    padding: 1.75rem 1rem; border-radius: 24px; border: 2px dashed var(--border);
-    background: var(--surface); box-shadow: var(--shadow);
-    transition: transform 0.12s ease-out, box-shadow 0.12s, border-color 0.12s;
+    min-height: clamp(19rem, 38vh, 23rem); align-content: center; gap: 0.8rem;
+    padding: 8rem clamp(1.25rem, 5vw, 3rem) 6rem; border: 0; border-radius: 30% 30% 50% 50%;
+    background: none; color: #fff;
   }
-  .home .hero-drop:is(:hover, .over, :focus-within) {
-    border-color: var(--accent); background: var(--surface);
-    transform: translateY(-2px); box-shadow: 0 16px 40px -20px rgb(0 0 0 / 0.25);
+  .home .hero-drop:is(:hover, .over, :focus-within) { background: none; }
+  .mouth-shape { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--fg); pointer-events: none; transform-origin: 50% 20%; animation: mouth-breathe 6s ease-in-out infinite; transition: transform 0.18s ease-out; }
+  .home[data-dragging] .mouth-shape { animation: none; }
+  .hero-drop:is(:hover, .over, :focus-within) .mouth-shape { color: var(--accent); }
+  .hero-drop > span { position: relative; pointer-events: none; }
+  .home:is([data-dragging], [data-eating]) .hero-drop > span { visibility: hidden; }
+  .hero-drop > input { z-index: 1; }
+  .hero-drop .drop-hint { color: #f1d6dc; }
+  @keyframes mouth-breathe { 50% { transform: scaleY(1.025) rotate(-0.3deg); } }
+  /* The dragged file, drawn as a snack under the pointer on the start screen (positioned by followDrag and feed). */
+  .snack { position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; visibility: hidden; }
+  .snack[data-on] { visibility: visible; }
+  .snack svg { display: none; width: 88px; height: 88px; translate: -50% -50%; filter: drop-shadow(0 6px 10px rgb(0 0 0 / 0.35)); animation: snack-wobble 0.7s ease-in-out infinite alternate; }
+  .snack[data-kind='donut'] [data-kind='donut'], .snack[data-kind='pretzel'] [data-kind='pretzel'], .snack[data-kind='beer'] [data-kind='beer'] { display: block; }
+  @keyframes snack-wobble { from { rotate: -6deg; } to { rotate: 6deg; } }
+  @media (prefers-reduced-motion: reduce) {
+    .mouth-shape { animation: none; transition: none; }
   }
   .hero-drop:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 3px; }
-  .hero-drop .drop-title { font-size: clamp(1.3rem, 3vw, 1.75rem); letter-spacing: -0.02em; }
   .drop-btn { pointer-events: none; font-size: 1.02rem; padding: 0.7rem 1.4rem; border-radius: 12px; }
+  .drop-btn .icon svg { width: 20px; height: 20px; }
   .cell-inner .status { min-height: 0; margin: 0.5rem 0 0; }
   .centre-actions { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem; }
   .all-tools { border-radius: 999px; }
@@ -696,35 +776,81 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
     openTool(screen, slug, true);
   }
 
+  // On the start screen the mouth eats what it is fed: a dropped snack falls in, the mouth shuts, the tool fades in.
+  const snack = $('[data-snack]');
+  async function feed(list: File[], at?: { x: number; y: number }) {
+    if (!list.length) return;
+    if (active === 'centre' && !reduceMotion.matches) {
+      // Set before the fall so the button and hint stay hidden from release until the tool shows.
+      home.toggleAttribute('data-eating', true);
+      if (at) {
+        const m = mouthShape.getBoundingClientRect();
+        const x = m.left + m.width / 2, y = m.top + m.height * 0.45;
+        snack.toggleAttribute('data-on', true);
+        await snack.animate([
+          { transform: `translate(${at.x}px, ${at.y}px)` },
+          { transform: `translate(${at.x + (x - at.x) * 0.2}px, ${Math.min(at.y, y) - 40}px) rotate(-30deg)`, offset: 0.3 },
+          { transform: `translate(${x}px, ${y}px) rotate(160deg) scale(0.3)`, opacity: 0.5 },
+        ], { duration: 550, easing: 'ease-in' }).finished;
+        snack.removeAttribute('data-on');
+      }
+      // Stays shut through the cross-fade to the tool, then reopens for the next visit.
+      const shut = mouthShape.animate([{ transform: 'none' }, { transform: 'scaleY(0.12)' }], { duration: 220, easing: 'cubic-bezier(0.5, 0, 0.75, 0)', fill: 'forwards' });
+      await shut.finished;
+      setTimeout(() => {
+        shut.cancel();
+        home.removeAttribute('data-eating');
+      }, 400);
+    }
+    await handle(list);
+  }
+
   input.addEventListener('change', () => {
-    void handle([...(input.files ?? [])]);
+    void feed([...(input.files ?? [])]);
     input.value = '';
   });
   // Accept drops anywhere on the hub so a near miss doesn't open the file in the browser.
   const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
   const eyes = document.querySelector<SVGSVGElement>('.word-eyes')!;
   const pupils = eyes.querySelector<SVGGElement>('.eye-pupils')!;
+  const mouthShape = drop.querySelector<SVGSVGElement>('.mouth-shape')!;
+  const SNACKS = ['donut', 'pretzel', 'beer'];
   const setDragging = (on: boolean) => {
+    // A fresh drag gets a random snack.
+    if (on && !home.hasAttribute('data-dragging')) snack.dataset.kind = SNACKS[Math.floor(Math.random() * SNACKS.length)];
     drop.classList.toggle('over', on);
     home.toggleAttribute('data-dragging', on);
-    if (!on) pupils.removeAttribute('transform');
+    if (!on) {
+      pupils.removeAttribute('transform');
+      mouthShape.style.removeProperty('transform');
+      snack.removeAttribute('data-on');
+    }
   };
-  // A soft spotlight follows the cursor while files are dragged over the hub or any app frame.
+  // A soft spotlight (a snack on the start screen) follows the cursor while files are dragged over the hub or any app frame.
   // Browsers repeat dragover at least every ~350 ms while the pointer is over the page, so silence means the drag
   // left or was cancelled; drops hide it at once.
   const glow = $('[data-drag-glow]');
   let glowTimer = 0;
   function followDrag(e: DragEvent, frame?: HTMLIFrameElement) {
     const r = frame?.getBoundingClientRect();
+    const snacking = active === 'centre' && !reduceMotion.matches;
     glow.style.transform = `translate(${e.clientX + (r?.left ?? 0)}px, ${e.clientY + (r?.top ?? 0)}px)`;
     glow.style.setProperty('--accent', active === 'centre' ? '' : `var(--c-${active})`);
-    glow.toggleAttribute('data-on', true);
-    if (active === 'centre' && !reduceMotion.matches) {
+    glow.toggleAttribute('data-on', !snacking);
+    snack.toggleAttribute('data-on', snacking);
+    if (snacking) {
+      snack.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
       const eyeBox = eyes.getBoundingClientRect();
       const dx = e.clientX - (eyeBox.left + eyeBox.width / 2);
       const dy = e.clientY - (eyeBox.top + eyeBox.height / 2);
       const distance = Math.hypot(dx, dy, 70);
       pupils.setAttribute('transform', `translate(${2.5 * dx / distance} ${2.5 * dy / distance})`);
+      const mouth = drop.getBoundingClientRect();
+      const mouthX = e.clientX - (mouth.left + mouth.width / 2);
+      const mouthY = e.clientY - (mouth.top + mouth.height / 2);
+      const reach = Math.hypot(mouthX, mouthY, 150);
+      const over = e.clientX >= mouth.left && e.clientX <= mouth.right && e.clientY >= mouth.top && e.clientY <= mouth.bottom;
+      mouthShape.style.transform = `translate(${8 * mouthX / reach}px, ${6 * mouthY / reach}px) rotate(${2 * mouthX / reach}deg) scaleY(${over ? 1.2 : 1.08})`;
     }
     clearTimeout(glowTimer);
     glowTimer = window.setTimeout(() => {
@@ -748,13 +874,13 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
   document.addEventListener('drop', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    void handle([...e.dataTransfer!.files]);
+    void feed([...e.dataTransfer!.files], { x: e.clientX, y: e.clientY });
   });
   document.addEventListener('paste', (e) => {
     const pasted = [...(e.clipboardData?.files ?? [])];
     if (!pasted.length || (e.target as Element).closest?.('input, textarea')) return;
     e.preventDefault();
-    void handle(pasted);
+    void feed(pasted);
   });
 
   // ---------- History ----------
