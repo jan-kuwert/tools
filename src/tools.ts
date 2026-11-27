@@ -13,6 +13,8 @@ export interface Tool {
   limits: string;
   /** Mode of the category app that covers this tool (`<app>/?mode=<appMode>`); omitted = the app's default. */
   appMode?: string;
+  /** false = no standalone page; the tool lives only inside its category app (see toolHref). */
+  page?: false;
 }
 
 /**
@@ -115,12 +117,26 @@ export const tools: Tool[] = [
   },
   {
     slug: 'audio/convert',
+    appMode: 'convert',
     category: 'audio',
-    title: 'Convert & trim audio',
-    short: 'Convert & trim',
-    summary: 'Trim, cut and fade, then convert M4A, MP3, WAV, OGG and more to MP3, WAV or OGG. Optional cloud export to M4A, FLAC or Opus with tags kept.',
+    title: 'Convert audio',
+    short: 'Convert',
+    summary: 'M4A, MP3, WAV, OGG, FLAC and more to MP3, WAV or OGG, keeping the source quality.',
     mode: 'local',
-    limits: 'Formats your browser can decode (M4A/AAC, MP3, WAV, OGG, FLAC) · up to 200 MB each · cloud export up to 30 MB',
+    limits: 'Formats your browser can decode (M4A/AAC, MP3, WAV, OGG, FLAC) · up to 200 MB each',
+  },
+  ...[
+    ['trim', 'Trim audio', 'Keep only the part you select, accurate to the sample.'],
+    ['cut', 'Cut out a section', 'Remove a selected part and join the rest.'],
+    ['fade', 'Fade in & fade out', 'Add smooth fades at the start and end.'],
+    ['silence', 'Remove silence', 'Detect silent intros and outros and trim them.'],
+  ].map(([m, title, summary]): Tool => ({
+    slug: `audio/${m}`, appMode: m, page: false, category: 'audio', title, short: title, summary, mode: 'local',
+    limits: 'Formats your browser can decode · up to 200 MB',
+  })),
+  {
+    slug: 'audio/cloud-export', appMode: 'cloud', page: false, category: 'audio', title: 'Convert to M4A, FLAC or Opus', short: 'M4A / FLAC / Opus',
+    summary: 'Export with tags and cover art kept, processed on our EU server.', mode: 'cloud', limits: 'One file · up to 30 MB',
   },
   {
     slug: 'files/zip',
@@ -162,6 +178,31 @@ export const tools: Tool[] = [
     mode: 'local',
     limits: 'Paste code or open a file up to 10 MB',
   },
+  ...[
+    ['extract', 'Extract archives', 'Unpack ZIP, 7z, RAR, tar, gz, xz and bz2 files.'],
+    ['7z', 'Create 7z archive', '7-Zip archives with optional AES-256 password.'],
+    ['compare', 'Compare text', 'Side-by-side diff with highlighted changes; JSON-aware.'],
+    ['markdown', 'Markdown preview', 'Write or open Markdown and see it rendered.'],
+  ].map(([m, title, summary]): Tool => ({
+    slug: `files/${m}`, appMode: m, page: false, category: 'files', title, short: title, summary, mode: 'local',
+    limits: 'Runs in your browser',
+  })),
+  ...[
+    ['crop', 'Crop images', 'Crop to a ratio or a free selection.'],
+    ['flip', 'Rotate & flip images', 'Rotate in 90° steps and mirror on either axis.'],
+    ['merge', 'Merge images', 'Arrange several images side by side and combine them into one.'],
+    ['svg', 'SVG to PNG / JPEG / WebP', 'Rasterize SVG files sharply at any size.'],
+  ].map(([m, title, summary]): Tool => ({
+    slug: `images/${m}`, appMode: m, page: false, category: 'images', title, short: title, summary, mode: 'local',
+    limits: 'JPEG, PNG, WebP or SVG · up to 16.7 megapixels each',
+  })),
+  ...[
+    ['rotate', 'Rotate PDF pages', 'Turn single pages or the whole document.'],
+    ['delete', 'Delete PDF pages', 'Remove pages you don’t need.'],
+  ].map(([m, title, summary]): Tool => ({
+    slug: `pdf/${m}`, appMode: 'organize', page: false, category: 'pdf', title, short: title, summary, mode: 'local',
+    limits: 'Unencrypted PDFs · up to 200 MB',
+  })),
 ];
 
 export const toolBySlug = (slug: string): Tool => {
@@ -172,3 +213,10 @@ export const toolBySlug = (slug: string): Tool => {
 
 /** Prefix an app-relative path with the configured base. */
 export const href = (path = ''): string => `${import.meta.env.BASE_URL.replace(/\/$/, '')}/${path}`.replace(/\/?$/, '/');
+
+/** Standalone URL for a tool: its own page, or its category app opened in the tool's mode. */
+export const toolHref = (t: Tool): string => {
+  if (t.page !== false) return href(t.slug);
+  const app = categories.find((c) => c.id === t.category)!.app;
+  return `${href(app)}?mode=${t.appMode}`;
+};

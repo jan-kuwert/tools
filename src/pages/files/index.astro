@@ -73,7 +73,7 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
           <button class="fx-btn fx-primary" type="button" data-act="compare"><Icon name="compare" /><span>Compare</span></button>
         </div>
         <div class="fx-tool" data-panel="archive" role="group" aria-label="Archive" hidden>
-          <span class="fx-note fx-wrap">Collect files in the Archive tray under the Explorer to zip or gzip them. Drop a .zip or .gz there to extract it.</span>
+          <span class="fx-note fx-wrap">Collect files in the Archive tray under the Explorer to make a ZIP, 7z or gzip. Drop an archive there to extract it: ZIP, 7z, RAR, tar, gzip, xz, bz2, ISO, CAB.</span>
           <span class="fx-grow"></span>
           <button class="fx-btn" type="button" data-tray-add>Add selected to archive</button>
           <button class="fx-btn fx-primary" type="button" data-tray-focus>Go to Archive</button>
@@ -85,6 +85,12 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
           <div class="fx-tabbar">
             <div class="fx-tabs" role="tablist" aria-label="Open documents" data-tabs></div>
             <div class="fx-doc-actions">
+              <div class="segmented fx-seg fx-md-modes" role="radiogroup" aria-label="Markdown view" data-md-modes hidden>
+                <label><input type="radio" name="mdView" value="edit" checked /><span>Editor</span></label>
+                <label><input type="radio" name="mdView" value="split" /><span>Split</span></label>
+                <label><input type="radio" name="mdView" value="preview" /><span>Preview</span></label>
+              </div>
+              <button class="fx-ib" type="button" data-md-html aria-label="Download as HTML" title="Download as HTML" hidden><Icon name="code" /></button>
               <button class="fx-ib" type="button" data-copy aria-label="Copy text" title="Copy text"><Icon name="copy" /></button>
               <button class="fx-ib" type="button" data-download aria-label="Download" title="Download (Ctrl/Cmd+S)"><Icon name="download" /></button>
               <button class="fx-ib" type="button" data-close aria-label="Close tab" title="Close tab (Alt+W)"><Icon name="xmark" /></button>
@@ -95,8 +101,12 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
             <div class="fx-code" data-code hidden>
               <div class="fx-curline" data-curline aria-hidden="true"></div>
               <div class="fx-gutter" aria-hidden="true"><div data-gutter></div></div>
-              <textarea data-text spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="Document text" aria-describedby="fx-keys"></textarea>
+              <div class="fx-ta">
+                <pre class="fx-hl" aria-hidden="true"><code data-hl></code></pre>
+                <textarea data-text spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="Document text" aria-describedby="fx-keys"></textarea>
+              </div>
             </div>
+            <article class="fx-md" data-md tabindex="0" aria-label="Markdown preview" hidden></article>
             <section class="fx-diff" data-diff hidden aria-label="Comparison">
               <div class="fx-diff-head">
                 <span class="fx-diff-names" data-diff-names></span>
@@ -115,18 +125,33 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
               <pre data-hexdump></pre>
             </div>
             <div class="fx-empty" data-empty-state>
-              <svg class="fx-ghost" viewBox="0 0 120 84" aria-hidden="true">
-                <rect x="4" y="4" width="112" height="76" rx="9" /><path d="M4 18h112M98 4v76" />
-                <path d="M12 30h34M12 40h52M20 50h28M20 60h44M12 70h18" />
-              </svg>
-              <p class="fx-empty-title">Drop files, paste, or start typing</p>
-              <div class="fx-empty-actions">
-                <button class="btn btn-primary" type="button" data-open><Icon name="upload" />Choose files</button>
-                <button class="btn" type="button" data-paste><Icon name="paste" />Paste from clipboard</button>
-                <button class="btn" type="button" data-new><Icon name="new-file" />New file</button>
+              <div class="fx-ghost-doc">
+                <div class="fx-ghost-gutter" aria-hidden="true">{Array.from({ length: 14 }, (_, i) => <span>{i + 1}</span>)}</div>
+                <div class="fx-ghost-lines">
+                  <input class="fx-ghost-input" type="text" data-start-typing placeholder="Start typing…" aria-label="Start a new document" autocomplete="off" spellcheck="false" />
+                  <div class="fx-ghost-text" aria-hidden="true">
+                    <span><i style="width: 38%"></i></span>
+                    <span><i style="width: 12%"></i><i style="width: 31%"></i></span>
+                    <span class="in"><i style="width: 24%"></i><i style="width: 18%"></i></span>
+                    <span class="in2"><i style="width: 44%"></i></span>
+                    <span class="in"><i style="width: 9%"></i></span>
+                    <span></span>
+                    <span><i style="width: 27%"></i><i style="width: 14%"></i></span>
+                    <span class="in"><i style="width: 36%"></i></span>
+                    <span><i style="width: 6%"></i></span>
+                  </div>
+                </div>
               </div>
-              <p class="fx-empty-hint">Text up to 50 MB · JavaScript up to 10 MB · ZIP up to 500 MB total · gzip up to 200 MB in.</p>
-              <p class="fx-empty-hint" id="fx-keys">Tab inserts two spaces; press Esc, then Tab, to leave the editor. Ctrl/Cmd+S downloads, Ctrl/Cmd+Shift+F formats JSON, Alt+W closes the tab.</p>
+              <div class="fx-dropzone">
+                <svg class="fx-drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 30H11a7 7 0 0 1-1-13.9A11 11 0 0 1 31.4 13 9 9 0 1 1 36 30h-2" /><path d="M24 22v16M18 28l6-6 6 6" /></svg>
+                <p class="fx-empty-title">Drop files here or choose files</p>
+                <div class="fx-empty-actions">
+                  <button class="btn btn-primary" type="button" data-open><Icon name="upload" />Choose files</button>
+                  <button class="btn" type="button" data-paste><Icon name="paste" />Paste from clipboard</button>
+                </div>
+                <p class="fx-empty-hint">Text up to 50 MB · JavaScript up to 10 MB · archives: ZIP, 7z, gzip; extracts 7z, RAR, tar, xz, bz2 and more · up to 500 MB.</p>
+                <p class="fx-empty-hint" id="fx-keys">Tab inserts two spaces; press Esc, then Tab, to leave the editor. Ctrl/Cmd+S downloads, Ctrl/Cmd+Shift+F formats JSON, Alt+W closes the tab.</p>
+              </div>
             </div>
           </div>
 
@@ -167,21 +192,32 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
             </div>
             <div class="fx-tray-drop" data-tray-drop>
               <ul class="fx-tray-list" data-tray-list aria-label="Files in the archive tray"></ul>
-              <p class="fx-tray-empty" id="fx-tray-help">Drop files here, or drag them from the list. Keyboard: tick files, then Add to archive.</p>
+              <p class="fx-tray-empty" id="fx-tray-help">Drop files here, or drag them from the list (keyboard: tick files, then Add to archive). Makes ZIP, 7z or gzip; extracts ZIP, 7z, RAR, tar, gzip, xz, bz2, ISO, CAB.</p>
             </div>
             <div class="fx-tray-opts">
-              <label class="fx-tray-name"><span class="fx-label">Name</span><input type="text" name="zipName" value="archive" autocomplete="off" spellcheck="false" /><span class="fx-note">.zip</span></label>
-              <div class="segmented fx-seg fx-level" role="radiogroup" aria-label="Compression">
+              <div class="segmented fx-seg fx-fmt" role="radiogroup" aria-label="Archive format">
+                <label><input type="radio" name="fmt" value="zip" checked /><span>ZIP</span></label>
+                <label><input type="radio" name="fmt" value="7z" /><span>7z</span></label>
+                <label title="Compresses a single file"><input type="radio" name="fmt" value="gz" /><span>gzip</span></label>
+              </div>
+              <label class="fx-tray-name" data-fmt-name><span class="fx-label">Name</span><input type="text" name="zipName" value="archive" autocomplete="off" spellcheck="false" /><span class="fx-note" data-ext>.zip</span></label>
+              <div class="segmented fx-seg fx-level" role="radiogroup" aria-label="Compression" data-levels="zip">
                 <label><input type="radio" name="level" value="0" /><span>Store</span></label>
                 <label><input type="radio" name="level" value="6" checked /><span>Balanced</span></label>
                 <label><input type="radio" name="level" value="9" /><span>Smallest</span></label>
               </div>
+              <div class="segmented fx-seg fx-level" role="radiogroup" aria-label="Compression" data-levels="7z" hidden>
+                <label><input type="radio" name="level7" value="0" /><span>Store</span></label>
+                <label><input type="radio" name="level7" value="1" /><span>Fast</span></label>
+                <label><input type="radio" name="level7" value="5" checked /><span>Normal</span></label>
+                <label><input type="radio" name="level7" value="9" /><span>Ultra</span></label>
+              </div>
+              <label class="fx-tray-name" data-fmt-pass hidden><span class="fx-label">Password</span><input type="password" name="zipPass" autocomplete="new-password" placeholder="Optional" aria-describedby="fx-pass-note" /></label>
+              <p class="fx-tray-note" id="fx-pass-note" data-fmt-pass hidden>With a password, contents and file names are encrypted (AES-256). It is not stored anywhere.</p>
             </div>
             <div class="fx-tray-acts">
-              <button class="fx-btn" type="button" data-act="zip">Create ZIP</button>
-              <button class="fx-btn" type="button" data-act="gzip" title="Compress one file with gzip">Gzip</button>
-              <button class="fx-btn" type="button" data-act="unzip" hidden>Unzip</button>
-              <button class="fx-btn" type="button" data-act="gunzip" hidden>Gunzip</button>
+              <button class="fx-btn" type="button" data-act="create">Create ZIP</button>
+              <button class="fx-btn" type="button" data-act="extract" hidden>Extract</button>
             </div>
             <div class="fx-tray-busy" data-tray-busy hidden>
               <ProgressDial data-dial />
@@ -189,6 +225,19 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
               <button class="btn" type="button" data-cancel>Cancel</button>
             </div>
           </section>
+
+          <dialog class="fx-pw" data-pw-dialog aria-labelledby="fx-pw-title">
+            <form method="dialog">
+              <h2 id="fx-pw-title"><Icon name="lock" /> Password needed</h2>
+              <p data-pw-text></p>
+              <label class="fx-pw-field"><span>Password</span><input type="password" name="pw" autocomplete="off" required /></label>
+              <p class="fx-pw-error" data-pw-error role="alert" hidden></p>
+              <div class="fx-pw-acts">
+                <button class="btn" type="button" value="cancel" data-pw-cancel>Cancel</button>
+                <button class="btn btn-primary" value="ok">Extract</button>
+              </div>
+            </form>
+          </dialog>
         </aside>
       </div>
 
@@ -200,6 +249,8 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
         <span data-sb-size></span>
         <span data-sb-enc>UTF-8</span>
         <button class="fx-sb-btn" type="button" data-sb-json hidden></button>
+        <span data-sb-hl></span>
+        <select class="fx-sb-select" data-sb-syntax aria-label="Language" title="Language for highlighting" hidden></select>
         <span data-sb-lang></span>
       </footer>
 
@@ -344,6 +395,16 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
   .fx-tray-acts .fx-btn[hidden] { display: none; }
   .fx-tray-busy { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; text-align: center; background: color-mix(in srgb, var(--fx-tray) 88%, transparent); backdrop-filter: blur(2px); }
   .fx-tray-busy[hidden] { display: none; }
+  .fx .fx-fmt { display: flex; }
+  .fx .fx-fmt label { flex: 1; text-align: center; }
+  .fx-fmt input:disabled + span { opacity: 0.4; }
+  .fx-tray-note { margin: 0; color: var(--muted); font-size: 0.75rem; }
+  .fx-pw form { display: grid; gap: 0.75rem; justify-content: stretch; margin: 0; }
+  .fx-pw h2 { margin: 0; }
+  .fx-pw p { margin: 0; overflow-wrap: anywhere; }
+  .fx-pw-field { display: grid; gap: 0.3rem; font-weight: 600; font-size: 0.9rem; }
+  .fx-pw-error { color: var(--error); font-size: 0.88rem; }
+  .fx-pw-acts { display: flex; gap: 0.5rem; justify-content: flex-end; }
   .fx-tray-busy p { margin: 0; font-weight: 600; font-size: 0.85rem; }
   .fx-tray-busy .btn { padding: 0.35rem 0.9rem; font-size: 0.85rem; }
 
@@ -373,12 +434,63 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
   }
   .fx-gutter > div { white-space: pre; padding-top: 8px; will-change: transform; }
   .fx-curline { position: absolute; left: 0; right: 0; height: var(--fx-line); top: 8px; background: color-mix(in srgb, var(--fg) 4.5%, transparent); pointer-events: none; }
-  .fx-code textarea {
-    flex: 1; min-width: 0; height: 100%; min-height: 0; margin: 0; padding: 8px 12px 8px 10px; border: 0; border-radius: 0; resize: none;
-    background: transparent; color: var(--fg); font: 13px/var(--fx-line) var(--mono); tab-size: 4;
-    white-space: pre; overflow-wrap: normal; overflow: auto; position: relative;
+  /* Highlight overlay: the textarea (transparent text, visible caret) sits exactly over a highlighted <pre>. */
+  .fx-ta { position: relative; flex: 1; min-width: 0; }
+  .fx-hl, .fx-code textarea {
+    margin: 0; padding: 8px 12px 8px 10px; border: 0; border-radius: 0;
+    font: 13px/var(--fx-line) var(--mono); letter-spacing: 0; font-variant-ligatures: none; tab-size: 4;
+    white-space: pre; overflow-wrap: normal;
   }
+  .fx-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: var(--fg); }
+  .fx-hl code { display: block; font: inherit; will-change: transform; }
+  .fx-code:not([data-hl-on]) .fx-hl { display: none; }
+  .fx-code textarea { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; resize: none; background: transparent; color: var(--fg); overflow: auto; }
+  .fx-code[data-hl-on] textarea { color: transparent; caret-color: var(--fg); }
+  .fx-code[data-hl-on] textarea::selection { color: transparent; background: color-mix(in srgb, var(--accent) 26%, transparent); }
   .fx-code textarea:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -1px; border-radius: 0; }
+
+  /* Syntax colours (GitHub-like, ≥ 4.5:1 on --surface in both themes). */
+  .fx {
+    --hl-keyword: light-dark(#8250df, #d2a8ff); --hl-string: light-dark(#0a3069, #a5d6ff); --hl-number: light-dark(#0550ae, #79c0ff);
+    --hl-comment: light-dark(#5f6770, #8b949e); --hl-title: light-dark(#6639ba, #d2a8ff); --hl-attr: light-dark(#0550ae, #79c0ff);
+    --hl-builtin: light-dark(#953800, #ffa657); --hl-tag: light-dark(#116329, #7ee787); --hl-meta: light-dark(#5f6770, #8b949e);
+  }
+  .hljs-keyword, .hljs-doctag, .hljs-template-tag { color: var(--hl-keyword); }
+  .hljs-string, .hljs-regexp, .hljs-template-variable, .hljs-link { color: var(--hl-string); }
+  .hljs-number, .hljs-literal, .hljs-attr, .hljs-attribute, .hljs-property, .hljs-selector-attr, .hljs-selector-pseudo, .hljs-section { color: var(--hl-number); }
+  .hljs-comment, .hljs-quote, .hljs-meta, .hljs-code { color: var(--hl-comment); }
+  .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: var(--hl-title); }
+  .hljs-built_in, .hljs-type, .hljs-variable, .hljs-params, .hljs-bullet, .hljs-symbol, .hljs-subst { color: var(--hl-builtin); }
+  .hljs-tag, .hljs-name, .hljs-selector-tag, .hljs-selector-class, .hljs-selector-id, .hljs-addition { color: var(--hl-tag); }
+  .hljs-deletion { color: var(--error); }
+  .hljs-section, .hljs-strong { font-weight: 700; }
+  .hljs-emphasis { font-style: italic; }
+
+  /* Markdown preview (Preview or Split view) */
+  .fx-md { position: absolute; inset: 0; overflow: auto; padding: 1.25rem 2rem 3rem; background: var(--surface); font: 15px/1.65 var(--font); overflow-wrap: anywhere; }
+  .fx-md[hidden] { display: none; }
+  .fx-md:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -1px; border-radius: 0; }
+  .fx-editor[data-md-view='split'] .fx-code { right: 50%; }
+  .fx-editor[data-md-view='split'] .fx-md { left: 50%; border-left: 1px solid var(--app-line); }
+  .fx-md > :first-child { margin-top: 0; }
+  .fx-md h1, .fx-md h2, .fx-md h3 { margin: 1.4em 0 0.5em; line-height: 1.25; }
+  .fx-md h1 { font-size: 1.7rem; padding-bottom: 0.3em; border-bottom: 1px solid var(--app-line); }
+  .fx-md h2 { font-size: 1.35rem; padding-bottom: 0.25em; border-bottom: 1px solid var(--app-line); }
+  .fx-md h3 { font-size: 1.12rem; }
+  .fx-md p, .fx-md ul, .fx-md ol, .fx-md table, .fx-md pre, .fx-md blockquote { margin: 0 0 1em; }
+  .fx-md code { font: 0.88em var(--mono); padding: 0.1em 0.35em; border-radius: 5px; background: var(--surface-2); }
+  .fx-md pre { padding: 0.8rem 1rem; overflow: auto; border-radius: 9px; background: var(--surface-2); }
+  .fx-md pre code { padding: 0; background: none; font-size: 0.85rem; line-height: 1.55; }
+  .fx-md blockquote { padding-left: 1rem; border-left: 3px solid var(--app-line); color: var(--muted); }
+  .fx-md table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .fx-md th, .fx-md td { padding: 0.35rem 0.7rem; border: 1px solid var(--app-line); }
+  .fx-md th { background: var(--surface-2); text-align: left; }
+  .fx-md li:has(> input[type='checkbox']) { list-style: none; margin-left: -1.3em; }
+  .fx-md input[type='checkbox'] { margin: 0 0.45em 0 0; accent-color: var(--accent); vertical-align: -0.1em; }
+  .fx-md hr { border: 0; border-top: 1px solid var(--app-line); margin: 1.5em 0; }
+  .fx-md .md-img-off { color: var(--muted); font-style: italic; }
+  .fx-md-modes { padding: 2px; border-radius: 8px; margin-right: 0.25rem; }
+  .fx .fx-md-modes span { padding: 0.1rem 0.55rem; font-size: 0.78rem; }
 
   /* Comparison view */
   .fx-diff { position: absolute; inset: 0; display: flex; flex-direction: column; }
@@ -419,10 +531,35 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
   .fx-hex-tray { margin: 0 0 1rem; padding: 0.4rem 0.85rem; font-size: 0.88rem; }
   .fx-hex pre { margin: 0; font: 12.5px/1.6 var(--mono); color: var(--muted); }
 
-  .fx-empty { position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.7rem; padding: 1rem; text-align: center; border: 2px dashed var(--border); border-radius: 12px; overflow: auto; }
-  .fx.fx-over .fx-empty { border-color: var(--accent); }
-  .fx-ghost { width: 110px; height: 78px; fill: none; stroke: color-mix(in srgb, var(--muted) 55%, transparent); stroke-width: 2.5; stroke-linecap: round; flex: none; }
-  .fx-empty-title { margin: 0; font-size: 1.1rem; font-weight: 650; }
+  /* Empty state: a faint document whose first line is a real input, fading into the drop area. */
+  .fx-empty { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: auto; }
+  .fx-ghost-doc {
+    display: flex; flex: none; height: calc(14 * var(--fx-line) + 8px); padding-top: 8px; overflow: hidden;
+    font: 13px/var(--fx-line) var(--mono);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0 18%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0 18%, transparent 100%);
+  }
+  .fx-ghost-gutter { flex: none; width: 4ch; padding-right: 0.9ch; box-sizing: content-box; text-align: right; user-select: none; color: color-mix(in srgb, var(--muted) 70%, transparent); border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+  .fx-ghost-gutter span { display: block; height: var(--fx-line); }
+  .fx-ghost-lines { flex: 1; min-width: 0; }
+  .fx .fx-ghost-input {
+    display: block; width: 100%; height: var(--fx-line); margin: 0; padding: 0 12px 0 10px; border: 0; border-radius: 0;
+    font: inherit; color: var(--fg); background: color-mix(in srgb, var(--fg) 4.5%, transparent); outline: none;
+  }
+  .fx-ghost-input::placeholder { color: var(--muted); opacity: 1; }
+  .fx .fx-ghost-input:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--accent); }
+  .fx-ghost-text { padding: 0 12px 0 10px; }
+  .fx-ghost-text span { display: flex; gap: 1ch; align-items: center; height: var(--fx-line); }
+  .fx-ghost-text .in { padding-left: 2ch; }
+  .fx-ghost-text .in2 { padding-left: 4ch; }
+  .fx-ghost-text i { display: block; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 24%, transparent); }
+  .fx-dropzone {
+    position: relative; flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.65rem;
+    margin: -4.5rem 1.5rem 1.5rem; padding: 1.5rem 1rem; text-align: center;
+    border: 1.5px dashed color-mix(in srgb, var(--muted) 35%, transparent); border-radius: 14px; transition: border-color 0.15s, background-color 0.15s;
+  }
+  .fx.fx-over .fx-dropzone { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .fx-drop-icon { width: 44px; height: 44px; fill: none; stroke: color-mix(in srgb, var(--muted) 80%, transparent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .fx-empty-title { margin: 0; font-size: 1.05rem; font-weight: 650; }
   .fx-empty-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
   .fx-empty-actions .btn { padding: 0.5rem 0.95rem; font-size: 0.9rem; }
   .fx-empty-hint { margin: 0; max-width: 54ch; color: var(--muted); font-size: 0.8rem; }
@@ -457,8 +594,14 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
   .fx-sb-btn[data-state='valid'] { color: var(--local); }
   .fx-sb-btn[data-state='invalid'] { color: var(--error); }
   .fx-sb-btn .icon svg { width: 14px; height: 14px; }
+  .fx-sb-select { height: 20px; padding: 0 0.2rem; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .fx-sb-select:hover { background: var(--fx-hover); color: var(--fg); }
 
   @media (max-width: 760px) {
+    .fx-editor[data-md-view='split'] .fx-code { right: 0; bottom: 50%; }
+    .fx-editor[data-md-view='split'] .fx-md { left: 0; top: 50%; border-left: 0; border-top: 1px solid var(--app-line); }
+    .fx-md { padding: 1rem 1rem 2rem; }
+    .fx .fx-md-modes span { padding-inline: 0.35rem; }
     .fx { height: clamp(520px, calc(100dvh - 2rem), 900px); }
     .fx-top-actions .fx-btn > span:not(.icon) { display: none; }
     .fx-top-actions .fx-btn { width: 32px; padding: 0; }

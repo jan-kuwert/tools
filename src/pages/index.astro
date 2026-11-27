@@ -2,7 +2,7 @@
 import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import ModeBadge from '../components/ModeBadge.astro';
-import { categories, href, tools, type Category, type Tool } from '../tools';
+import { categories, href, toolHref, tools, type Category, type Tool } from '../tools';
 
 type Dir = 'n' | 'e' | 's' | 'w';
 // Each category screen sits one move away from the start screen; from a category the only way is back to the start.
@@ -78,7 +78,7 @@ const toolsIn = (c: Category) => tools.filter((t) => t.category === c);
           <ul>
             {toolsIn(c.id).map((t) => (
               <li data-keywords={`${t.title} ${t.summary} ${c.label} ${t.slug}`.toLowerCase()}>
-                <a href={href(t.slug)} data-open-screen={c.id} data-open-slug={t.slug}>
+                <a href={toolHref(t)} data-open-screen={c.id} data-open-slug={t.slug}>
                   <span class="tile"><Icon name={toolIcon(t)} /></span>
                   <span class="pk-text"><strong>{t.title}</strong><small>{t.summary}</small></span>
                   <ModeBadge mode={t.mode} />

@@ -2,14 +2,17 @@
 import { Gunzip, Gzip, gzipSync, Unzip, UnzipInflate, zip, type Zippable } from 'fflate';
 import { formatJson, jsonError } from './json';
 import { jsonErrorAt } from './json-locate';
+import type * as Highlight from './highlight';
+import type * as Markdown from './markdown';
 import { diffLines, diffWords, sortJsonKeys } from './diff';
 import { resizable } from './resize';
+import { runSevenZip } from './sevenzip';
 import { downloadBlob, el, formatBytes, setDial, sniff, throwIfAborted, UserError } from './tool';
 
 type Tool = 'json' | 'js' | 'zip' | 'gzip' | 'compare';
 type Lang = 'json' | 'js' | 'text' | 'binary';
 type Kind = 'info' | 'ok' | 'warn' | 'error';
-type Sniffed = 'jpeg' | 'png' | 'webp' | 'pdf' | 'gzip' | 'zip' | 'unknown';
+type Sniffed = 'jpeg' | 'png' | 'webp' | 'pdf' | 'gzip' | 'zip' | '7z' | 'rar' | 'xz' | 'bz2' | 'tar' | 'iso' | 'cab' | 'unknown';
 
 interface Item {
   id: number;
@@ -27,6 +30,9 @@ interface Item {
   note?: string;
   json?: { ok: boolean; message?: string; line?: number; col?: number };
   view?: { start: number; end: number; dir: 'forward' | 'backward' | 'none'; top: number; left: number };
+  /** Highlighting language chosen in the status bar; overrides detection. */
+  syntax?: string;
+  mdView?: 'edit' | 'split' | 'preview';
 }
 
 const MB = 1024 * 1024;
@@ -46,8 +52,28 @@ const DIFF = -1;
 const INDENTS: Record<string, string> = { '2': '  ', '4': '    ', tab: '\t' };
 const LANG_LABEL: Record<Lang, string> = { json: 'JSON', js: 'JavaScript', text: 'Plain text', binary: 'Binary' };
 const TYPE_LABEL: Record<Item['sniffed'], string> = {
-  jpeg: 'JPEG image', png: 'PNG image', webp: 'WebP image', pdf: 'PDF document', gzip: 'Gzip archive', zip: 'ZIP archive', unknown: 'Binary data',
+  jpeg: 'JPEG image', png: 'PNG image', webp: 'WebP image', pdf: 'PDF document', gzip: 'Gzip archive', zip: 'ZIP archive',
+  '7z': '7z archive', rar: 'RAR archive', xz: 'xz archive', bz2: 'bzip2 archive', tar: 'tar archive', iso: 'ISO disc image', cab: 'Cabinet archive', unknown: 'Binary data',
 };
+/** Kinds the tray can extract: ZIP and plain gzip with fflate, the rest with 7-Zip. */
+const ARCHIVES: Sniffed[] = ['zip', 'gzip', '7z', 'rar', 'xz', 'bz2', 'tar', 'iso', 'cab'];
+
+/** tool.ts sniff plus the archive formats 7-Zip handles (magic bytes, never the extension). */
+async function sniffAll(blob: Blob): Promise<Sniffed> {
+  const basic = await sniff(blob);
+  if (basic !== 'unknown') return basic;
+  const b = new Uint8Array(await blob.slice(0, 32774).arrayBuffer());
+  const bytes = (o: number, xs: number[]) => xs.every((x, i) => b[o + i] === x);
+  const ascii = (o: number, s: string) => bytes(o, [...s].map((c) => c.charCodeAt(0)));
+  if (bytes(0, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c])) return '7z';
+  if (bytes(0, [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07])) return 'rar';
+  if (bytes(0, [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00])) return 'xz';
+  if (ascii(0, 'BZh') && b[3] >= 0x31 && b[3] <= 0x39) return 'bz2';
+  if (ascii(257, 'ustar')) return 'tar';
+  if (ascii(0, 'MSCF')) return 'cab';
+  if (ascii(32769, 'CD001')) return 'iso';
+  return 'unknown';
+}
 
 /** Archive entry path made safe for the Explorer: no absolute paths, drive letters, `.`/`..` segments or control characters. */
 const safeEntryName = (raw: string) =>
@@ -56,6 +82,34 @@ const safeEntryName = (raw: string) =>
     .split(/[\\/]+/)
     .filter((s) => s && s !== '.' && s !== '..' && !/^[a-z]:$/i.test(s))
     .join('/');
+
+/**
+ * True when a ZIP's central directory lists encrypted entries or methods other than store/deflate:
+ * fflate cannot read those correctly, 7-Zip can. ZIP64 or unreadable directories stay with fflate.
+ */
+async function zipNeedsSevenZip(blob: Blob): Promise<boolean> {
+  const tail = new DataView(await blob.slice(Math.max(0, blob.size - 65557)).arrayBuffer());
+  let end = -1;
+  for (let i = tail.byteLength - 22; i >= 0; i--) {
+    if (tail.getUint32(i, true) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return false;
+  const count = tail.getUint16(end + 10, true);
+  const size = tail.getUint32(end + 12, true);
+  const offset = tail.getUint32(end + 16, true);
+  if (count === 0xffff || offset === 0xffffffff) return false;
+  const cd = new DataView(await blob.slice(offset, offset + size).arrayBuffer());
+  for (let p = 0, n = 0; n < count && p + 46 <= cd.byteLength; n++) {
+    if (cd.getUint32(p, true) !== 0x02014b50) return false;
+    const method = cd.getUint16(p + 10, true);
+    if (cd.getUint16(p + 8, true) & 1 || (method !== 0 && method !== 8)) return true;
+    p += 46 + cd.getUint16(p + 28, true) + cd.getUint16(p + 30, true) + cd.getUint16(p + 32, true);
+  }
+  return false;
+}
 
 /** UTF-8 text without NUL bytes, or null for binary, non-UTF-8 or oversized data. */
 async function decodeText(blob: Blob, max: number): Promise<string | null> {
@@ -76,6 +130,25 @@ const lang = (it: Item): Lang => {
   // Untitled documents (no extension) that look like JSON.
   return !/\.[^./]+$/.test(it.name) && /^\s*[[{]/.test(it.text.slice(0, 256)) ? 'json' : 'text';
 };
+
+/** highlight.js language ids offered in the status bar. */
+const SYNTAXES: Record<string, string> = {
+  plaintext: 'Plain text', bash: 'Shell', css: 'CSS', xml: 'HTML / XML', javascript: 'JavaScript', json: 'JSON',
+  markdown: 'Markdown', python: 'Python', sql: 'SQL', typescript: 'TypeScript', yaml: 'YAML',
+};
+const EXT_SYNTAX: Record<string, string> = {
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
+  json: 'json', jsonc: 'json', webmanifest: 'json', geojson: 'json', py: 'python', pyw: 'python', md: 'markdown', markdown: 'markdown',
+  html: 'xml', htm: 'xml', xhtml: 'xml', xml: 'xml', svg: 'xml', css: 'css', sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml', sql: 'sql',
+};
+function syntaxOf(it: Item): string {
+  if (it.syntax) return it.syntax;
+  const ext = /\.([^./]+)$/.exec(it.name)?.[1].toLowerCase();
+  if (ext && EXT_SYNTAX[ext]) return EXT_SYNTAX[ext];
+  const shebang = /^#!.*\b(python|bash|sh|zsh|node)\b/.exec(it.text?.slice(0, 120) ?? '')?.[1];
+  if (shebang) return shebang === 'python' ? 'python' : shebang === 'node' ? 'javascript' : 'bash';
+  return lang(it) === 'json' ? 'json' : 'plaintext';
+}
 
 const mimeOf = (it: Item) => ({ json: 'application/json', js: 'text/javascript', text: 'text/plain;charset=utf-8', binary: 'application/octet-stream' })[lang(it)];
 const blobOf = (it: Item): Blob => (it.blob && !it.edited ? it.blob : new Blob([it.text ?? ''], { type: mimeOf(it) }));
@@ -154,6 +227,11 @@ export function initFilesApp(): void {
   const field = <T extends HTMLInputElement>(name: string) => root.querySelector<T>(`[name="${name}"]`)!;
   const checkedValue = (name: string) => root.querySelector<HTMLInputElement>(`[name="${name}"]:checked`)!.value;
   const narrow = matchMedia('(max-width: 760px)');
+  const hlCode = $('[data-hl]');
+  const mdEl = $('[data-md]');
+  const editorEl = $('#fx-editor');
+  const sbSyntax = $<HTMLSelectElement>('[data-sb-syntax]');
+  const starter = $<HTMLInputElement>('[data-start-typing]');
 
   let items: Item[] = [];
   let open: number[] = [];
@@ -275,9 +353,12 @@ export function initFilesApp(): void {
     const text = it?.text !== undefined;
     $('[data-sb-size]').textContent = it ? formatBytes(it.size) : '';
     $('[data-sb-enc]').textContent = text ? 'UTF-8' : '';
-    $('[data-sb-lang]').textContent = it ? LANG_LABEL[lang(it)] : '';
+    // The language picker covers text documents; binary files just say so.
+    $('[data-sb-lang]').textContent = it && !text ? 'Binary' : '';
+    sbSyntax.hidden = !text;
+    if (text) sbSyntax.value = syntaxOf(it);
     if (!text) $('[data-sb-pos]').textContent = '';
-    const showJson = text && (lang(it) === 'json' || tool === 'json') && it.text!.trim() !== '';
+    const showJson = text && (lang(it) === 'json' || (tool === 'json' && syntaxOf(it) === 'plaintext')) && it.text!.trim() !== '';
     sbJson.hidden = !showJson;
     if (showJson) {
       const state = it.json ? (it.json.ok ? 'valid' : 'invalid') : 'unknown';
@@ -286,6 +367,129 @@ export function initFilesApp(): void {
       sbJson.title = it.json?.message ?? 'Validate JSON';
     }
   }
+
+  // ---- Highlighting (overlay) and Markdown preview; both modules load on first need ----
+  const HL_MAX = 300 * 1024;
+  let hl: typeof Highlight | undefined;
+  let md: typeof Markdown | undefined;
+  let synTimer = 0;
+  let mdTimer = 0;
+  // Lazy on purpose: highlight.js only downloads when a highlighted language is first shown.
+  const loadHl = () => import('./highlight').then((m) => (hl = m));
+
+  function syncHl() {
+    hlCode.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+  }
+
+  /** Redraws the overlay; small documents synchronously, larger ones after a short pause in typing. */
+  function refreshHl(now = false) {
+    const it = curText();
+    const syntax = it ? syntaxOf(it) : 'plaintext';
+    const large = ta.value.length >= HL_MAX;
+    const want = !!it && !code.hidden && syntax !== 'plaintext' && !large;
+    $('[data-sb-hl]').textContent = it && syntax !== 'plaintext' && large ? 'Highlighting off (large file)' : '';
+    if (want && !hl) void loadHl().then(() => refreshHl(true));
+    const on = want && !!hl;
+    code.toggleAttribute('data-hl-on', on);
+    clearTimeout(synTimer);
+    if (!on) return void (hlCode.textContent = '');
+    // highlight() returns escaped HTML generated from the text, never raw user markup.
+    const draw = () => {
+      hlCode.innerHTML = hl!.highlight(ta.value, syntax) + '\n';
+      syncHl();
+    };
+    if (now || ta.value.length < 20_000) return draw();
+    hlCode.textContent = ta.value + '\n';
+    syncHl();
+    synTimer = window.setTimeout(draw, 90);
+  }
+
+  /** Markdown view controls and preview visibility for the active document. */
+  function renderMdChrome() {
+    const it = curText();
+    const isMd = !!it && syntaxOf(it) === 'markdown';
+    const view = isMd ? (it.mdView ?? 'edit') : 'edit';
+    $('[data-md-modes]').hidden = !isMd;
+    $('[data-md-html]').hidden = !isMd;
+    field(`mdView"][value="${view}`).checked = true;
+    if (view === 'edit') delete editorEl.dataset.mdView;
+    else editorEl.dataset.mdView = view;
+    if (it) code.hidden = view === 'preview';
+    mdEl.hidden = view === 'edit';
+    if (!mdEl.hidden) scheduleMd(true);
+  }
+
+  function scheduleMd(now = false) {
+    if (mdEl.hidden) return;
+    clearTimeout(mdTimer);
+    mdTimer = window.setTimeout(
+      async () => {
+        // Lazy on purpose: micromark + GFM only download when a preview is first shown.
+        md ??= await import('./markdown');
+        const it = curText();
+        if (!it || mdEl.hidden) return;
+        sync();
+        const top = mdEl.scrollTop;
+        mdEl.replaceChildren(md.renderMarkdown(it.text!));
+        mdEl.scrollTop = top;
+      },
+      now ? 0 : 150,
+    );
+  }
+
+  sbSyntax.append(...Object.entries(SYNTAXES).map(([value, label]) => el('option', { value, textContent: label })));
+  sbSyntax.addEventListener('change', () => {
+    const it = curText();
+    if (!it) return;
+    it.syntax = sbSyntax.value;
+    renderMdChrome();
+    refreshHl(true);
+    renderStatus();
+  });
+  $$<HTMLInputElement>('[name="mdView"]').forEach((r) =>
+    r.addEventListener('change', () => {
+      const it = curText();
+      if (!it) return;
+      it.mdView = r.value as Item['mdView'];
+      renderMdChrome();
+      refreshHl(true);
+      paint();
+    }),
+  );
+  $('[data-md-html]').addEventListener('click', async () => {
+    const it = curText();
+    if (!it) return;
+    sync();
+    md ??= await import('./markdown');
+    const title = stem(it.name) || 'document';
+    downloadBlob(new Blob([md.markdownDocument(title, md.renderMarkdown(it.text!))], { type: 'text/html' }), `${title}.html`);
+    say(`Downloading ${title}.html.`);
+  });
+
+  // Empty state: the first ghost line is a real input; typing there starts a document at the same caret.
+  const startDoc = () => {
+    const v = starter.value;
+    if (!v) return;
+    const caret = starter.selectionStart ?? v.length;
+    starter.value = '';
+    newDoc(v);
+    ta.setSelectionRange(caret, caret);
+  };
+  starter.addEventListener('input', (e) => !(e as InputEvent).isComposing && startDoc());
+  starter.addEventListener('compositionend', startDoc);
+  starter.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    newDoc('\n');
+  });
+  starter.addEventListener('paste', (e) => {
+    const text = e.clipboardData?.getData('text/plain');
+    if (!text || e.clipboardData?.files.length) return;
+    // A text input would drop the line breaks.
+    e.preventDefault();
+    e.stopPropagation();
+    newDoc(text);
+  });
 
   function saveView() {
     const it = cur();
@@ -322,7 +526,7 @@ export function initFilesApp(): void {
         const info = $('[data-info]');
         const rows: [string, string][] = [['Name', it.name], ['Size', `${formatBytes(it.size)} (${it.size.toLocaleString()} bytes)`], ['Type', TYPE_LABEL[it.sniffed]]];
         if (it.note) rows.push(['Note', it.note]);
-        if (it.sniffed === 'zip' || it.sniffed === 'gzip') rows.push(['Tip', `Add it to the Archive tray to ${it.sniffed === 'zip' ? 'extract' : 'decompress'} it.`]);
+        if (ARCHIVES.includes(it.sniffed)) rows.push(['Tip', 'Add it to the Archive tray to extract it.']);
         rows.push(['Preview', blob.size > 4096 ? 'First 4 KB, hexadecimal' : 'Hexadecimal']);
         info.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })]));
         $('[data-hexdump]').textContent = '';
@@ -334,6 +538,8 @@ export function initFilesApp(): void {
           });
       }
     }
+    renderMdChrome();
+    refreshHl(true);
     renderTabs();
     renderExplorer();
     renderTools();
@@ -427,7 +633,7 @@ export function initFilesApp(): void {
     if (l === 'json') return 'braces';
     if (l === 'js') return 'code';
     if (l === 'text') return 'doc';
-    return { zip: 'files', gzip: 'files', jpeg: 'images', png: 'images', webp: 'images', pdf: 'pdf', unknown: 'doc' }[it.sniffed];
+    return ({ jpeg: 'images', png: 'images', webp: 'images', pdf: 'pdf', unknown: 'doc' } as Record<string, string>)[it.sniffed] ?? 'files';
   };
   // Folder prefixes (from extracted archives) are shown muted before the file name.
   const nameEl = (name: string) => {
@@ -675,24 +881,32 @@ export function initFilesApp(): void {
     if (hadFocus && !trayList.contains(document.activeElement)) trayEl.focus();
     const total = list.reduce((s, it) => s + it.size, 0);
     $('[data-tray-count]').textContent = list.length ? `${plural(list.length)} · ${formatBytes(total)}` : '';
-    const zips = list.filter((it) => it.sniffed === 'zip').length;
-    const gzs = list.filter((it) => it.sniffed === 'gzip').length;
+    const archives = list.filter((it) => ARCHIVES.includes(it.sniffed)).length;
     // A tray holding only archives is most likely there to be extracted.
-    const extract = list.length > 0 && zips + gzs === list.length;
+    const extract = list.length > 0 && archives === list.length;
+    const gzRadio = field('fmt"][value="gz');
+    gzRadio.disabled = list.length !== 1 && !gzRadio.checked;
+    const fmt = checkedValue('fmt');
+    $('[data-levels="zip"]').hidden = fmt !== 'zip';
+    $('[data-levels="7z"]').hidden = fmt !== '7z';
+    $$('[data-fmt-pass]').forEach((n) => (n.hidden = fmt !== '7z'));
+    $('[data-fmt-name]').hidden = fmt === 'gz';
+    $('[data-ext]').textContent = fmt === '7z' ? '.7z' : '.zip';
     const set = (act: string, enabled: boolean, primary: boolean, show = true) => {
       const b = $<HTMLButtonElement>(`[data-act="${act}"]`);
       b.hidden = !show;
       b.disabled = !!busy || !enabled;
       b.classList.toggle('fx-primary', primary && enabled);
     };
-    set('zip', list.length > 0, !extract);
-    set('gzip', list.length === 1, false);
-    set('unzip', zips > 0, extract, zips > 0);
-    set('gunzip', gzs > 0, extract, gzs > 0);
+    const create = $('[data-act="create"]');
+    create.textContent = fmt === '7z' ? 'Create 7z' : fmt === 'gz' ? 'Gzip' : 'Create ZIP';
+    create.title = fmt === 'gz' && list.length !== 1 ? 'Gzip compresses a single file: keep exactly one file in the tray.' : '';
+    set('create', list.length > 0 && (fmt !== 'gz' || list.length === 1), !extract);
+    set('extract', archives > 0, extract, archives > 0);
     $<HTMLButtonElement>('[data-tray-clear]').disabled = !!busy || !list.length;
     const it = cur();
     const hexBtn = $<HTMLButtonElement>('[data-hex-tray]');
-    hexBtn.hidden = !it || it.text !== undefined || (it.sniffed !== 'zip' && it.sniffed !== 'gzip');
+    hexBtn.hidden = !it || it.text !== undefined || !ARCHIVES.includes(it.sniffed);
     hexBtn.disabled = !!it && tray.includes(it.id);
     hexBtn.querySelector('span:not(.icon)')!.textContent = hexBtn.disabled ? 'In the Archive tray' : 'Add to Archive tray';
   }
@@ -930,6 +1144,7 @@ export function initFilesApp(): void {
     const src = blobOf(it);
     if (src.size > MAX_ZIP) throw new UserError(`${it.name} is larger than ${formatBytes(MAX_ZIP)}, the ZIP limit.`);
     if ((await sniff(src)) !== 'zip') throw new UserError(`${it.name} is not a ZIP archive.`);
+    if (await zipNeedsSevenZip(src)) return extract7z(it, signal);
     const entries: { name: string; chunks: Uint8Array[]; done: boolean; error?: string }[] = [];
     let total = 0;
     let renamed = 0;
@@ -974,24 +1189,116 @@ export function initFilesApp(): void {
     } catch (err) {
       reader.cancel().catch(() => {});
       if (err instanceof UserError || (err instanceof DOMException && err.name === 'AbortError')) throw err;
-      throw new UserError(`${it.name} is damaged or uses a ZIP feature this tool does not support.`);
+      // fflate stopped (e.g. ZIP64 quirks or damaged headers): 7-Zip is more forgiving.
+      return extract7z(it, signal);
     }
     const good = entries.filter((e) => e.done && !e.error);
-    if (!good.length) throw new UserError(entries.length ? `Could not extract ${it.name}: ${entries[0].error ?? 'the data is damaged'}.` : `${it.name} contains no files.`);
+    // Encrypted entries or methods fflate lacks (Deflate64, LZMA, AES…): hand the whole archive to 7-Zip.
+    if (good.length < entries.length) return extract7z(it, signal);
+    if (!good.length) throw new UserError(`${it.name} contains no files.`);
     setBusyText('Adding files…');
     const added: Item[] = [];
     for (const e of good) added.push(await addBlob(uniqueName(e.name), new Blob(e.chunks as BlobPart[]), Date.now(), true, MAX_INLINE - 1));
     openItem(added[0].id, false, true);
     log('ok', `Extracted ${plural(good.length)} from ${it.name}: ${formatBytes(src.size)} → ${formatBytes(total)}.`);
-    if (good.length < entries.length) log('warn', `${plural(entries.length - good.length)} in ${it.name} could not be extracted (encrypted, damaged or unsupported compression).`);
     if (renamed) log('warn', `${plural(renamed, 'entry name')} in ${it.name} pointed outside the archive or used unsafe characters; ${renamed === 1 ? 'it was' : 'they were'} cleaned up.`);
   }
+
+  // ---- 7-Zip (worker + WASM, loaded on first use) ----
+  async function create7z(signal: AbortSignal) {
+    const list = trayItems();
+    if (!list.length) throw new UserError('Add files to the archive tray first.');
+    const blobs = list.map(blobOf);
+    const total = blobs.reduce((s, b) => s + b.size, 0);
+    if (total > MAX_ZIP) throw new UserError(`The files in the tray add up to ${formatBytes(total)}; the archive limit is ${formatBytes(MAX_ZIP)}.`);
+    const name = (field('zipName').value.trim().replace(/[\\/]+/g, '-') || 'archive').replace(/\.(zip|7z)$/i, '') + '.7z';
+    const password = field('zipPass').value;
+    // Safe relative paths; duplicates get " (2)" like in ZIPs.
+    const used = new Set<string>();
+    const files = list.map((it, i) => {
+      const base = safeEntryName(it.name) || `file-${i + 1}`;
+      let n = base;
+      for (let k = 2; used.has(n); k++) n = base.replace(/(\.[^./]*)?$/, ` (${k})$1`);
+      used.add(n);
+      return { name: n, blob: blobs[i] };
+    });
+    setBusyText('Compressing with 7-Zip…');
+    const res = await runSevenZip({ op: 'create', files, level: Number(checkedValue('level7')) as 0 | 1 | 5 | 9, password: password || undefined }, { signal, onProgress: setFraction });
+    if (res.type === 'error') throw new UserError(`Could not create ${name}: ${res.message}`);
+    if (res.type !== 'created') throw new Error(`Unexpected 7-Zip reply: ${res.type}`);
+    const o = addOutput(name, { blob: new Blob([res.data], { type: 'application/x-7z-compressed' }) }, '7z');
+    log('ok', `Created ${o.name}${password ? ' (encrypted)' : ''} from ${plural(list.length)}: ${formatBytes(total)} → ${formatBytes(o.size)}.`);
+  }
+
+  async function extract7z(it: Item, signal: AbortSignal) {
+    const src = blobOf(it);
+    if (src.size > MAX_ZIP) throw new UserError(`${it.name} is larger than ${formatBytes(MAX_ZIP)}, the archive limit.`);
+    let password: string | undefined;
+    for (;;) {
+      setBusyText(`Extracting ${it.name}…`);
+      setFraction();
+      const res = await runSevenZip({ op: 'extract', name: it.name, blob: src, password, maxBytes: MAX_ZIP, maxEntries: MAX_ENTRIES }, { signal, onProgress: setFraction });
+      if (res.type === 'error') {
+        if (res.code === 'password' || res.code === 'wrong-password') {
+          password = await askPassword(it.name, res.code === 'wrong-password' && password !== undefined);
+          if (password === undefined) throw new DOMException('Cancelled', 'AbortError');
+          continue;
+        }
+        if (res.code === 'too-big') throw new UserError(`${it.name} expands to more than ${formatBytes(MAX_ZIP)}; stopped to protect your device.`);
+        if (res.code === 'too-many') throw new UserError(`${it.name} holds more than ${plural(MAX_ENTRIES)}; stopped to protect your device.`);
+        throw new UserError(`${it.name}: ${res.message}`);
+      }
+      if (res.type !== 'extracted') throw new Error(`Unexpected 7-Zip reply: ${res.type}`);
+      setBusyText('Adding files…');
+      const added: Item[] = [];
+      let renamed = 0;
+      let total = 0;
+      for (const e of res.entries) {
+        const name = safeEntryName(e.name);
+        if (name !== e.name) renamed++;
+        if (!name) continue;
+        total += e.data.byteLength;
+        added.push(await addBlob(uniqueName(name), new Blob([e.data]), Date.now(), true, MAX_INLINE - 1));
+      }
+      if (!added.length) throw new UserError(`${it.name} contains no files.`);
+      openItem(added[0].id, false, true);
+      log('ok', `Extracted ${plural(added.length)} from ${it.name}: ${formatBytes(src.size)} → ${formatBytes(total)}.`);
+      if (res.skipped) log('warn', `${plural(res.skipped, 'link')} or special file${res.skipped === 1 ? '' : 's'} in ${it.name} ${res.skipped === 1 ? 'was' : 'were'} skipped.`);
+      if (renamed) log('warn', `${plural(renamed, 'entry name')} in ${it.name} used unsafe characters and ${renamed === 1 ? 'was' : 'were'} cleaned up.`);
+      if (res.warning) log('warn', `${it.name}: ${res.warning}`);
+      return;
+    }
+  }
+
+  /** Modal password prompt; resolves undefined on cancel. The password is only handed to the worker for this job. */
+  function askPassword(name: string, wrong: boolean): Promise<string | undefined> {
+    const dlg = $<HTMLDialogElement>('[data-pw-dialog]');
+    const input = dlg.querySelector<HTMLInputElement>('input[name="pw"]')!;
+    const err = $('[data-pw-error]');
+    $('[data-pw-text]').textContent = `${name} is encrypted. Enter its password to extract it.`;
+    err.textContent = wrong ? 'That password is wrong. Try again.' : '';
+    err.hidden = !wrong;
+    input.value = '';
+    dlg.returnValue = '';
+    const { promise, resolve } = Promise.withResolvers<string | undefined>();
+    dlg.addEventListener(
+      'close',
+      () => {
+        resolve(dlg.returnValue === 'ok' ? input.value : undefined);
+        input.value = '';
+      },
+      { once: true },
+    );
+    dlg.showModal();
+    return promise;
+  }
+  $('[data-pw-cancel]').addEventListener('click', () => $<HTMLDialogElement>('[data-pw-dialog]').close('cancel'));
 
   // ---- Files in: picker, hub hand-over, drop, paste ----
   /** Adds bytes to the Explorer: UTF-8 text up to `maxText` becomes an editable document, anything else a binary file. */
   async function addBlob(name: string, blob: Blob, mtime: number, generated: boolean, maxText = MAX_TEXT): Promise<Item> {
-    const sniffed = await sniff(blob);
-    const text = await decodeText(blob, maxText);
+    const sniffed = await sniffAll(blob);
+    const text = sniffed === 'unknown' ? await decodeText(blob, maxText) : null;
     let note: string | undefined;
     if (text === null && sniffed === 'unknown') note = blob.size > maxText ? `Larger than ${formatBytes(maxText)}, so it is not opened as text.` : 'Not UTF-8 text, so it is shown as binary.';
     if (text !== null && blob.size > WARN_TEXT) log('warn', `${name} is ${formatBytes(blob.size)}: the editor may be slow.`);
@@ -1003,9 +1310,17 @@ export function initFilesApp(): void {
     for (const f of files) added.push(await addBlob(f.name, f, f.lastModified, false));
     if (!added.length) return;
     if (toTray) tray.push(...added.map((it) => it.id));
-    openItem(added[0].id, false, toTray);
+    // ?mode=markdown: the first Markdown file replaces the untouched placeholder and opens in Split view.
+    const md = mdPlaceholder !== undefined ? added.find((it) => syntaxOf(it) === 'markdown') : undefined;
+    if (md) {
+      md.mdView = 'split';
+      if (!byId(mdPlaceholder)?.edited) removeItem(mdPlaceholder!);
+      mdPlaceholder = undefined;
+    }
+    openItem((md ?? added[0]).id, false, toTray);
     say(`Added ${plural(added.length)}${toTray ? ' to the archive tray' : ''}.`);
   }
+  let mdPlaceholder: number | undefined;
 
   async function pasteFromClipboard() {
     let text: string;
@@ -1077,20 +1392,24 @@ export function initFilesApp(): void {
     'minify-json': () => runJson('minify'),
     format: () => runJson('format'),
     'minify-js': runJs,
-    zip: () => trayRun('Reading files…', createZip),
-    gzip: () =>
-      trayRun('Compressing…', async (signal) => {
+    create: () => {
+      const fmt = checkedValue('fmt');
+      if (fmt === '7z') return trayRun('Starting 7-Zip…', create7z);
+      if (fmt === 'zip') return trayRun('Reading files…', createZip);
+      return trayRun('Compressing…', async (signal) => {
         const list = trayItems();
         if (list.length !== 1) throw new UserError('Gzip compresses a single file: keep exactly one file in the tray.');
         await gzipItem(list[0], true, signal);
-      }),
-    gunzip: () =>
-      trayRun('Decompressing…', async (signal) => {
-        for (const it of trayItems().filter((x) => x.sniffed === 'gzip')) await gzipItem(it, false, signal);
-      }),
-    unzip: () =>
+      });
+    },
+    extract: () =>
       trayRun('Extracting…', async (signal) => {
-        for (const it of trayItems().filter((x) => x.sniffed === 'zip')) await unzipItem(it, signal);
+        for (const it of trayItems().filter((x) => ARCHIVES.includes(x.sniffed))) {
+          if (it.sniffed === 'zip') await unzipItem(it, signal);
+          // Plain .gz stays with fflate; a gzipped tar is unpacked in one go by 7-Zip.
+          else if (it.sniffed === 'gzip' && !/\.(tgz|tar\.gz)$/i.test(it.name)) await gzipItem(it, false, signal);
+          else await extract7z(it, signal);
+        }
       }),
     compare: () => void compareChosen(),
     'compare-clip': async () => {
@@ -1346,6 +1665,7 @@ export function initFilesApp(): void {
   });
   $$('[data-act]').forEach((b) => b.addEventListener('click', () => acts[b.dataset.act!]()));
   $$('[data-tray-add]').forEach((b) => b.addEventListener('click', addSelectedToTray));
+  $$('[name="fmt"]').forEach((r) => r.addEventListener('change', renderTray));
   $('[data-tray-focus]').addEventListener('click', () => showTray(true));
   $('[data-hex-tray]').addEventListener('click', () => {
     if (active !== undefined) addToTray([active]);
@@ -1401,10 +1721,20 @@ export function initFilesApp(): void {
     dirty = true;
     const it = byId(shown)!;
     it.edited = true;
+    refreshHl();
+    scheduleMd();
     analyse(it.size > WARN_TEXT ? 600 : 150);
     paint();
   });
-  ta.addEventListener('scroll', paint);
+  ta.addEventListener('scroll', () => {
+    syncHl();
+    // Split view: keep the preview roughly at the same relative position.
+    if (editorEl.dataset.mdView === 'split') {
+      const f = ta.scrollTop / Math.max(1, ta.scrollHeight - ta.clientHeight);
+      mdEl.scrollTop = f * (mdEl.scrollHeight - mdEl.clientHeight);
+    }
+    paint();
+  });
   document.addEventListener('selectionchange', () => document.activeElement === ta && paint());
   new ResizeObserver(paint).observe(ta);
   ta.addEventListener('blur', () => (escaped = false));
@@ -1470,7 +1800,17 @@ export function initFilesApp(): void {
   });
 
   if (narrow.matches) setExplorer(false);
-  const mode = new URLSearchParams(location.search).get('mode') as Tool | null;
-  setTool(mode && TOOLS.includes(mode) ? mode : 'json', true);
-  showActive();
+  // Deep links: the top-bar tools, plus extract / 7z (archive tray presets) and markdown (a Split-view document).
+  const mode = new URLSearchParams(location.search).get('mode');
+  if (mode === 'extract' || mode === '7z') {
+    if (mode === '7z') field('fmt"][value="7z').checked = true;
+    else $('#fx-tray-help').textContent = 'Drop an archive to extract (ZIP, 7z, RAR, tar, gz, xz, bz2).';
+    setTool('zip', true);
+  } else setTool(TOOLS.includes(mode as Tool) ? (mode as Tool) : 'json', true);
+  if (mode === 'markdown') {
+    const text = '# Untitled\n\nWrite **Markdown** here; the preview on the right updates as you type.\n\n- [ ] Task lists, tables and `code` work too.\n';
+    const it = addItem({ name: uniqueName(`Untitled-${++untitled}.md`), text, size: new Blob([text]).size, sniffed: 'unknown', generated: true, mdView: 'split' });
+    mdPlaceholder = it.id;
+    openItem(it.id);
+  } else showActive();
 }
