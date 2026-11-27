@@ -1194,11 +1194,10 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
     if (result) silKeys.both.focus();
   });
 
-  // Deep links from the tool list: ?mode=trim|cut|fade|silence|cloud preselects and focuses the matching control.
-  const mode = new URLSearchParams(location.search).get('mode');
   const modeModule: Record<string, HTMLElement> = { trim: $('.mod-edit'), cut: $('.mod-edit'), fade: $('.mod-edit'), silence: $('.mod-edit'), cloud };
-  // Focus waits for the first decoded file, since the edit controls are disabled until then.
-  let pendingMode = mode && mode in modeModule ? mode : undefined;
+  let mode: string | null = null;
+  // Edit controls remain disabled until a file has decoded.
+  let pendingMode: string | undefined;
 
   function flash(node: HTMLElement) {
     node.classList.remove('flash');
@@ -1225,9 +1224,19 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
 
   setStatus('idle');
   refresh();
-  if (pendingMode) {
+  function applyMode(next: string | null) {
+    mode = next;
+    if (mode === 'cut' || mode === 'trim') {
+      $<HTMLInputElement>(`[name=edit][value=${mode === 'cut' ? 'remove' : 'keep'}]`).checked = true;
+      refresh();
+    }
+    pendingMode = mode && mode in modeModule ? mode : undefined;
+    if (!pendingMode) return;
+    if (decoded) return afterDecode(decoded.file);
     const target = modeModule[pendingMode];
     flash(target);
     if (pendingMode === 'cloud') target.scrollIntoView({ block: 'nearest' });
   }
+  addEventListener('tools:mode', (e) => applyMode((e as CustomEvent<string | null>).detail));
+  applyMode(new URLSearchParams(location.search).get('mode'));
 </script>

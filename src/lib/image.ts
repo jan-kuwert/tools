@@ -48,10 +48,10 @@ export async function imageKind(file: Blob): Promise<ImageKind | undefined> {
   if (kind === 'unknown' && (await isSvg(file))) return 'svg';
 }
 
-const UNITS: Record<string, number> = { '': 1, px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, em: 16, rem: 16 };
-const svgLength = (v: string | null) => {
+const UNITS: Record<string, number> = { '': 1, px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4 };
+const svgLength = (v: string | null, fontSize = 16) => {
   const m = v?.trim().match(/^(\d*\.?\d+(?:e[+-]?\d+)?)\s*([a-z]*)$/i);
-  const n = m ? Number(m[1]) * (UNITS[m[2].toLowerCase()] ?? NaN) : NaN;
+  const n = m ? Number(m[1]) * (/^(em|rem)$/i.test(m[2]) ? fontSize : (UNITS[m[2].toLowerCase()] ?? NaN)) : NaN;
   return n > 0 && Number.isFinite(n) ? n : undefined;
 };
 
@@ -66,8 +66,9 @@ function readSvg(file: Blob) {
       if (svg.localName !== 'svg' || doc.getElementsByTagName('parsererror').length) throw new UserError('This SVG could not be read. The file may be damaged.');
       const vb = (svg.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number);
       const ratio = vb.length === 4 && vb[2] > 0 && vb[3] > 0 ? vb[2] / vb[3] : undefined;
-      let w = svgLength(svg.getAttribute('width'));
-      let h = svgLength(svg.getAttribute('height'));
+      const fontSize = svgLength(svg.style.fontSize || svg.getAttribute('font-size')) ?? 16;
+      let w = svgLength(svg.getAttribute('width'), fontSize);
+      let h = svgLength(svg.getAttribute('height'), fontSize);
       if (w && !h && ratio) h = w / ratio;
       if (h && !w && ratio) w = h * ratio;
       // Without a size, use the viewBox units as px; without either, a 1024 px square.
@@ -75,7 +76,9 @@ function readSvg(file: Blob) {
       // Content without a viewBox is laid out in px; give it one so it scales with the raster size.
       if (!ratio) svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
       const k = Math.min(1, Math.sqrt(MAX_PIXELS / (w * h)));
-      return { doc, w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
+      const width = Math.max(1, Math.min(MAX_PIXELS, Math.round(w * k)));
+      const height = Math.max(1, Math.min(Math.floor(MAX_PIXELS / width), Math.round(h * k)));
+      return { doc, w: width, h: height };
     });
     svgDocs.set(file, p);
   }

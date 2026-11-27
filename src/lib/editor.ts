@@ -471,6 +471,7 @@ function bake(kind: 'crop' | 'cut') {
     const px = await bakedPixels(canvas);
     pushHistory(it);
     const next: Item = { ...it, px, rot: 0, flip: false };
+    radio('ratio', 'free')!.checked = true;
     resetCrop(next);
     setState(it, next);
     const what = kind === 'crop' ? `Cropped to ${w} × ${h} px.` : `Cut out ${w} × ${h} px; that area is now transparent.`;
@@ -799,7 +800,8 @@ function arrangeReadouts() {
 
 function merge() {
   if (blocks.length < 2) return;
-  const B = bounds(blocks);
+  const pieces = blocks.map((b) => ({ ...b, it: { ...b.it, crop: { ...b.it.crop } } }));
+  const B = bounds(pieces);
   if (B.w * B.h > MAX_PIXELS) return setStatus(tooBig(B), 'error');
   return run(async () => {
     setStatus('Merging…', 'working');
@@ -809,14 +811,15 @@ function merge() {
       ctx.fillStyle = field('colour').value;
       ctx.fillRect(0, 0, B.w, B.h);
     }
-    for (const b of blocks) {
+    for (const b of pieces) {
       const piece = renderOutput(b.it, await fullOf(b.it, rasterScale(b.it, b.scale)), [b.w, b.h]);
       ctx.drawImage(piece, b.x - B.x, b.y - B.y);
       piece.width = 0;
     }
     const px = await bakedPixels(canvas);
-    const n = blocks.length;
+    const n = pieces.length;
     const it: Item = { px, origin: new File([], 'merged.png', { type: 'image/png' }), view: px.base, rot: 0, flip: false, crop: { x: 0, y: 0, w: px.w, h: px.h }, gps: false, undo: [], redo: [], include: true, merged: true };
+    radio('ratio', 'free')!.checked = true;
     resetCrop(it);
     items.push(it);
     cur = items.length - 1;
@@ -1199,6 +1202,8 @@ function flash(el: Element | null | undefined) {
 /** Entry points from the All tools list: `?mode=crop|flip|merge|svg`; anything else keeps the defaults. */
 function applyMode(mode: string | null) {
   const hint = root!.querySelector<HTMLElement>('[data-mode-hint]')!;
+  hint.textContent = '';
+  afterLoad = undefined;
   if (mode === 'crop') {
     radio('fit', 'fill')!.checked = true;
     afterLoad = () => {
@@ -1231,6 +1236,7 @@ function applyMode(mode: string | null) {
     (ui.form.elements.namedItem('format') as HTMLSelectElement).value = 'image/png';
   }
   hint.hidden = !hint.textContent;
+  if (items.length && afterLoad?.()) afterLoad = undefined;
 }
 
 const ARRANGE_FIELDS = ['layout', 'align', 'gap', 'cols', 'match', 'enlarge', 'overlap'];
@@ -1465,6 +1471,7 @@ export function initImageEditor(): void {
     { passive: false },
   );
   canvas.addEventListener('keydown', (e) => {
+    if (busy) return;
     const it = items[cur];
     if (arranging) {
       if (arrangeKey(e)) e.preventDefault();
@@ -1494,5 +1501,9 @@ export function initImageEditor(): void {
   refreshPalette();
 
   applyMode(new URLSearchParams(location.search).get('mode'));
+  window.addEventListener('tools:mode', (event) => {
+    applyMode((event as CustomEvent<string | null>).detail);
+    changed();
+  });
   syncControls();
 }

@@ -3,6 +3,7 @@
 import SevenZip, { type SevenZipModule } from '7z-wasm';
 import wasmUrl from '7z-wasm/7zz.wasm?url';
 import type { SzFailure, SzRequest, SzResponse } from './sevenzip';
+import { mountArchiveFiles } from './archive';
 
 const JOB = '/job';
 const IN = `${JOB}/in`;
@@ -205,9 +206,7 @@ async function create(req: Extract<SzRequest, { op: 'create' }>): Promise<SzResp
   const FS = sz!.FS;
   FS.mkdir(JOB);
   FS.mkdir(IN);
-  // Names are already safe relative paths (no "..", no leading "/"); WORKERFS creates their folders.
-  FS.mount(sz!.WORKERFS, { blobs: req.files.map((f) => ({ name: f.name, data: f.blob })) }, IN);
-  FS.chdir(IN);
+  FS.chdir(mountArchiveFiles(sz!, req.files, IN));
   const top = [...new Set(req.files.map((f) => f.name.split('/')[0]))];
   const args = ['a', `-t${req.format}`, `-mx${req.level}`, '-bsp1', '-bb0', '-y', '-spd'];
   // 7z also encrypts the file names; ZIP gets AES-256 instead of the weak legacy ZipCrypto.

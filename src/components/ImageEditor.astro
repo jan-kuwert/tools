@@ -45,7 +45,7 @@ const bgTip = cloudReady ? 'Uploads this image to our EU server; asks first' : '
           <button class="ie-tool" type="button" data-needs-image data-reset aria-label="Reset the selection" title="Reset the selection"><Icon name="restart" /></button>
         </div>
         <div class="ie-tb-group ie-edit">
-          <button class="ie-tool ie-cloud" type="button" data-remove-bg data-needs-image disabled title={bgTip} data-tip={bgTip} data-ready={cloudReady || undefined}>
+          <button class="ie-tool ie-cloud" type="button" data-remove-bg data-needs-image disabled aria-label="Remove background" title={bgTip} data-tip={bgTip} data-ready={cloudReady || undefined}>
             <Icon name="cloud" /><span class="ie-tool-label">Remove background</span>
           </button>
         </div>

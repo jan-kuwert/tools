@@ -1,5 +1,5 @@
 // GPX 1.0/1.1 parsing, GPX 1.1 serialization, stats and track edits for the GPX app.
-// No DOM: a small XML reader keeps <extensions> verbatim and lets node tests run the same code.
+// No DOM: a small XML reader preserves extension XML and lets node tests run the same code.
 // Tracks and points are treated as immutable; every edit returns a new Track (cheap undo snapshots).
 import { UserError } from './tool.ts';
 
@@ -9,18 +9,18 @@ export interface Pt {
   ele?: number;
   /** Epoch milliseconds. */
   time?: number;
-  /** Inner XML of the point's <extensions>, verbatim (Garmin TrackPointExtension, power, …). */
+  /** Inner XML of the point's <extensions>, with inherited namespace declarations preserved. */
   ext?: string;
   /** Read from ext for display; ext stays the source of truth on export. */
   hr?: number;
   cad?: number;
 }
-export interface Wpt { lat: number; lon: number; /** Inner XML, verbatim. */ raw: string }
+export interface Wpt { lat: number; lon: number; /** Inner XML with inherited namespace declarations preserved. */ raw: string }
 export interface Track { name: string; type: string; desc: string; route: boolean; ext?: string; segs: Pt[][] }
 export interface Gpx {
   name: string;
   desc: string;
-  /** Namespace prefix → URI from the root element (gpxtpx, ns3, …), needed by the verbatim extensions. */
+  /** Namespace prefix → URI from the root element (gpxtpx, ns3, …). */
   ns: Record<string, string>;
   wpts: Wpt[];
   tracks: Track[];
@@ -29,11 +29,12 @@ export interface Gpx {
 export const MAX_BYTES = 50 * 1024 * 1024;
 const R = 6371008.8;
 const RAD = Math.PI / 180;
+const XSI = 'http://www.w3.org/2001/XMLSchema-instance';
 
 // ---------- XML reader ----------
 
 class XmlError extends Error {}
-interface XNode { tag: string; name: string; attrs: Record<string, string>; kids: XNode[]; text: string; inner: [number, number] }
+interface XNode { tag: string; name: string; attrs: Record<string, string>; ns: Record<string, string>; open: number; kids: XNode[]; text: string; inner: [number, number] }
 
 const ENT: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
 const decode = (s: string): string =>
@@ -88,10 +89,19 @@ function parseXml(src: string): XNode {
       NAME.lastIndex = lt + 1;
       const m = NAME.exec(src);
       if (!m) throw new XmlError('invalid tag');
-      // Namespaces ignored: match on local names so gpx:, default and odd prefixes all work.
-      const node: XNode = { tag: m[0], name: m[0].slice(m[0].indexOf(':') + 1), attrs: {}, kids: [], text: '', inner: [0, 0] };
+      // GPX elements are matched on local names; copied XML keeps its namespace context.
+      const inherited = stack[stack.length - 1]?.ns ?? { xmlns: '' };
+      const node: XNode = { tag: m[0], name: m[0].slice(m[0].indexOf(':') + 1), attrs: {}, ns: inherited, open: NAME.lastIndex, kids: [], text: '', inner: [0, 0] };
       let j = NAME.lastIndex;
-      for (let a; (ATTR.lastIndex = j), (a = ATTR.exec(src)); j = ATTR.lastIndex) node.attrs[a[1]] = decode(a[2] ?? a[3]);
+      for (let a; (ATTR.lastIndex = j), (a = ATTR.exec(src)); j = ATTR.lastIndex) {
+        const key = a[1];
+        const value = decode(a[2] ?? a[3]);
+        node.attrs[key] = value;
+        if (key === 'xmlns' || key.startsWith('xmlns:')) {
+          if (node.ns === inherited) node.ns = { ...inherited };
+          node.ns[key] = value;
+        }
+      }
       WS.lastIndex = j;
       WS.exec(src);
       j = WS.lastIndex;
@@ -104,14 +114,7 @@ function parseXml(src: string): XNode {
       else if (root) throw new XmlError('more than one root element');
       else root = node;
       if (selfClosing) continue;
-      if (node.name === 'extensions') {
-        // Kept verbatim, so no need to build (many) nodes for its content.
-        const close = `</${node.tag}>`;
-        const e = src.indexOf(close, i);
-        if (e < 0) throw new XmlError(`<${node.tag}> is not closed`);
-        node.inner[1] = e;
-        i = e + close.length;
-      } else stack.push(node);
+      stack.push(node);
     }
   }
   if (stack.length) throw new XmlError(`<${stack[stack.length - 1].tag}> is not closed`);
@@ -141,7 +144,23 @@ export function parseGpx(text: string): Gpx {
     throw e;
   }
   if (root.name !== 'gpx') throw new UserError(`Not a GPX file: the XML root is <${root.tag}>, not <gpx>.`);
-  const raw = (n: XNode | undefined) => (n ? src.slice(n.inner[0], n.inner[1]) : '');
+  const raw = (n: XNode | undefined) => {
+    if (!n) return '';
+    const out: string[] = [];
+    let from = n.inner[0];
+    // Each copied child carries its inherited bindings without overriding its own declarations.
+    for (const child of n.kids) {
+      out.push(src.slice(from, child.open));
+      for (const [key, uri] of Object.entries(n.ns)) {
+        // The serializer supplies this binding on every output root.
+        if (key === 'xmlns:xsi' && uri === XSI) continue;
+        if (!(key in child.attrs)) out.push(` ${key}="${esc(uri)}"`);
+      }
+      from = child.open;
+    }
+    out.push(src.slice(from, n.inner[1]));
+    return out.join('');
+  };
   const ns: Record<string, string> = {};
   for (const [k, v] of Object.entries(root.attrs)) if (k.startsWith('xmlns:') && k !== 'xmlns:xsi') ns[k.slice(6)] = v;
 
@@ -195,7 +214,7 @@ export function serializeGpx(g: Gpx, creator = 'Tools'): string {
   const out: string[] = ['<?xml version="1.0" encoding="UTF-8"?>'];
   const xmlns = Object.entries(g.ns).map(([p, u]) => ` xmlns:${p}="${esc(u)}"`).join('');
   out.push(
-    `<gpx version="1.1" creator="${esc(creator)}" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"${xmlns} xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">`,
+    `<gpx version="1.1" creator="${esc(creator)}" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="${XSI}"${xmlns} xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">`,
   );
   const first = g.tracks.map((t) => timeRange(t)?.[0]).find((v) => v !== undefined);
   if (g.name || g.desc || first !== undefined) {
@@ -329,12 +348,15 @@ export function stats(t: Track, f: Flat = flatten(t)): Stats {
     if (moving > 0) s.avgSpeed = movingDist / moving;
     if (maxSpeed > 0) s.maxSpeed = maxSpeed;
   }
-  const eles = pts.flatMap((p) => (p.ele === undefined ? [] : [p.ele]));
-  if (eles.length) {
-    Object.assign(s, climb(eles));
+  for (const seg of t.segs) {
+    const eles = seg.flatMap((p) => (p.ele === undefined ? [] : [p.ele]));
+    if (!eles.length) continue;
+    const { ascent, descent } = climb(eles);
+    s.ascent = (s.ascent ?? 0) + ascent;
+    s.descent = (s.descent ?? 0) + descent;
     // No Math.min(...eles): spreading 100k+ arguments overflows the stack.
-    s.minEle = eles.reduce((a, b) => Math.min(a, b));
-    s.maxEle = eles.reduce((a, b) => Math.max(a, b));
+    s.minEle = Math.min(s.minEle ?? Infinity, eles.reduce((a, b) => Math.min(a, b)));
+    s.maxEle = Math.max(s.maxEle ?? -Infinity, eles.reduce((a, b) => Math.max(a, b)));
   }
   const hrs = pts.flatMap((p) => (p.hr === undefined ? [] : [p.hr]));
   if (hrs.length) {
@@ -406,9 +428,9 @@ export const movePoint = (t: Track, i: number, lat: number, lon: number): Track 
 
 /** Insert a point after flat index i (same segment), interpolating elevation and time. */
 export function insertPoint(t: Track, i: number, lat: number, lon: number): Track {
-  const { pts } = flatten(t);
+  const { pts, brk } = flatten(t);
   const a = pts[i];
-  const b = pts[i + 1];
+  const b = brk[i + 1] ? undefined : pts[i + 1];
   const da = haversine(a, { lat, lon });
   const f = b ? da / (da + haversine({ lat, lon }, b) || 1) : 0;
   const p: Pt = { lat: round(lat, 7), lon: round(lon, 7) };
@@ -575,11 +597,10 @@ export function privacy(t: Track, startM: number, endM: number): Track {
   return mapPts(t, (p, i) => (dist[i] >= startM && dist[i] <= total - endM ? p : null));
 }
 
-/** Centred moving average of elevation over `window` points. */
+/** Centred moving average of elevation over `window` points within each segment. */
 export function smoothElevation(t: Track, window: number): Track {
-  const { pts } = flatten(t);
   const half = Math.max(0, Math.floor(window / 2));
-  return mapPts(t, (p, i) => {
+  return withSegs(t, t.segs.map((pts) => pts.map((p, i) => {
     if (p.ele === undefined) return p;
     let sum = 0;
     let n = 0;
@@ -588,7 +609,7 @@ export function smoothElevation(t: Track, window: number): Track {
       if (e !== undefined) (sum += e), n++;
     }
     return { ...p, ele: round(sum / n, 1) };
-  });
+  })));
 }
 
 export const shiftTime = (t: Track, ms: number): Track => mapPts(t, (p) => (p.time === undefined ? p : { ...p, time: p.time + ms }));

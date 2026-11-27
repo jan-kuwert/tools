@@ -1,6 +1,7 @@
 // Files app (src/pages/files/index.astro): a file list for many files and folders with sorting and manual order,
 // bulk rename, ZIP / 7z / gzip creation and archive extraction. Everything runs in the browser.
-import { Gunzip, Gzip, Unzip, UnzipInflate, zip, type Zippable } from 'fflate';
+import { Gunzip, Gzip, Unzip, UnzipInflate } from 'fflate';
+import { archiveFiles, createZip, safeEntryName } from './archive';
 import { renameOne, splitExt, ymd, type RenameOpts } from './rename';
 import { runSevenZip } from './sevenzip';
 import { downloadBlob, el, formatBytes, setDial, sniff, throwIfAborted, UserError } from './tool';
@@ -78,14 +79,6 @@ async function sniffAll(blob: Blob): Promise<Sniffed> {
   if (blob.size >= 32774 && (await blob.slice(32769, 32774).text()) === 'CD001') return 'iso';
   return 'unknown';
 }
-
-/** Path made safe: no absolute paths, drive letters, `.`/`..` segments or control characters. */
-const safeEntryName = (raw: string) =>
-  raw
-    .replace(/[\u0000-\u001f]/g, '')
-    .split(/[\\/]+/)
-    .filter((s) => s && s !== '.' && s !== '..' && !/^[a-z]:$/i.test(s))
-    .join('/');
 
 /**
  * True when a ZIP's central directory lists encrypted entries or methods other than store/deflate:
@@ -439,18 +432,6 @@ export function initFilesApp(): void {
 
   const archiveName = (ext: string) => (field(archiveForm, 'zipName').value.trim().replace(/[\\/]+/g, '-') || 'archive').replace(/\.(zip|7z)$/i, '') + ext;
 
-  /** Entry names in list order: folder paths kept, duplicates get " (2)". */
-  function archiveFiles(list: Entry[]) {
-    const used = new Set<string>();
-    return list.map((e, i) => {
-      const base = safeEntryName(pathOf(e)) || `file-${i + 1}`;
-      let name = base;
-      for (let k = 2; used.has(name); k++) name = base.replace(/(\.[^./]*)?$/, ` (${k})$1`);
-      used.add(name);
-      return { name, blob: e.file as Blob, mtime: e.file.lastModified };
-    });
-  }
-
   function setBusyText(text: string) {
     say(text);
     $('[data-busy-text]').textContent = text;
@@ -491,22 +472,10 @@ export function initFilesApp(): void {
     const files = archiveFiles(list);
     let blob: Blob;
     if (fmt === 'zip' && !password) {
-      const zipped: Zippable = {};
-      for (const [i, f] of files.entries()) {
-        throwIfAborted(signal);
-        setFraction(i / files.length);
-        zipped[f.name] = [new Uint8Array(await f.blob.arrayBuffer()), { level, mtime: f.mtime }];
-      }
-      setBusyText('Compressing…');
-      setFraction();
-      const { promise, resolve, reject } = Promise.withResolvers<Uint8Array>();
-      // Async fflate runs in workers and keeps the page responsive.
-      const terminate = zip(zipped, (err, data) => (err ? reject(err) : resolve(data)));
-      signal.addEventListener('abort', () => {
-        terminate();
-        reject(new DOMException('Cancelled', 'AbortError'));
+      blob = await createZip(files, level, signal, (fraction) => {
+        if (fraction === undefined) setBusyText('Compressing…');
+        setFraction(fraction);
       });
-      blob = new Blob([(await promise) as BlobPart], { type: 'application/zip' });
     } else {
       // 7z, and ZIP with AES encryption (fflate cannot encrypt).
       setBusyText('Compressing with 7-Zip…');
@@ -515,6 +484,7 @@ export function initFilesApp(): void {
       if (res.type !== 'created') throw new Error(`Unexpected 7-Zip reply: ${res.type}`);
       blob = new Blob([res.data], { type: fmt === '7z' ? 'application/x-7z-compressed' : 'application/zip' });
     }
+    throwIfAborted(signal);
     downloadBlob(blob, name);
     say(`Created ${name}${password ? ' (encrypted)' : ''} from ${plural(list.length)}: ${formatBytes(total)} → ${formatBytes(blob.size)}.`, 'ok');
   }
@@ -938,12 +908,14 @@ export function initFilesApp(): void {
     if (e.key === 'Escape' && narrow.matches && panel && !busy && inspector.contains(e.target as Node)) closePanel();
   });
 
-  // Deep links: archive modes preselect the format (or Extract); rename opens the rename panel.
-  const mode = new URLSearchParams(location.search).get('mode');
-  const fmt = ({ zip: 'zip', '7z': '7z', gzip: 'gz' } as Record<string, string | undefined>)[mode ?? ''];
-  if (fmt) archiveForm.querySelector<HTMLInputElement>(`[name="fmt"][value="${fmt}"]`)!.checked = true;
-  if (fmt || mode === 'extract') showPanel('archive');
-  else showPanel(mode === 'rename' || !narrow.matches ? 'rename' : null);
+  function applyMode(mode: string | null) {
+    const fmt = mode === 'zip' || mode === '7z' ? mode : mode === 'gzip' ? 'gz' : undefined;
+    if (fmt) archiveForm.querySelector<HTMLInputElement>(`[name="fmt"][value="${fmt}"]`)!.checked = true;
+    if (fmt || mode === 'extract') showPanel('archive');
+    else showPanel(mode === 'rename' || !narrow.matches ? 'rename' : null);
+  }
+  window.addEventListener('tools:mode', (event) => applyMode((event as CustomEvent<string | null>).detail));
+  applyMode(new URLSearchParams(location.search).get('mode'));
   // The sidebar only collapses as a narrow-screen drawer; widening the window brings it back.
   narrow.addEventListener('change', () => {
     if (!narrow.matches && !panel) showPanel(lastPanel);

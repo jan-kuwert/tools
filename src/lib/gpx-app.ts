@@ -163,7 +163,7 @@ export function initGpxApp(): void {
   const radio = (name: string) => (root.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)?.value ?? '');
   const mapCtx = mapCanvas.getContext('2d')!;
   const profCtx = profCanvas.getContext('2d')!;
-  const mode = new URLSearchParams(location.search).get('mode');
+  let mode = new URLSearchParams(location.search).get('mode');
 
   let items: Item[] = [];
   let activeId = 0;
@@ -209,6 +209,7 @@ export function initGpxApp(): void {
   // ---------- History ----------
   const snap = (): Snap => ({ items: items.map((i) => ({ ...i })), activeId, ticked: [...ticked] });
   function restore(s: Snap) {
+    cancelGesture();
     items = s.items.map((i) => ({ ...i }));
     activeId = s.activeId;
     ticked.clear();
@@ -218,6 +219,7 @@ export function initGpxApp(): void {
   }
   /** Run an undoable change. Tracks left without points are dropped. */
   function commit(fn: () => void, message = '') {
+    cancelGesture();
     undoStack.push(snap());
     if (undoStack.length > 200) undoStack.shift();
     redoStack.length = 0;
@@ -562,6 +564,11 @@ export function initGpxApp(): void {
     | { kind: 'point'; i: number; x: number; y: number; moved: boolean }
     | { kind: 'pinch'; d: number; s: number; wx: number; wy: number };
   let gesture: Gesture | null = null;
+  function cancelGesture() {
+    gesture = moving = pdrag = null;
+    for (const id of ptrs.keys()) if (map.hasPointerCapture(id)) map.releasePointerCapture(id);
+    ptrs.clear();
+  }
   const pinchState = () => {
     const [p, q] = [...ptrs.values()];
     const cx = (p.x + q.x) / 2;
@@ -947,6 +954,7 @@ export function initGpxApp(): void {
   // ---------- Track list ----------
   function setActive(id: number) {
     if (id === activeId) return;
+    cancelGesture();
     activeId = id;
     sel = cursor = mark = null;
     refresh();
@@ -1137,19 +1145,33 @@ export function initGpxApp(): void {
   }
 
   let outlierTimer = 0;
+  let outlierTrack: Track | undefined;
+  let outlierDist = NaN;
+  let outlierRun = NaN;
   const outlierForm = $<HTMLFormElement>('[data-clean="outliers"]');
   /** First flat index of each group of consecutive outliers. */
   const outlierStarts = () => outliers.filter((k, j) => outliers[j - 1] !== k - 1);
   function renderOutliers() {
+    const t = active()?.t;
+    const dist = Number(outlierForm.dist.value);
+    const run = Number(outlierForm.run.value);
+    if (t === outlierTrack && dist === outlierDist && run === outlierRun) {
+      outlierNext.disabled = !outliers.length;
+      return;
+    }
+    outlierTrack = t;
+    outlierDist = dist;
+    outlierRun = run;
     clearTimeout(outlierTimer);
+    outliers = [];
+    outlierNext.disabled = true;
+    outlierInfo.textContent = '';
+    draw();
     outlierTimer = window.setTimeout(() => {
-      const a = active();
-      const dist = Number(outlierForm.dist.value);
-      const run = Number(outlierForm.run.value);
-      outliers = a && dist > 0 && run >= 1 ? findOutliers(a.t, dist, run) : [];
+      outliers = t && dist > 0 && run >= 1 ? findOutliers(t, dist, run) : [];
       const groups = outlierStarts().length;
       const n = outliers.length;
-      outlierInfo.textContent = !a
+      outlierInfo.textContent = !t
         ? ''
         : !n
           ? 'None found with these settings.'
@@ -1162,9 +1184,10 @@ export function initGpxApp(): void {
   outlierNext.addEventListener('click', () => {
     const a = active();
     const starts = outlierStarts();
-    if (!a || !starts.length) return;
+    if (!a || a.t !== outlierTrack || !starts.length) return;
     const i = starts.find((k) => mark === null || k > mark) ?? starts[0];
     const d = info(a.t);
+    if (i < 0 || i >= d.pts.length) return;
     mark = i;
     view.x = d.wx[i];
     view.y = d.wy[i];
@@ -1522,11 +1545,17 @@ export function initGpxApp(): void {
 
   // Modes from the hub: ?mode=merge readies multi-select, ?mode=clean opens the clean-up tools.
   root.toggleAttribute('data-profile', true);
-  if (mode === 'merge' || mode === 'clean') {
-    const sec = $(mode === 'merge' ? '[data-merge-sec]' : '[data-clean-sec]');
-    sec.toggleAttribute('data-highlight', true);
-    if (mode === 'merge') ($<HTMLInputElement>('input[name="gx-scope"][value="ticked"]')).checked = true;
-    requestAnimationFrame(() => (insp.scrollTop = sec.offsetTop - insp.offsetTop - 8));
+  function applyMode(next: string | null) {
+    mode = next;
+    $('[data-merge-sec]').toggleAttribute('data-highlight', mode === 'merge');
+    $('[data-clean-sec]').toggleAttribute('data-highlight', mode === 'clean');
+    if (mode === 'merge' || mode === 'clean') {
+      const sec = $(mode === 'merge' ? '[data-merge-sec]' : '[data-clean-sec]');
+      if (mode === 'merge') ($<HTMLInputElement>('input[name="gx-scope"][value="ticked"]')).checked = true;
+      requestAnimationFrame(() => (insp.scrollTop = sec.offsetTop - insp.offsetTop - 8));
+    }
+    refresh();
   }
-  refresh();
+  window.addEventListener('tools:mode', (e) => applyMode((e as CustomEvent<string | null>).detail));
+  applyMode(mode);
 }

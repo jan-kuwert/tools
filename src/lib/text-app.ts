@@ -169,13 +169,14 @@ export function initTextApp(): void {
     dirty: boolean;
     lineCount: number;
     synTimer: number;
+    mdTimer: number;
   }
   const panes: Pane[] = [...root.querySelectorAll<HTMLElement>('[data-pane]')].map((el) => {
     const q = <T extends Element = HTMLElement>(sel: string) => el.querySelector<T>(sel)!;
     return {
       el, ta: q<HTMLTextAreaElement>('[data-text]'), code: q('[data-code]'), gutter: q('[data-gutter]'), curline: q('[data-curline]'), hex: q('[data-hex]'),
       tabsEl: q('[data-tabs]'), hlCode: q('[data-hl]'), mdEl: q('[data-md]'), editorEl: q('[data-editor]'),
-      open: [], dirty: false, lineCount: 1, synTimer: 0,
+      open: [], dirty: false, lineCount: 1, synTimer: 0, mdTimer: 0,
     };
   });
   let pane = panes[0];
@@ -387,7 +388,6 @@ export function initTextApp(): void {
   const HL_MAX = 300 * 1024;
   let hl: typeof Highlight | undefined;
   let md: typeof Markdown | undefined;
-  let mdTimer = 0;
   // Lazy on purpose: highlight.js only downloads when a highlighted language is first shown.
   const loadHl = () => import('./highlight').then((m) => (hl = m));
 
@@ -431,21 +431,26 @@ export function initTextApp(): void {
   }
 
   function scheduleMd(now = false) {
-    if (mdEl.hidden) return;
-    clearTimeout(mdTimer);
-    mdTimer = window.setTimeout(
+    const p = pane;
+    const it = curText();
+    if (!it || mdEl.hidden) return;
+    clearTimeout(p.mdTimer);
+    const timer = window.setTimeout(
       async () => {
         // Lazy on purpose: micromark + GFM only download when a preview is first shown.
         md ??= await import('./markdown');
-        const it = curText();
-        if (!it || mdEl.hidden) return;
-        sync();
-        const top = mdEl.scrollTop;
-        mdEl.replaceChildren(md.renderMarkdown(it.text!));
-        mdEl.scrollTop = top;
+        if (p.mdTimer !== timer || p.el.hidden) return;
+        withPane(p, () => {
+          if (curText() !== it || it.type !== 'markdown' || mdEl.hidden) return;
+          sync();
+          const top = mdEl.scrollTop;
+          mdEl.replaceChildren(md!.renderMarkdown(it.text!));
+          mdEl.scrollTop = top;
+        });
       },
       now ? 0 : 150,
     );
+    p.mdTimer = timer;
   }
 
   /** After a document's type changed: highlighting, preview, icons and the tools follow. */
@@ -715,7 +720,10 @@ export function initTextApp(): void {
         };
         const acts = el('span', { className: 'fx-acts' });
         if (it.generated) acts.append(btn('edit', 'Rename', () => rename(it.id)));
-        acts.append(btn('download', 'Download', () => downloadBlob(blobOf(it), it.name)), btn('trash', 'Remove', () => confirmRemove(it.id)));
+        acts.append(btn('download', 'Download', () => {
+          for (const p of panes) withPane(p, sync);
+          downloadBlob(blobOf(it), it.name);
+        }), btn('trash', 'Remove', () => confirmRemove(it.id)));
         row.append(cb, openBtn, acts);
         return row;
       }),
@@ -1314,18 +1322,23 @@ export function initTextApp(): void {
 
   async function compare(a: Source, b: Source) {
     // The comparison view lives in the first pane.
-    activatePane(panes[0]);
-    diffSrc = { a, b };
+    const p = panes[0];
+    activatePane(p);
+    const sources = diffSrc = { a, b };
     saveView();
     if (!open.includes(DIFF)) open.push(DIFF);
     active = DIFF;
+    showActive();
     say('Comparing…');
     const painted = Promise.withResolvers<void>();
     requestAnimationFrame(() => setTimeout(painted.resolve));
     await painted.promise;
-    renderDiff();
-    showActive();
-    diffBody.focus({ preventScroll: true });
+    if (diffSrc !== sources) return;
+    withPane(p, () => {
+      if (!open.includes(DIFF)) return;
+      renderDiff();
+      if (active === DIFF && leads()) diffBody.focus({ preventScroll: true });
+    });
   }
 
   function compareChosen(clipboardText?: string) {
@@ -1691,17 +1704,27 @@ export function initTextApp(): void {
     setExplorer(false);
     setTools(false);
   }
-  // Deep links: json/js/markdown set the type of new documents (markdown also opens a Split-view one); compare opens Compare.
-  const mode = new URLSearchParams(location.search).get('mode');
-  defaultType = ({ json: 'json', js: 'javascript', markdown: 'markdown' } as Record<string, string>)[mode ?? ''];
-  if (mode === 'compare') {
-    compareSec.open = true;
-    setTools(true);
+  // Deep links and hub mode changes preserve documents already open in this frame.
+  function applyMode(mode: string | null) {
+    defaultType = mode === 'json' ? 'json' : mode === 'js' ? 'javascript' : mode === 'markdown' ? 'markdown' : undefined;
+    if (mode === 'compare') {
+      compareSec.open = true;
+      setTools(true);
+    }
+    if (mode === 'markdown') {
+      const current = curText();
+      const existing = current?.type === 'markdown' ? current : items.find((it) => it.type === 'markdown' && it.text !== undefined);
+      if (existing) {
+        existing.mdView ??= 'split';
+        openItem(existing.id);
+      } else {
+        const text = '# Untitled\n\nWrite **Markdown** here; the preview on the right updates as you type.\n\n- [ ] Task lists, tables and `code` work too.\n';
+        const it = addItem({ name: uniqueName(`Untitled-${++untitled}.md`), text, size: new Blob([text]).size, sniffed: 'unknown', generated: true, mdView: 'split' });
+        mdPlaceholder = it.id;
+        openItem(it.id);
+      }
+    } else showActive();
   }
-  if (mode === 'markdown') {
-    const text = '# Untitled\n\nWrite **Markdown** here; the preview on the right updates as you type.\n\n- [ ] Task lists, tables and `code` work too.\n';
-    const it = addItem({ name: uniqueName(`Untitled-${++untitled}.md`), text, size: new Blob([text]).size, sniffed: 'unknown', generated: true, mdView: 'split' });
-    mdPlaceholder = it.id;
-    openItem(it.id);
-  } else showActive();
+  window.addEventListener('tools:mode', (event) => applyMode((event as CustomEvent<string | null>).detail));
+  applyMode(new URLSearchParams(location.search).get('mode'));
 }

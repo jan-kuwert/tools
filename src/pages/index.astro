@@ -509,7 +509,7 @@ const teeth = Array.from({ length: 11 }, (_, i) => {
   const frames = new Map<string, Frame>();
   // The tool each category screen shows (decides the app mode); none = the app's default.
   const selected = new Map<string, string>();
-  // Files from the last drop, in memory only, and the screen they were routed to.
+  // Pending drop, consumed when its app receives it.
   let held: { screen: string; files: File[] } | undefined;
 
   const toolBySlug = (slug: string) => tools.find((t) => t.slug === slug);
@@ -578,17 +578,29 @@ const teeth = Array.from({ length: 11 }, (_, i) => {
     if (focusInside) (to === 'centre' ? hub : frames.get(to)?.el ?? hub).focus({ preventScroll: true });
   }
 
-  /** Create the app frame for a screen in its selected mode, unless it already shows exactly that. */
+  function applyFrameMode(rec: Frame) {
+    const win = rec.el.contentWindow as (Window & typeof globalThis) | null;
+    win?.dispatchEvent(new win.CustomEvent('tools:mode', { detail: new URL(rec.src, location.href).searchParams.get('mode') }));
+  }
+
+  /** Keep each app alive when switching entry modes so its working documents survive. */
   function ensureFrame(id: string) {
     if (id === 'centre') return;
     const src = frameSrc(id);
-    if (frames.get(id)?.src === src) return;
-    frames.get(id)?.el.remove();
+    const existing = frames.get(id);
+    if (existing) {
+      if (existing.src !== src) {
+        existing.src = src;
+        if (existing.loaded) applyFrameMode(existing);
+      }
+      return;
+    }
     const title = categories.find((c) => c.id === id)!.label;
     const rec: Frame = { src, loaded: false, el: el('iframe', { src, title: `${title} tools`, className: 'tool-frame' }) };
     frames.set(id, rec);
     rec.el.addEventListener('load', () => {
       rec.loaded = true;
+      if (rec.src !== src) applyFrameMode(rec);
       onFrameLoad(id, rec);
     });
     screens.get(id)!.querySelector('[data-panel]')!.append(rec.el);
@@ -598,24 +610,16 @@ const teeth = Array.from({ length: 11 }, (_, i) => {
   function openTool(id: string, slug?: string, push = false) {
     if (slug && toolBySlug(slug)?.appMode) selected.set(id, slug);
     else selected.delete(id);
-    const rec = frames.get(id);
-    if (rec?.src === frameSrc(id)) {
-      if (rec.loaded) inject(id, rec);
-    } else ensureFrame(id);
+    ensureFrame(id);
+    const rec = frames.get(id)!;
+    if (rec.loaded) inject(id, rec);
     if (push) history.pushState({ drop: true }, '', hashFor(id) || location.pathname + location.search);
     if (active !== id) go(id);
     else syncUrl();
   }
 
-  // ---------- App frames ----------
-  const accepts = (accept: string, f: File) =>
-    !accept ||
-    accept.split(',').some((a) => {
-      const t = a.trim().toLowerCase();
-      return t.startsWith('.') ? f.name.toLowerCase().endsWith(t) : t.endsWith('/*') ? f.type.startsWith(t.slice(0, -1)) : f.type === t;
-    });
 
-  /** Put the held files into the app's file input, if they belong to this screen and the input takes them. */
+  /** Deliver a pending drop; each app validates its input content. */
   function inject(id: string, rec: Frame) {
     const win = rec.el.contentWindow as (Window & typeof globalThis) | null;
     const doc = rec.el.contentDocument;
@@ -623,13 +627,14 @@ const teeth = Array.from({ length: 11 }, (_, i) => {
     // Apps and tool pages take files through [data-input]; text tools through [data-file].
     const target = doc.querySelector<HTMLInputElement>('[data-input], [data-file]');
     if (!target) return;
-    const list = held.files.filter((f) => accepts(target.accept, f));
+    const list = held.files;
     if (!list.length) return;
     const dt = new win.DataTransfer();
     // Rebuild each File in the frame's realm so arrayBuffer() returns that realm's ArrayBuffer;
     // libraries' `instanceof ArrayBuffer` checks fail otherwise (e.g. pdf-lib).
     (target.multiple ? list : list.slice(0, 1)).forEach((f) => dt.items.add(new win.File([f], f.name, { type: f.type, lastModified: f.lastModified })));
     target.files = dt.files;
+    held = undefined;
     target.dispatchEvent(new win.Event('change'));
   }
 

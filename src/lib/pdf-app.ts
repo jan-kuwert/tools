@@ -10,7 +10,7 @@ import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import qpdfWasmUrl from '@neslinesli93/qpdf-wasm/dist/qpdf.wasm?url';
 import { downloadBlob, el, formatBytes, publishOutput, setDial, sniff, throwIfAborted, tick, UserError, type Result } from './tool';
-import { loadPdf, parseRanges, pdfBlob, SIGNATURE_NOTE } from './pdf';
+import { loadPdf, parseRanges, pdfBlob } from './pdf';
 import { resizable } from './resize';
 
 type ViewKind = 'pages' | 'grid';
@@ -1380,10 +1380,25 @@ export function initPdfApp(): void {
   // ---------- Output ----------
   type Progress = (text: string, fraction?: number) => void;
 
-  /** Write pages (PDF pages from any file and image pages, in this order) as a new PDF with the user's rotations. */
+  /** Retain PDF catalogs and page references while writing the edited page order. */
   async function build(items: Item[], signal: AbortSignal, progress?: Progress): Promise<Uint8Array> {
-    const { PDFDocument, degrees } = await import('@cantoo/pdf-lib');
-    const out = await PDFDocument.create();
+    const first = items[0];
+    if (first && isPage(first) && items.length === first.doc.pages.length && items.every((item, index) => isPage(item) && item.doc === first.doc && item.index === index && !item.rot)) {
+      const bytes = new Uint8Array(await first.doc.file.arrayBuffer());
+      throwIfAborted(signal);
+      return bytes;
+    }
+    const { degrees } = await import('@cantoo/pdf-lib');
+    // Keep catalog primitives in pdf-lib's lazy chunk rather than loading them at first paint.
+    const { preparePdf } = await import('./pdf-compose');
+    const documents = [...new Set(items.filter(isPage).map((item) => item.doc))];
+    const inputs = await Promise.all(documents.map(async (doc) => ({
+      bytes: new Uint8Array(await doc.file.arrayBuffer()),
+      indices: items.filter((item): item is Page => isPage(item) && item.doc === doc).map((item) => item.index),
+    })));
+    throwIfAborted(signal);
+    const { doc: out, pages } = await preparePdf(inputs);
+    const offsets = new Map<Doc, number>();
     const o = imgOptions();
     for (let i = 0; i < items.length; ) {
       throwIfAborted(signal);
@@ -1406,13 +1421,14 @@ export function initPdfApp(): void {
         i++;
         continue;
       }
-      // Copy runs from the same file together so shared resources (fonts, images) are copied once per run.
       let j = i;
       while (j + 1 < items.length && srcOf(items[j + 1]) === it.doc) j++;
       const run = items.slice(i, j + 1) as Page[];
-      progress?.(`Copying pages from ${it.doc.file.name}`, i / items.length);
+      progress?.(`Adding pages from ${it.doc.file.name}`, i / items.length);
       await tick();
-      const copied = await out.copyPages(it.doc.lib, run.map((p) => p.index));
+      const offset = offsets.get(it.doc) ?? 0;
+      const copied = pages[documents.indexOf(it.doc)].slice(offset, offset + run.length);
+      offsets.set(it.doc, offset + run.length);
       run.forEach((p, k) => {
         const pg = copied[k];
         if (p.rot) pg.setRotation(degrees((pg.getRotation().angle + p.rot) % 360));
@@ -1423,7 +1439,7 @@ export function initPdfApp(): void {
     throwIfAborted(signal);
     progress?.('Saving…');
     await tick();
-    return out.save({ useObjectStreams: true });
+    return out.save({ useObjectStreams: true, updateFieldAppearances: false });
   }
 
   /** Lossless qpdf pass (as in src/pages/pdf/compress.astro). */
@@ -1504,7 +1520,7 @@ export function initPdfApp(): void {
   const totalSize = () => sources.reduce((s, x) => s + x.file.size, 0);
   /** Name stem: the file's own name, or "combined" when pages come from several files. */
   const stem = () => (sources.length === 1 ? baseName(sources[0].file.name) : 'combined');
-  const sigNote = () => (docs().some((d) => d.signed) ? SIGNATURE_NOTE : undefined);
+  const sigNote = () => (docs().some((d) => d.signed) ? 'The original contains digital signatures. Editing or optimizing the PDF invalidates them.' : undefined);
   /** Pages that go into any output, after checking the limits. */
   function outputPages(): Item[] {
     if (!order.length) throw new UserError('Add a PDF or image first.');
@@ -1585,10 +1601,12 @@ export function initPdfApp(): void {
     showBusy('Working…', true);
     panel();
     try {
-      results = await job(controller.signal, (text, fraction) => {
+      const completed = await job(controller.signal, (text, fraction) => {
         busyText.textContent = text;
         setDial(dial, fraction);
       });
+      throwIfAborted(controller.signal);
+      results = completed;
       showResults();
       return true;
     } catch (err) {
@@ -1789,15 +1807,22 @@ export function initPdfApp(): void {
     summary();
   });
 
-  // Deep links from the hub's tool entries: ?mode=split opens the Split section, ?mode=compress picks Optimized.
-  const requested = new URLSearchParams(location.search).get('mode');
-  if (requested === 'compress') (exportForm.elements.namedItem('quality') as RadioNodeList).value = 'optimized';
+  function applyMode(mode: string | null) {
+    splitSection.toggleAttribute('data-highlight', mode === 'split');
+    if (mode === 'compress') {
+      (exportForm.elements.namedItem('quality') as RadioNodeList).value = 'optimized';
+      clearResults();
+      summary();
+      scheduleEstimate(300);
+    }
+    if (mode === 'split') {
+      reveal(splitSection, $('.pa-insp'));
+      splitForm.querySelector<HTMLInputElement>('input:checked')!.focus({ preventScroll: true });
+    }
+  }
   setCardSize(cardSize);
   setView(session('pdf.view') === 'grid' ? 'grid' : 'pages');
   changed();
-  if (requested === 'split') {
-    splitSection.toggleAttribute('data-highlight', true);
-    reveal(splitSection, $('.pa-insp'));
-    splitForm.querySelector<HTMLInputElement>('input:checked')!.focus({ preventScroll: true });
-  }
+  applyMode(new URLSearchParams(location.search).get('mode'));
+  window.addEventListener('tools:mode', (event) => applyMode((event as CustomEvent<string | null>).detail));
 }

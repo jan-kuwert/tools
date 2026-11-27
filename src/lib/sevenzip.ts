@@ -1,8 +1,9 @@
 // Page side of the 7-Zip worker: one job at a time, cancel by terminating the worker.
 // The worker (and its ~1.6 MB WASM) is created on first use only.
+import type { ArchiveFile } from './archive';
 
 export type SzRequest =
-  | { op: 'create'; format: '7z' | 'zip'; files: { name: string; blob: Blob }[]; level: 0 | 1 | 5 | 6 | 9; password?: string }
+  | { op: 'create'; format: '7z' | 'zip'; files: ArchiveFile[]; level: 0 | 1 | 5 | 6 | 9; password?: string }
   | { op: 'extract'; name: string; blob: Blob; password?: string; maxBytes: number; maxEntries: number };
 
 export interface SzFailure {
