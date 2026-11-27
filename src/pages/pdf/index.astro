@@ -1,20 +1,14 @@
 ---
-// PDF category app: viewer-style workspace (organize, merge, split, images to PDF, optimize). Behaviour: src/lib/pdf-app.ts.
+// PDF category app: one combined document built from PDFs and images (reorder, rotate, delete, split, export).
+// Behaviour: src/lib/pdf-app.ts.
 import Base from '../../layouts/Base.astro';
 import Icon from '../../components/Icon.astro';
 import ModeBadge from '../../components/ModeBadge.astro';
 import ProgressDial from '../../components/ProgressDial.astro';
-import { categories, href, tools } from '../../tools';
+import { categories, href, toolBySlug } from '../../tools';
 
 const category = categories.find((c) => c.id === 'pdf')!;
-const modeTool = (id: string) => tools.find((t) => t.category === 'pdf' && t.appMode === id)!;
-const modes = [
-  { id: 'organize', icon: 'grid', label: 'Organize', action: 'Save PDF' },
-  { id: 'merge', icon: 'pages', label: 'Merge', action: 'Merge' },
-  { id: 'split', icon: 'scissor', label: 'Split', action: 'Split' },
-  { id: 'from-images', icon: 'images', label: 'Images to PDF', action: 'Create PDF' },
-  { id: 'compress', icon: 'compress', label: 'Optimize', action: 'Optimize' },
-] as const;
+const limits = `${toolBySlug('pdf/merge').limits} · ${toolBySlug('pdf/from-images').limits}`;
 const accept = 'application/pdf,.pdf,image/jpeg,image/png';
 ---
 <Base title="PDF · Tools" description={category.blurb}>
@@ -34,7 +28,14 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
       <header class="pa-tb">
         <div class="pa-title"><Icon name="pdf" /><span>PDF</span><ModeBadge mode="local" /></div>
         <button class="pa-tool" type="button" data-open title="Open or add PDFs and images"><Icon name="plus" /><span class="pa-tool-label">Add</span></button>
-        <div class="pa-group" data-pdf-only>
+        <div class="pa-viewseg" role="radiogroup" aria-label="View">
+          <label title="Pages: read continuously (G)"><input type="radio" name="pa-view" value="pages" checked /><span><Icon name="pdf" /><span class="pa-tool-label">Pages</span></span></label>
+          <label title="Grid: overview of all pages (G)"><input type="radio" name="pa-view" value="grid" /><span><Icon name="grid" /><span class="pa-tool-label">Grid</span></span></label>
+        </div>
+        <label class="pa-group pa-cardsize" data-grid-only title="Card size (Ctrl/Cmd+wheel or pinch in the grid)">
+          <Icon name="zoom-out" /><input type="range" min="96" max="360" step="8" value="168" data-card-size aria-label="Card size" /><Icon name="zoom-in" />
+        </label>
+        <div class="pa-group" data-pages-only>
           <button class="pa-tool" type="button" data-zoom-out aria-label="Zoom out" title="Zoom out"><Icon name="zoom-out" /></button>
           <select class="pa-select" data-zoom aria-label="Zoom">
             <option value="width">Fit width</option>
@@ -48,8 +49,6 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
           <span>/ <span data-page-count>0</span></span>
         </div>
         <div class="pa-end">
-          <button class="btn btn-primary" type="button" data-run disabled><span data-run-label>Save PDF</span></button>
-          <button class="btn" type="button" data-download disabled title="Create the file and download it"><Icon name="download" /><span class="pa-tool-label">Download</span></button>
           <button class="pa-tool" type="button" data-close-all disabled aria-label="Close all files" title="Close all files"><Icon name="xmark" /></button>
         </div>
       </header>
@@ -60,18 +59,14 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
       </div>
 
       <div class="pa-body">
-        <aside class="pa-side" aria-label="Tools and pages">
-          <div class="pa-tools" role="toolbar" aria-orientation="vertical" aria-label="Tools" data-tools>
-            {modes.map((m) => (
-              <button class="pa-tool-item" type="button" data-mode={m.id} data-action={m.action} aria-pressed={m.id === 'organize' ? 'true' : 'false'} tabindex={m.id === 'organize' ? 0 : -1} title={modeTool(m.id).summary}>
-                <Icon name={m.icon} /><span>{m.label}</span>
-              </button>
-            ))}
-          </div>
+        <aside class="pa-side" aria-label="Files and pages">
           <div class="pa-thumbs" data-side>
-            <div data-docs></div>
-            <ol class="pa-list" data-images role="listbox" aria-multiselectable="true" aria-label="Images, in page order"></ol>
-            <p class="pa-hint">Arrow keys move, Shift selects a range, Alt+arrows reorder, R rotates, Delete deletes.</p>
+            <div class="pa-legend">
+              <ul class="pa-legend-files" data-legend aria-label="Files"></ul>
+              <p class="pa-legend-bar"><span data-legend-note></span><button class="pa-link" type="button" data-group>Group by file</button></p>
+            </div>
+            <ol class="pa-list" data-thumbs role="listbox" aria-multiselectable="true" aria-label="Pages, in output order"></ol>
+            <p class="pa-hint">Drag to reorder. Arrows move, Shift extends, Ctrl/Cmd+arrows then Space picks several, Alt+arrows reorder, R rotates, Delete deletes, G switches view, Ctrl/Cmd+S exports.</p>
           </div>
         </aside>
         <div class="pane-resizer" data-resize="left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize page sidebar"></div>
@@ -80,11 +75,14 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
           <div class="pa-view" data-view tabindex="0" aria-label="Page view">
             <div class="pa-pages" data-pages></div>
           </div>
+          <div class="pa-grid" data-grid aria-label="Page overview">
+            <ol class="pa-cards" data-cards role="listbox" aria-multiselectable="true" aria-label="Pages, in output order"></ol>
+          </div>
           <label class="pa-empty" data-empty-state>
             <span class="pa-ph" aria-hidden="true"><Icon name="pdf" /></span>
-            <span class="pa-empty-title" data-empty-title>Drop PDFs or images, or choose files</span>
+            <span class="pa-empty-title">Drop PDFs or images, or choose files</span>
             <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
-            <span class="pa-empty-hint">PDFs, or JPEG and PNG images to turn into a PDF. You can also paste from the clipboard.</span>
+            <span class="pa-empty-hint">PDFs and JPEG or PNG images all become pages of one document. You can also paste from the clipboard.</span>
             <input class="visually-hidden" type="file" accept={accept} multiple data-input />
           </label>
           <div class="pa-busy" data-busy hidden>
@@ -103,109 +101,120 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
         <div class="pane-resizer" data-resize="right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize options panel"></div>
 
         <aside class="pa-insp" aria-label="Options">
-          <p class="pa-doc-line" data-doc-line></p>
+          <div class="pa-insp-scroll">
+            <section aria-labelledby="pa-pages-title">
+              <h2 id="pa-pages-title">Pages</h2>
+              <p class="pa-order-info" data-order-info></p>
+              <p class="pa-note" data-sel-info></p>
+              <div class="pa-actions">
+                <button class="btn" type="button" data-act="rotate-left"><Icon name="rotate-left" />Rotate left</button>
+                <button class="btn" type="button" data-act="rotate-right"><Icon name="rotate-right" />Rotate right</button>
+                <button class="btn" type="button" data-act="up"><Icon name="arrow-up" />Move up</button>
+                <button class="btn" type="button" data-act="down"><Icon name="arrow-down" />Move down</button>
+                <button class="btn" type="button" data-act="delete"><Icon name="trash" /><span data-label>Delete</span></button>
+                <button class="btn" type="button" data-act="select-all"><Icon name="grid" />Select all</button>
+                <button class="btn" type="button" data-act="reverse"><Icon name="reverse" />Reverse</button>
+                <button class="btn" type="button" data-act="reset"><Icon name="restart" />Reset all</button>
+              </div>
+              <p class="pa-note">Every PDF and image you add joins this one page order; drag pages to mix files. Deleted pages are left out of Export and Split.</p>
+            </section>
 
-          <section data-panel="organize">
-            <h2>Pages</h2>
-            <p class="pa-note" data-sel-info></p>
-            <div class="pa-actions">
-              <button class="btn" type="button" data-act="rotate-left"><Icon name="rotate-left" />Rotate left</button>
-              <button class="btn" type="button" data-act="rotate-right"><Icon name="rotate-right" />Rotate right</button>
-              <button class="btn" type="button" data-act="up"><Icon name="arrow-up" />Move up</button>
-              <button class="btn" type="button" data-act="down"><Icon name="arrow-down" />Move down</button>
-              <button class="btn" type="button" data-act="delete"><Icon name="trash" /><span data-label>Delete</span></button>
-              <button class="btn" type="button" data-act="select-all"><Icon name="grid" />Select all</button>
-            </div>
-            <h2>Document</h2>
-            <div class="pa-actions">
-              <button class="btn" type="button" data-act="reverse"><Icon name="reverse" />Reverse</button>
-              <button class="btn" type="button" data-act="reset"><Icon name="restart" />Reset</button>
-            </div>
-            <p class="pa-note">Changes here also apply when you merge, split or optimize.</p>
-          </section>
+            <section class="pa-split" data-split aria-labelledby="pa-split-title">
+              <h2 id="pa-split-title">Split</h2>
+              <form class="pa-form" data-split-form>
+                <fieldset>
+                  <legend class="visually-hidden">Split into</legend>
+                  <div class="segmented pa-seg">
+                    <label><input type="radio" name="split" value="each" checked /><span>Every page</span></label>
+                    <label><input type="radio" name="split" value="ranges" /><span>By ranges</span></label>
+                    <label><input type="radio" name="split" value="extract" /><span>Extract</span></label>
+                  </div>
+                </fieldset>
+                <label class="field" data-ranges-field hidden>
+                  <span>Pages</span>
+                  <input type="text" name="ranges" placeholder="e.g. 1-3, 5, 8-" autocomplete="off" aria-describedby="pa-split-info" />
+                </label>
+                <button class="btn" type="button" data-use-selection hidden>Use selected pages</button>
+                <p class="pa-note" id="pa-split-info" data-split-info aria-live="polite"></p>
+                <button class="btn" type="submit" data-split-run disabled><Icon name="scissor" />Split</button>
+              </form>
+            </section>
 
-          <section data-panel="merge">
-            <h2>Merge</h2>
-            <p class="pa-note" data-merge-info></p>
-            <p class="pa-note">Documents are combined in sidebar order; reorder them with the arrows next to each name. Deleted pages are left out. Bookmarks and form fields may not be preserved.</p>
-          </section>
+            <section class="pa-imgopts" aria-labelledby="pa-img-title">
+              <h2 id="pa-img-title">Image pages</h2>
+              <p class="pa-note" data-img-info></p>
+              <form class="pa-form" data-img-form>
+                <fieldset>
+                  <legend>Page size</legend>
+                  <div class="segmented pa-seg">
+                    <label><input type="radio" name="size" value="a4" checked /><span>A4</span></label>
+                    <label><input type="radio" name="size" value="letter" /><span>Letter</span></label>
+                    <label><input type="radio" name="size" value="fit" /><span>Fit image</span></label>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>Orientation</legend>
+                  <div class="segmented pa-seg">
+                    <label><input type="radio" name="orientation" value="auto" checked /><span>Auto</span></label>
+                    <label><input type="radio" name="orientation" value="portrait" /><span>Portrait</span></label>
+                    <label><input type="radio" name="orientation" value="landscape" /><span>Landscape</span></label>
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>Margin</legend>
+                  <div class="segmented pa-seg">
+                    <label><input type="radio" name="margin" value="0" checked /><span>None</span></label>
+                    <label><input type="radio" name="margin" value="18" /><span>Small</span></label>
+                    <label><input type="radio" name="margin" value="54" /><span>Large</span></label>
+                  </div>
+                </fieldset>
+              </form>
+            </section>
 
-          <section data-panel="split">
-            <h2>Split</h2>
-            <form class="pa-form" data-split-form>
+            <p class="warn-box" data-sig hidden>A PDF here is digitally signed. Signatures will not be valid in the new copy.</p>
+            <p class="pa-limits">{limits}</p>
+            <p class="visually-hidden" data-announce aria-live="polite"></p>
+          </div>
+
+          <section class="pa-export" aria-labelledby="pa-export-title">
+            <h2 id="pa-export-title">Export</h2>
+            <form class="pa-form" data-export-form>
               <fieldset>
-                <legend>Output</legend>
+                <legend class="visually-hidden">Quality</legend>
                 <div class="segmented pa-seg">
-                  <label><input type="radio" name="split" value="each" checked /><span>Every page</span></label>
-                  <label><input type="radio" name="split" value="ranges" /><span>Ranges</span></label>
-                  <label><input type="radio" name="split" value="extract" /><span>Extract</span></label>
+                  <label title="Written by the PDF library as is"><input type="radio" name="quality" value="standard" checked /><span>Standard</span></label>
+                  <label title="Lossless optimization; smaller when possible"><input type="radio" name="quality" value="optimized" /><span>Optimized</span></label>
                 </div>
               </fieldset>
-              <label class="field" data-ranges-field hidden>
-                <span>Pages</span>
-                <input type="text" name="ranges" placeholder="e.g. 1-3, 5, 8-" autocomplete="off" aria-describedby="pa-split-info" />
+              <p class="pa-note">Optimized: lossless, used only when smaller.</p>
+              <label class="field">
+                <span>File name</span>
+                <input type="text" name="filename" autocomplete="off" spellcheck="false" />
               </label>
-              <button class="btn" type="button" data-use-selection hidden>Use selected pages</button>
-              <p class="pa-note" id="pa-split-info" data-split-info aria-live="polite"></p>
+              <dl class="pa-out" data-out aria-label="What will be exported">
+                <dt>Pages</dt><dd data-out-pages></dd>
+                <dt>Files</dt><dd data-out-files></dd>
+                <dt>Page size</dt><dd data-out-size></dd>
+                <dt data-out-rot>Rotated</dt><dd data-out-rot></dd>
+                <dt>File size</dt><dd data-out-bytes aria-live="polite"></dd>
+              </dl>
+              <button class="btn btn-primary" type="submit" data-export disabled><Icon name="download" />Export PDF</button>
+              <p class="pa-note" data-export-info aria-live="polite"></p>
             </form>
           </section>
-
-          <section data-panel="from-images">
-            <h2>Images to PDF</h2>
-            <form class="pa-form" data-img-form>
-              <fieldset>
-                <legend>Page size</legend>
-                <div class="segmented pa-seg">
-                  <label><input type="radio" name="size" value="a4" checked /><span>A4</span></label>
-                  <label><input type="radio" name="size" value="letter" /><span>Letter</span></label>
-                  <label><input type="radio" name="size" value="fit" /><span>Fit image</span></label>
-                </div>
-              </fieldset>
-              <fieldset>
-                <legend>Orientation</legend>
-                <div class="segmented pa-seg">
-                  <label><input type="radio" name="orientation" value="auto" checked /><span>Auto</span></label>
-                  <label><input type="radio" name="orientation" value="portrait" /><span>Portrait</span></label>
-                  <label><input type="radio" name="orientation" value="landscape" /><span>Landscape</span></label>
-                </div>
-              </fieldset>
-              <fieldset>
-                <legend>Margin</legend>
-                <div class="segmented pa-seg">
-                  <label><input type="radio" name="margin" value="0" checked /><span>None</span></label>
-                  <label><input type="radio" name="margin" value="18" /><span>Small</span></label>
-                  <label><input type="radio" name="margin" value="54" /><span>Large</span></label>
-                </div>
-              </fieldset>
-            </form>
-            <p class="pa-note" data-img-info></p>
-            <div class="pa-actions">
-              <button class="btn" type="button" data-act="up"><Icon name="arrow-up" />Move up</button>
-              <button class="btn" type="button" data-act="down"><Icon name="arrow-down" />Move down</button>
-              <button class="btn" type="button" data-act="reverse"><Icon name="reverse" />Reverse</button>
-              <button class="btn" type="button" data-act="delete"><Icon name="trash" />Remove</button>
-            </div>
-          </section>
-
-          <section data-panel="compress">
-            <h2>Optimize</h2>
-            <p class="pa-note">Lossless: streams are recompressed and objects packed. Images and text are not altered, so savings vary. If nothing gets smaller, you get the original back.</p>
-            <dl class="pa-dl" data-compress-info></dl>
-          </section>
-
-          <p class="warn-box" data-sig hidden>This PDF is digitally signed. Signatures will not be valid in the new copy.</p>
-          {modes.map((m) => <p class="pa-limits" data-limits={m.id}>{modeTool(m.id).limits}</p>)}
-          <p class="visually-hidden" data-announce aria-live="polite"></p>
         </aside>
       </div>
 
       <template data-icons>
-        <Icon name="chevron" class="i-chevron" />
         <Icon name="arrow-up" class="i-up" />
         <Icon name="arrow-down" class="i-down" />
         <Icon name="xmark" class="i-close" />
         <Icon name="download" class="i-download" />
         <Icon name="open" class="i-open" />
+        <Icon name="rotate-left" class="i-rotate-left" />
+        <Icon name="rotate-right" class="i-rotate-right" />
+        <Icon name="trash" class="i-trash" />
+        <Icon name="restart" class="i-restore" />
       </template>
     </section>
   </div>
@@ -217,6 +226,16 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
     --pa-left: 220px;
     --pa-right: 300px;
     --paper-shadow: 0 1px 2px rgb(0 0 0 / 0.16), 0 4px 16px rgb(0 0 0 / 0.1);
+    /* Source-file markers: muted hues, white text in light theme and near-black in dark (all ≥ 5:1). */
+    --fm-0: light-dark(#2f62a8, #86aef0);
+    --fm-1: light-dark(#a8452e, #f0977e);
+    --fm-2: light-dark(#2b7a5c, #6fcca6);
+    --fm-3: light-dark(#7a4fa3, #c3a0ec);
+    --fm-4: light-dark(#8a5d10, #e2b35c);
+    --fm-5: light-dark(#a83a6b, #f093bd);
+    --fm-6: light-dark(#4d7224, #a3cd72);
+    --fm-7: light-dark(#4f5f75, #a9b7ca);
+    --fm-ink: light-dark(#ffffff, #111214);
     position: relative;
     display: flex;
     flex-direction: column;
@@ -250,7 +269,15 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   .pa-pageno input { width: 4.2rem; text-align: right; }
   .pa-end { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
   .pa-end .btn { padding: 0.4rem 0.9rem; font-size: 0.88rem; }
-  .pdf-app[data-mode='from-images'] [data-pdf-only] { display: none; }
+  .pdf-app[data-view='grid'] [data-pages-only], .pdf-app:not([data-view='grid']) [data-grid-only] { display: none; }
+  .pa-viewseg { display: flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--app-hover); }
+  .pa-viewseg label { position: relative; }
+  .pa-viewseg input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .pa-viewseg label > span { display: flex; align-items: center; gap: 0.35rem; height: 30px; padding: 0 0.6rem; border-radius: 7px; color: var(--muted); font-size: 0.86rem; font-weight: 600; }
+  .pa-viewseg input:checked + span { background: var(--app-bar); color: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / 0.14); }
+  .pa-viewseg input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .pa-cardsize { gap: 0.35rem; color: var(--muted); }
+  .pa-cardsize input { width: 7.5rem; }
 
   .pa-msg { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.6rem 0.35rem 1rem; border-bottom: 1px solid var(--app-line); background: var(--app-bar); font-size: 0.88rem; }
   .pa-msg p { flex: 1; margin: 0; white-space: pre-line; }
@@ -258,57 +285,83 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   .pa-msg[data-kind='error'] .pa-tool { color: inherit; }
 
   .pa-body { flex: 1; display: grid; grid-template-columns: var(--pa-left) 0 minmax(0, 1fr) 0 var(--pa-right); min-height: 0; }
+  /* No files: the page sidebar folds away; every pane keeps its own grid track. */
+  .pdf-app[data-empty] .pa-body { grid-template-columns: 0 0 minmax(0, 1fr) 0 var(--pa-right); }
+  .pdf-app[data-empty] :is(.pa-side, [data-resize='left']) { visibility: hidden; overflow: hidden; }
 
-  /* Sidebar: tools on top, page thumbnails below (only the thumbnails scroll). */
+  /* Sidebar: file legend, then the page thumbnails in output order. */
   .pa-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-side); border-right: 1px solid var(--app-line); }
-  .pa-tools { display: grid; gap: 2px; padding: 0.5rem; border-bottom: 1px solid var(--app-line); }
-  .pa-tool-item {
-    display: flex; align-items: center; gap: 0.6rem; min-height: 34px; padding: 0 0.6rem; border: 0; border-radius: 8px;
-    background: transparent; color: var(--muted); font: inherit; font-size: 0.86rem; font-weight: 600; text-align: left; cursor: pointer; white-space: nowrap;
-  }
-  .pa-tool-item span { overflow: hidden; text-overflow: ellipsis; }
-  .pa-tool-item:hover { background: var(--app-hover); color: var(--fg); }
-  .pa-tool-item[aria-pressed='true'] { background: var(--app-selected); color: var(--accent); }
-  .pa-tool-item:focus-visible { outline: 3px solid var(--accent); outline-offset: -1px; }
-  .pa-thumbs { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem; }
-  .pdf-app[data-empty] .pa-thumbs { display: none; }
+  .pa-thumbs { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem; }
   .pa-hint { margin: 0.5rem 0.25rem; font-size: 0.75rem; color: var(--muted); }
-  .pdf-app[data-mode='from-images'] .pa-hint { display: none; }
-  .pdf-app[data-mode='from-images'] [data-docs], .pdf-app:not([data-mode='from-images']) [data-images] { display: none; }
-  .pa-doc + .pa-doc { margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid var(--app-line); }
-  .pa-doc-head { display: flex; align-items: center; }
-  .pa-doc-head .pa-tool { min-width: 26px; height: 26px; padding: 0; color: var(--muted); }
-  .pa-doc-head .icon svg { width: 15px; height: 15px; }
-  .pa-doc-toggle {
-    flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.25rem; padding: 0.25rem; border: 0; border-radius: 6px;
+  .pa-legend { display: grid; gap: 0.15rem; padding-bottom: 0.4rem; margin-bottom: 0.25rem; border-bottom: 1px solid var(--app-line); }
+  .pa-legend-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+  .pa-legend-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.5rem; margin: 0; padding: 0.15rem 0.25rem 0; font-size: 0.75rem; color: var(--muted); }
+  .pdf-app:not([data-mixed]) .pa-legend-bar { display: none; }
+  .pa-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .pa-src { display: flex; align-items: center; }
+  .pa-src .pa-tool { min-width: 26px; height: 26px; padding: 0; color: var(--muted); }
+  .pa-src .icon svg { width: 15px; height: 15px; }
+  .pa-src-name {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.35rem; padding: 0.25rem; border: 0; border-radius: 6px;
     background: none; color: var(--fg); font: inherit; font-size: 0.8rem; font-weight: 650; text-align: left; cursor: pointer;
   }
-  .pa-doc-toggle:hover { background: var(--app-hover); }
-  .pa-doc-toggle .icon { transition: transform 0.15s; }
-  .pa-doc-toggle[aria-expanded='false'] .icon { transform: rotate(-90deg); }
-  .pa-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pa-doc-count { flex: none; color: var(--muted); font-weight: 500; }
-  .pa-doc[data-active] .pa-doc-name { color: var(--accent); }
+  .pa-src-name:hover { background: var(--app-hover); }
+  .pa-src-name > span:not(.pa-mark):not(.pa-src-count) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pa-src-name .pa-mark { position: static; flex: none; }
+  .pa-src-count { flex: none; margin-left: auto; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
   .pa-list { list-style: none; margin: 0; padding: 0.25rem 0; display: grid; gap: 0.25rem; }
-  .pa-thumb { display: grid; justify-items: center; gap: 0.25rem; padding: 0.45rem 0.5rem 0.3rem; border-radius: 10px; border: 2px solid transparent; cursor: pointer; }
-  .pa-thumb:hover { background: var(--app-hover); }
-  .pa-thumb[aria-selected='true'] { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--app-selected); }
-  .pa-thumb:focus-visible { outline: 3px solid var(--accent); outline-offset: 0; }
-  .pa-thumb.dragging { opacity: 0.4; }
-  .pa-thumb.drop-before { box-shadow: 0 -3px 0 var(--accent); }
-  .pa-thumb.drop-after { box-shadow: 0 3px 0 var(--accent); }
-  /* Square box sized by the sidebar: a page rotated by 90° still fits, so rotating never shifts the list.
+  .pa-thumb, .pa-card { position: relative; border: 2px solid transparent; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .pa-thumb { display: grid; justify-items: center; gap: 0.25rem; padding: 0.45rem 0.5rem 0.3rem; border-radius: 10px; }
+  :is(.pa-thumb, .pa-card):hover { background: var(--app-hover); }
+  :is(.pa-thumb, .pa-card)[aria-selected='true'] { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--app-selected); }
+  :is(.pa-thumb, .pa-card):focus-visible { outline: 3px solid var(--accent); outline-offset: 0; }
+  .pa-lifted { opacity: 0.35; }
+  .pa-dragging, .pa-dragging * { cursor: grabbing !important; }
+  .pa-insert { position: absolute; z-index: 3; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); pointer-events: none; }
+  .pa-ghost {
+    position: fixed; top: 0; left: 0; z-index: 50; padding: 0.3rem 0.65rem; border-radius: 999px; pointer-events: none;
+    background: var(--fg); color: var(--bg); font-size: 0.8rem; font-weight: 650; white-space: nowrap; box-shadow: 0 6px 18px rgb(0 0 0 / 0.25);
+  }
+  /* Square box sized by the sidebar / grid column: a page rotated by 90° still fits, so rotating never shifts the list.
      The art fills the box absolutely and centres with flex (not grid: an auto grid row would size to the
      canvas), so the children's 100% limits resolve against the box and the hi-DPI canvas scales down. */
-  .pa-thumb-box { position: relative; width: 100%; aspect-ratio: 1; }
+  .pa-thumb-box, .pa-card-box { position: relative; display: block; width: 100%; aspect-ratio: 1; }
   .pa-art { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; }
   .pa-art > * { display: block; min-width: 0; min-height: 0; max-width: 100%; max-height: 100%; background: #fff; box-shadow: var(--paper-shadow); }
-  .pa-art img { image-orientation: none; object-fit: contain; }
+  .pa-art img { image-orientation: none; object-fit: contain; -webkit-user-drag: none; }
   .pa-paper[data-failed]::after { content: 'No preview'; display: grid; place-items: center; height: 100%; color: #6b6f76; font-size: 0.7rem; }
   .pa-thumb-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .pa-thumb[aria-current='true'] .pa-thumb-label { color: var(--accent); }
-  .pa-thumb[data-deleted] .pa-art { opacity: 0.3; filter: grayscale(1); }
-  .pa-thumb[data-deleted] .pa-thumb-label { color: var(--muted); text-decoration: line-through; }
+  :is(.pa-thumb, .pa-card)[aria-current='true'] :is(.pa-thumb-label, .pa-card-label) { color: var(--accent); }
+  :is(.pa-thumb, .pa-card)[data-deleted] .pa-art { opacity: 0.3; filter: grayscale(1); }
+  :is(.pa-thumb, .pa-card)[data-deleted] :is(.pa-thumb-label, .pa-card-label) { color: var(--muted); text-decoration: line-through; }
+
+  /* Source markers: letter badge (not colour alone) plus a colour stripe; shown once two or more sources are open. */
+  .pa-mark {
+    position: absolute; top: 3px; left: 3px; z-index: 1; min-width: 1.4em; height: 1.4em; padding: 0 0.3em; border-radius: 5px;
+    background: var(--fm); color: var(--fm-ink); font-size: 0.68rem; font-weight: 750; line-height: 1.4em; text-align: center;
+    box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--app-side) 80%, transparent);
+  }
+  .pdf-app:not([data-multi]) .pa-mark { display: none; }
+  .pdf-app[data-multi] :is(.pa-thumb, .pa-card)::before { content: ''; position: absolute; left: -2px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--fm); }
+
+  /* Grid overview */
+  .pa-grid { --card: 168px; position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .pa-cards { list-style: none; margin: 0; padding: 18px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(var(--card), 100%), 1fr)); align-content: start; }
+  .pa-card { display: grid; gap: 0.3rem; padding: 0.5rem 0.5rem 0.35rem; border-radius: 12px; }
+  .pa-card-box .pa-mark { top: 4px; left: 4px; font-size: 0.75rem; }
+  .pa-card-label { justify-self: center; font-size: 0.8rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .pa-card-actions {
+    position: absolute; top: 0.4rem; right: 0.4rem; z-index: 2; display: flex; gap: 2px; padding: 2px; border-radius: 9px;
+    background: color-mix(in srgb, var(--app-bar) 92%, transparent); box-shadow: 0 1px 4px rgb(0 0 0 / 0.18);
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .pa-card:is(:hover, :focus-within, [aria-current='true']) .pa-card-actions, .pa-card[data-deleted] .pa-card-actions { opacity: 1; }
+  @media (hover: none) { .pa-card[aria-selected='true'] .pa-card-actions { opacity: 1; } }
+  .pa-card-btn { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--fg); cursor: pointer; }
+  .pa-card-btn:hover { background: var(--app-hover); }
+  .pdf-app .pa-card-btn .icon svg { width: 16px; height: 16px; }
+  .pa-card[data-deleted] .pa-card-btn:not([data-act='delete']) { display: none; }
+  .pa-card[data-deleted] .pa-card-btn[data-act='delete'] { color: var(--accent); }
 
   /* Main view */
   .pa-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-stage); }
@@ -316,8 +369,11 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   .pa-view:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 0; }
   .pa-pages { display: flex; flex-direction: column; align-items: center; gap: 18px; width: max-content; min-width: 100%; padding: 22px; }
   .pa-page { position: relative; flex: none; background: #fff; box-shadow: var(--paper-shadow); }
+  .pdf-app[data-multi] .pa-page { box-shadow: -5px 0 0 var(--fm), var(--paper-shadow); }
+  .pa-page > .pa-mark { top: 8px; left: 8px; font-size: 0.8rem; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); }
   .pa-page > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .pa-page > img { position: absolute; image-orientation: none; object-fit: fill; }
+  .pa-sheet { position: absolute; left: 50%; top: 50%; background: #fff; }
+  .pa-sheet > img { position: absolute; image-orientation: none; object-fit: fill; }
   .pa-page[data-selected] { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 4px; }
   .pa-page[data-deleted] > * { opacity: 0.3; filter: grayscale(1); }
   .pa-page[data-deleted]::after {
@@ -325,7 +381,8 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
     background: var(--fg); color: var(--bg); font-size: 0.78rem; font-weight: 650;
   }
   .pa-page[data-failed]::before { content: 'No preview'; position: absolute; inset: 0; display: grid; place-items: center; color: #6b6f76; font-size: 0.9rem; }
-  .pdf-app[data-empty] .pa-view, .pdf-app:not([data-empty]) .pa-empty { display: none; }
+  .pdf-app[data-empty] :is(.pa-view, .pa-grid), .pdf-app:not([data-empty]) .pa-empty { display: none; }
+  .pdf-app[data-view='grid'] .pa-view, .pdf-app:not([data-view='grid']) .pa-grid { display: none; }
 
   .pa-empty {
     position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
@@ -360,15 +417,22 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   .pa-results .btn { padding: 0.35rem 0.75rem; font-size: 0.85rem; }
   .pa-res-actions { display: flex; gap: 0.35rem; }
 
-  /* Inspector */
-  .pa-insp { display: grid; align-content: start; gap: 0.9rem; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 1rem; background: var(--app-side); border-left: 1px solid var(--app-line); font-size: 0.9rem; }
+  /* Inspector: pages, split and image options scroll; Export stays pinned at the bottom. */
+  .pa-insp { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-side); border-left: 1px solid var(--app-line); font-size: 0.9rem; }
+  .pa-insp-scroll { flex: 1; min-height: 0; display: grid; align-content: start; gap: 1.1rem; overflow-y: auto; overscroll-behavior: contain; padding: 1rem; }
   .pa-insp section { display: grid; gap: 0.6rem; }
-  .pdf-app:not([data-mode='organize']) [data-panel='organize'], .pdf-app:not([data-mode='merge']) [data-panel='merge'],
-  .pdf-app:not([data-mode='split']) [data-panel='split'], .pdf-app:not([data-mode='from-images']) [data-panel='from-images'],
-  .pdf-app:not([data-mode='compress']) [data-panel='compress'] { display: none; }
-  .pdf-app[data-empty] .pa-insp :is([data-panel='organize'], [data-panel='merge'], .pa-actions, [data-use-selection]) { display: none; }
-  .pa-doc-line { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
-  .pa-doc-line:empty { display: none; }
+  .pdf-app[data-empty] .pa-insp :is(.pa-actions, [data-use-selection], .pa-split, .pa-export .pa-form > :not(button)) { display: none; }
+  .pdf-app:not([data-images]) .pa-imgopts { display: none; }
+  .pa-split[data-highlight] { margin: -0.5rem; padding: 0.5rem; border-radius: 10px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .pa-export { flex: none; padding: 0.85rem 1rem 1rem; background: var(--app-bar); border-top: 1px solid var(--app-line); }
+  .pa-export .btn-primary { justify-content: center; }
+  .pa-out { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0; padding: 0.5rem 0.7rem; border-radius: 10px; background: var(--app-hover); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+  .pa-out dt { color: var(--muted); }
+  .pa-out dd { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 0.25rem; margin: 0; text-align: right; font-weight: 600; }
+  .pa-out dd .pa-mark { position: static; }
+  .pa-out .pa-muted { color: var(--muted); font-weight: 500; }
+  .pa-order-info { margin: 0; font-weight: 650; }
+  .pa-order-info:empty { display: none; }
   .pa-note { margin: 0; font-size: 0.84rem; color: var(--muted); }
   .pa-note:empty { display: none; }
   .pa-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
@@ -379,33 +443,31 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
   .pa-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
   .pa-form legend, .pa-form .field > span { padding: 0; margin-bottom: 0.35rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
   .pa-form .field { gap: 0; }
+  .pa-form input[type='text'] { padding: 0.4rem 0.6rem; font-size: 0.88rem; }
   .pa-seg { display: flex; }
   .pa-seg label { flex: 1; text-align: center; }
   .pa-seg span { padding: 0.3rem 0.4rem; font-size: 0.84rem; }
-  .pa-dl { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0; padding: 0.5rem 0.7rem; border-radius: 10px; background: var(--app-hover); font-variant-numeric: tabular-nums; }
-  .pa-dl:empty { display: none; }
-  .pa-dl dt { color: var(--muted); }
-  .pa-dl dd { margin: 0; text-align: right; font-weight: 600; }
   .pa-insp .warn-box { margin: 0; }
   .pa-limits { margin: 0; font-size: 0.8rem; color: var(--muted); }
-  .pdf-app[data-mode='organize'] .pa-limits:not([data-limits='organize']), .pdf-app[data-mode='merge'] .pa-limits:not([data-limits='merge']),
-  .pdf-app[data-mode='split'] .pa-limits:not([data-limits='split']), .pdf-app[data-mode='from-images'] .pa-limits:not([data-limits='from-images']),
-  .pdf-app[data-mode='compress'] .pa-limits:not([data-limits='compress']) { display: none; }
 
   @media (max-width: 860px) {
     .pdf-app { height: auto; }
     .pa-body { grid-template-columns: minmax(0, 1fr); align-content: start; }
     .pa-body > .pane-resizer { display: none; }
-    /* Stacked: tools strip on top, then the page view, thumbnails, options. */
-    .pa-side { display: contents; }
-    .pa-tools { order: 0; display: flex; overflow-x: auto; background: var(--app-side); }
+    /* Stacked: page view, thumbnails, options (Export last). */
+    .pdf-app[data-empty] .pa-side { display: none; }
+    .pa-side { order: 2; border-right: 0; }
     .pa-main { order: 1; height: clamp(320px, 62dvh, 640px); }
     .pdf-app[data-empty] .pa-main { height: clamp(300px, 50dvh, 480px); }
-    .pa-thumbs { order: 2; max-height: 260px; background: var(--app-side); border-top: 1px solid var(--app-line); }
+    .pa-thumbs { max-height: 300px; border-top: 1px solid var(--app-line); }
     .pa-thumbs .pa-list { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
     .pa-thumb-box { width: 72px; }
+    .pa-cardsize input { width: 5rem; }
+    .pa-cards { padding: 10px; gap: 8px; }
     .pa-hint { display: none; }
-    .pa-insp { order: 3; border-left: 0; border-top: 1px solid var(--app-line); overflow: visible; }
+    .pa-insp { order: 3; border-left: 0; border-top: 1px solid var(--app-line); }
+    .pa-insp-scroll { overflow: visible; }
+    .pa-export { position: sticky; bottom: 0; z-index: 4; }
     .pa-tool-label { display: none; }
   }
   @media (max-width: 480px) {
@@ -413,8 +475,9 @@ const accept = 'application/pdf,.pdf,image/jpeg,image/png';
     .pa-title .mode { display: none; }
     .pa-tb { gap: 0.3rem; }
     .pa-pageno input { width: 3.2rem; }
+    .pa-cardsize .icon { display: none; }
   }
-  @media (prefers-reduced-motion: reduce) { .pa-art, .pa-doc-toggle .icon { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .pa-art { transition: none; } }
 
   /* Embedded in the home hub: the app is the whole frame, edge to edge. */
   :root[data-embed] main#main:has(.pdf-app) { width: 100%; padding: 0; }
