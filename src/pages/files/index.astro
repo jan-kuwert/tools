@@ -84,6 +84,16 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
         <div class="fx-main">
           <div class="fx-tabbar">
             <div class="fx-tabs" role="tablist" aria-label="Open documents" data-tabs></div>
+            <div class="fx-doc-info">
+              <span class="fx-msg" data-msg role="status" aria-live="polite"></span>
+              <progress data-progress max="1" hidden aria-label="Progress"></progress>
+              <span data-sb-hl></span>
+              <span data-sb-pos></span>
+              <span data-sb-size></span>
+              <button class="fx-sb-btn" type="button" data-sb-json hidden></button>
+              <select class="fx-sb-select" data-sb-syntax aria-label="Language" title="Language for highlighting" hidden></select>
+              <span data-sb-lang></span>
+            </div>
             <div class="fx-doc-actions">
               <div class="segmented fx-seg fx-md-modes" role="radiogroup" aria-label="Markdown view" data-md-modes hidden>
                 <label><input type="radio" name="mdView" value="edit" checked /><span>Editor</span></label>
@@ -125,22 +135,18 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
               <pre data-hexdump></pre>
             </div>
             <div class="fx-empty" data-empty-state>
-              <div class="fx-ghost-doc">
-                <div class="fx-ghost-gutter" aria-hidden="true">{Array.from({ length: 14 }, (_, i) => <span>{i + 1}</span>)}</div>
-                <div class="fx-ghost-lines">
-                  <input class="fx-ghost-input" type="text" data-start-typing placeholder="Start typing…" aria-label="Start a new document" autocomplete="off" spellcheck="false" />
-                  <div class="fx-ghost-text" aria-hidden="true">
-                    <span><i style="width: 38%"></i></span>
-                    <span><i style="width: 12%"></i><i style="width: 31%"></i></span>
-                    <span class="in"><i style="width: 24%"></i><i style="width: 18%"></i></span>
-                    <span class="in2"><i style="width: 44%"></i></span>
-                    <span class="in"><i style="width: 9%"></i></span>
-                    <span></span>
-                    <span><i style="width: 27%"></i><i style="width: 14%"></i></span>
-                    <span class="in"><i style="width: 36%"></i></span>
-                    <span><i style="width: 6%"></i></span>
-                  </div>
-                </div>
+              <div class="fx-ghost-doc" data-start-typing tabindex="0" role="textbox" aria-multiline="true" aria-label="New document: start typing">
+                <div class="fx-ghost-gutter" aria-hidden="true">{Array.from({ length: 10 }, (_, i) => <span>{i + 1}</span>)}</div>
+                <pre class="fx-ghost-text" aria-hidden="true">Start typing here, paste text, or drop files.
+
+JSON, JavaScript, Markdown, Python, CSS, SQL and more
+are highlighted as you type.
+
+{'{'}
+  "tip": "Format, minify or compare from the toolbar",
+  "archives": ["zip", "7z", "tar.gz"]
+{'}'}
+</pre>
               </div>
               <div class="fx-dropzone">
                 <svg class="fx-drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 30H11a7 7 0 0 1-1-13.9A11 11 0 0 1 31.4 13 9 9 0 1 1 36 30h-2" /><path d="M24 22v16M18 28l6-6 6 6" /></svg>
@@ -155,7 +161,7 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
             </div>
           </div>
 
-          <section class="fx-panel" aria-labelledby="fx-out-title">
+          <section class="fx-panel" aria-labelledby="fx-out-title" data-out-panel hidden>
             <div class="pane-resizer fx-resize-out" role="separator" aria-orientation="horizontal" aria-label="Resize Output panel" aria-controls="fx-out" tabindex="0" data-resize-out hidden></div>
             <div class="fx-panel-head">
               <button class="fx-panel-toggle" type="button" aria-expanded="false" aria-controls="fx-out" data-out-toggle>
@@ -241,19 +247,6 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
         </aside>
       </div>
 
-      <footer class="fx-status">
-        <span class="fx-msg" data-msg role="status" aria-live="polite"></span>
-        <progress data-progress max="1" hidden aria-label="Progress"></progress>
-        <span class="fx-grow"></span>
-        <span data-sb-pos></span>
-        <span data-sb-size></span>
-        <span data-sb-enc>UTF-8</span>
-        <button class="fx-sb-btn" type="button" data-sb-json hidden></button>
-        <span data-sb-hl></span>
-        <select class="fx-sb-select" data-sb-syntax aria-label="Language" title="Language for highlighting" hidden></select>
-        <span data-sb-lang></span>
-      </footer>
-
       <template data-icons>
         {rowIcons.map((n) => <span data-i={n}><Icon name={n} /></span>)}
       </template>
@@ -276,7 +269,7 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
     --fx-del-mark: light-dark(#f6c2bd, #6b2626);
     --fx-del-fg: light-dark(#b42318, #ff8a80);
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr);
     width: var(--fx-w);
     height: clamp(560px, calc(100dvh - 140px), 920px);
     margin: 1.5rem calc((100% - var(--fx-w)) / 2) 0;
@@ -423,6 +416,10 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
   .fx-tab-x:hover { opacity: 1; background: var(--fx-hover); }
   .fx-tab-x .icon svg { width: 14px; height: 14px; }
   .fx-doc-actions { display: flex; align-items: center; gap: 0.1rem; padding: 0 0.35rem; }
+  /* Document info (was a status bar): compact and muted at the right of the tab row. */
+  .fx-doc-info { display: flex; align-items: center; gap: 0.15rem 0.75rem; flex: 0 1 auto; min-width: 0; max-width: 60%; padding-left: 0.6rem; color: var(--muted); font-size: 0.76rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+  .fx-doc-info > span:empty { display: none; }
+  .fx-doc-info progress { width: 80px; height: 6px; accent-color: var(--accent); }
 
   .fx-editor { position: relative; min-height: 0; background: var(--surface); }
   .fx-code { position: absolute; inset: 0; display: flex; overflow: hidden; }
@@ -534,27 +531,19 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
   /* Empty state: a faint document whose first line is a real input, fading into the drop area. */
   .fx-empty { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: auto; }
   .fx-ghost-doc {
-    display: flex; flex: none; height: calc(14 * var(--fx-line) + 8px); padding-top: 8px; overflow: hidden;
+    position: relative; z-index: 1; display: flex; flex: none; height: calc(10 * var(--fx-line) + 8px); padding-top: 8px; overflow: hidden; cursor: text; outline: none;
     font: 13px/var(--fx-line) var(--mono);
-    -webkit-mask-image: linear-gradient(to bottom, #000 0 18%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0 18%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0 40%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0 40%, transparent 100%);
   }
   .fx-ghost-gutter { flex: none; width: 4ch; padding-right: 0.9ch; box-sizing: content-box; text-align: right; user-select: none; color: color-mix(in srgb, var(--muted) 70%, transparent); border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
   .fx-ghost-gutter span { display: block; height: var(--fx-line); }
-  .fx-ghost-lines { flex: 1; min-width: 0; }
-  .fx .fx-ghost-input {
-    display: block; width: 100%; height: var(--fx-line); margin: 0; padding: 0 12px 0 10px; border: 0; border-radius: 0;
-    font: inherit; color: var(--fg); background: color-mix(in srgb, var(--fg) 4.5%, transparent); outline: none;
-  }
-  .fx-ghost-input::placeholder { color: var(--muted); opacity: 1; }
-  .fx .fx-ghost-input:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--accent); }
-  .fx-ghost-text { padding: 0 12px 0 10px; }
-  .fx-ghost-text span { display: flex; gap: 1ch; align-items: center; height: var(--fx-line); }
-  .fx-ghost-text .in { padding-left: 2ch; }
-  .fx-ghost-text .in2 { padding-left: 4ch; }
-  .fx-ghost-text i { display: block; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 24%, transparent); }
+  .fx-ghost-text { position: relative; flex: 1; min-width: 0; margin: 0; padding: 0 12px 0 10px; font: inherit; white-space: pre; overflow: hidden; color: color-mix(in srgb, var(--muted) 72%, transparent); user-select: none; }
+  /* Keyboard focus shows a caret at the start of line 1. */
+  .fx-ghost-doc:focus-visible .fx-ghost-text::before { content: ''; position: absolute; left: 10px; top: 2px; width: 2px; height: calc(var(--fx-line) - 4px); background: var(--accent); animation: fx-blink 1.1s steps(1) infinite; }
+  @keyframes fx-blink { 50% { opacity: 0; } }
   .fx-dropzone {
     position: relative; flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.65rem;
-    margin: -4.5rem 1.5rem 1.5rem; padding: 1.5rem 1rem; text-align: center;
+    margin: -2.5rem 1.5rem 1.5rem; padding: 1.5rem 1rem; text-align: center;
     border: 1.5px dashed color-mix(in srgb, var(--muted) 35%, transparent); border-radius: 14px; transition: border-color 0.15s, background-color 0.15s;
   }
   .fx.fx-over .fx-dropzone { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
@@ -582,19 +571,15 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
   .fx-out-text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
   .fx-out-jump { flex: none; border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 
-  /* Status bar */
-  .fx-status { display: flex; align-items: center; gap: 0.25rem 1rem; padding: 0 0.75rem; min-height: 26px; background: var(--app-bar); border-top: 1px solid var(--app-line); color: var(--muted); font-size: 0.76rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
-  .fx-status > span:empty { display: none; }
-  .fx-msg { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+  .fx-msg { overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 20rem; flex: 0 1 auto; }
   .fx-msg[data-kind='error'] { color: var(--error); }
   .fx-msg[data-kind='ok'] { color: var(--local); }
-  .fx-status progress { width: 110px; height: 6px; accent-color: var(--accent); }
   .fx-sb-btn { height: 20px; padding: 0 0.35rem; color: inherit; font-weight: 500; border-radius: 4px; }
   .fx-sb-btn:hover { background: var(--fx-hover); color: var(--fg); }
   .fx-sb-btn[data-state='valid'] { color: var(--local); }
   .fx-sb-btn[data-state='invalid'] { color: var(--error); }
   .fx-sb-btn .icon svg { width: 14px; height: 14px; }
-  .fx-sb-select { height: 20px; padding: 0 0.2rem; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .fx-sb-select { field-sizing: content; height: 20px; padding: 0 0.2rem; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
   .fx-sb-select:hover { background: var(--fx-hover); color: var(--fg); }
 
   @media (max-width: 760px) {
@@ -615,7 +600,7 @@ const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'do
     .fx-explorer { position: absolute; inset: 0 0 0 auto; z-index: 20; width: min(88%, 320px); box-shadow: -8px 0 24px rgb(0 0 0 / 0.18); }
     .fx .fx-resize-side { display: none; }
     .fx-field select { max-width: 8.5rem; }
-    .fx-status [data-sb-enc], .fx-status [data-sb-size] { display: none; }
+    .fx-doc-info :is([data-sb-pos], [data-sb-size], [data-sb-hl], .fx-msg) { display: none; }
     .fx-modes span { padding-inline: 0.3rem; }
     .fx-diff-names { flex-basis: 100%; }
   }

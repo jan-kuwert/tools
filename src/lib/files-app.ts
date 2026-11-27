@@ -231,7 +231,8 @@ export function initFilesApp(): void {
   const mdEl = $('[data-md]');
   const editorEl = $('#fx-editor');
   const sbSyntax = $<HTMLSelectElement>('[data-sb-syntax]');
-  const starter = $<HTMLInputElement>('[data-start-typing]');
+  const starter = $('[data-start-typing]');
+  const outPanel = $('[data-out-panel]');
 
   let items: Item[] = [];
   let open: number[] = [];
@@ -267,10 +268,14 @@ export function initFilesApp(): void {
     return n;
   };
 
-  // ---- Messages: status bar line + Output panel ----
+  // ---- Messages: a short line in the tab row + the Output panel (shown only once something is logged) ----
+  let sayTimer = 0;
   const say = (text: string, kind: Kind = 'info') => {
     msg.textContent = text;
     msg.dataset.kind = kind;
+    clearTimeout(sayTimer);
+    // Errors stay until the next message; they are also in the Output panel.
+    if (text && kind !== 'error') sayTimer = window.setTimeout(() => (msg.textContent = ''), 6000);
   };
   const setOutOpen = (open: boolean) => {
     outToggle.ariaExpanded = String(open);
@@ -294,6 +299,7 @@ export function initFilesApp(): void {
       li.append(jump);
     }
     out.append(li);
+    outPanel.hidden = false;
     while (out.children.length > 200) out.firstElementChild!.remove();
     if (kind === 'error' || kind === 'warn') setOutOpen(true);
     out.scrollTop = out.scrollHeight;
@@ -352,7 +358,6 @@ export function initFilesApp(): void {
     const it = cur();
     const text = it?.text !== undefined;
     $('[data-sb-size]').textContent = it ? formatBytes(it.size) : '';
-    $('[data-sb-enc]').textContent = text ? 'UTF-8' : '';
     // The language picker covers text documents; binary files just say so.
     $('[data-sb-lang]').textContent = it && !text ? 'Binary' : '';
     sbSyntax.hidden = !text;
@@ -466,29 +471,15 @@ export function initFilesApp(): void {
     say(`Downloading ${title}.html.`);
   });
 
-  // Empty state: the first ghost line is a real input; typing there starts a document at the same caret.
-  const startDoc = () => {
-    const v = starter.value;
-    if (!v) return;
-    const caret = starter.selectionStart ?? v.length;
-    starter.value = '';
-    newDoc(v);
-    ta.setSelectionRange(caret, caret);
-  };
-  starter.addEventListener('input', (e) => !(e as InputEvent).isComposing && startDoc());
-  starter.addEventListener('compositionend', startDoc);
+  // Empty state: the faded sample is one focusable text box. Clicking it, or Enter while it has focus, starts an
+  // untitled document with the caret at the start; printable keys and paste go through the app-wide handlers below.
+  starter.addEventListener('click', () => newDoc());
   starter.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.isComposing) return;
+    // IME input: open the document and let the composition continue in the editor.
+    if (e.isComposing || e.key === 'Process') return void newDoc();
+    if (e.key !== 'Enter') return;
     e.preventDefault();
     newDoc('\n');
-  });
-  starter.addEventListener('paste', (e) => {
-    const text = e.clipboardData?.getData('text/plain');
-    if (!text || e.clipboardData?.files.length) return;
-    // A text input would drop the line breaks.
-    e.preventDefault();
-    e.stopPropagation();
-    newDoc(text);
   });
 
   function saveView() {
@@ -1380,6 +1371,8 @@ export function initFilesApp(): void {
     out.replaceChildren();
     say('');
     renderProblemCount();
+    setOutOpen(false);
+    outPanel.hidden = true;
   });
   sbJson.onclick = () => {
     const it = cur();
