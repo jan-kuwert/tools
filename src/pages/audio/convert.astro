@@ -70,7 +70,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
           <label class="screen-empty">
             <svg class="screen-ghost" viewBox="0 0 360 100" preserveAspectRatio="none" aria-hidden="true"><path d={ghost} /></svg>
             <span class="screen-title">Drop audio or choose a file</span>
-            <span class="key key-dark"><Icon name="upload" />Choose files</span>
+            <span class="btn btn-primary"><Icon name="upload" />Choose files</span>
             <span class="screen-hint">{tool.limits}. You can also paste from the clipboard.</span>
             <input class="visually-hidden" type="file" accept={accept} multiple data-input />
           </label>
@@ -236,10 +236,13 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
     --edge: color-mix(in srgb, var(--app-line) 82%, #000);
     --bevel: light-dark(rgb(255 255 255 / 0.85), rgb(255 255 255 / 0.06));
     --engrave: light-dark(#5a5d63, #9b9ea6);
-    --glass: light-dark(#141816, #050606);
-    --phos: light-dark(#86e6b9, #74e2b2);
+    /* Light theme: a reflective grey-green LCD with dark ink; dark theme: backlit glass with glowing phosphor. */
+    --glass: light-dark(#cfd8c6, #050606);
+    --glass-edge: light-dark(#97a28c, #000);
+    --glass-shade: light-dark(rgb(40 60 30 / 0.16), rgb(0 0 0 / 0.55));
+    --phos: light-dark(#1d3b2b, #74e2b2);
     --phos-dim: color-mix(in srgb, var(--phos) 52%, transparent);
-    --phos-glow: color-mix(in srgb, var(--phos) 45%, transparent);
+    --phos-glow: light-dark(transparent, color-mix(in srgb, var(--phos) 45%, transparent));
     --led-g: #43d68c;
     --led-a: #ffb23e;
     --key: light-dark(#e9e9e5, #2b2c30);
@@ -285,14 +288,9 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   .mod-warn { color: color-mix(in srgb, var(--cloud) 70%, var(--fg)); }
   .mod-lead { margin: 0 0 10px; }
   .mod .warn-box { margin: 0 0 10px; font-size: 0.8rem; }
-  /* Rack unit: screws in the corners and an amber edge mark the cloud module. */
+  /* Rack unit: an amber edge marks the cloud module. */
   .mod-cloud {
-    background:
-      radial-gradient(circle at 9px 9px, var(--edge) 0 2.5px, transparent 3px),
-      radial-gradient(circle at calc(100% - 9px) 9px, var(--edge) 0 2.5px, transparent 3px),
-      radial-gradient(circle at 9px calc(100% - 9px), var(--edge) 0 2.5px, transparent 3px),
-      radial-gradient(circle at calc(100% - 9px) calc(100% - 9px), var(--edge) 0 2.5px, transparent 3px),
-      linear-gradient(var(--face-hi), var(--face));
+    background: linear-gradient(var(--face-hi), var(--face));
     box-shadow: inset 3px 0 0 color-mix(in srgb, var(--led-a) 75%, transparent), inset 0 1px 0 var(--bevel), 0 1px 2px rgb(0 0 0 / 0.16);
     padding-left: 18px;
   }
@@ -320,8 +318,8 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   .screen {
     position: relative; display: flex; flex-direction: column; height: 270px; overflow: hidden; border-radius: 8px;
     background: radial-gradient(130% 120% at 50% 0%, color-mix(in srgb, var(--phos) 7%, var(--glass)), var(--glass) 65%);
-    border: 1px solid #000; color: var(--phos);
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.04), inset 0 10px 30px rgb(0 0 0 / 0.55), 0 1px 0 var(--bevel);
+    border: 1px solid var(--glass-edge); color: var(--phos);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.04), inset 0 10px 30px var(--glass-shade), 0 1px 0 var(--bevel);
   }
   .screen::after {
     content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
@@ -354,8 +352,8 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   .screen-empty > :not(svg, input) { position: relative; }
   .screen-title { font: 600 1.15rem/1.2 var(--font); letter-spacing: 0.02em; text-shadow: 0 0 10px var(--phos-glow); }
   .screen-hint { max-width: 46ch; font-size: 0.78rem; color: var(--phos-dim); }
-  .screen-empty:focus-within .key, .screen-empty:hover .key { box-shadow: 0 0 0 3px var(--phos-dim), 0 2px 0 var(--key-edge); }
-  .screen-empty:has(input:focus-visible) .key { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .screen-empty:focus-within .btn, .screen-empty:hover .btn { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .screen-empty:has(input:focus-visible) .btn { outline: 3px solid var(--accent); outline-offset: 3px; }
   .deck.over .screen-empty { background: color-mix(in srgb, var(--phos) 8%, transparent); }
   .screen-msg { position: absolute; inset: auto 0 40%; margin: 0; padding: 0 1rem; text-align: center; font: 0.9rem/1.4 var(--mono); text-shadow: 0 0 8px var(--phos-glow); pointer-events: none; }
   .screen-msg:empty { display: none; }
@@ -399,9 +397,9 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
 
   /* LCD fields and readouts */
   .deck .lcd {
-    margin: 0; padding: 0.38rem 0.55rem; border: 1px solid #000; border-radius: 5px; background: var(--glass); color: var(--phos);
+    margin: 0; padding: 0.38rem 0.55rem; border: 1px solid var(--glass-edge); border-radius: 5px; background: var(--glass); color: var(--phos);
     font: 500 0.95rem/1.25 var(--mono); font-variant-numeric: tabular-nums; text-shadow: 0 0 7px var(--phos-glow);
-    box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.7), 0 1px 0 var(--bevel);
+    box-shadow: inset 0 2px 6px var(--glass-shade), 0 1px 0 var(--bevel);
   }
   .deck input.lcd { width: 100%; min-width: 0; }
   .deck input.lcd:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
@@ -439,7 +437,7 @@ const ghost = Array.from({ length: 180 }, (_, i) => {
   .toggle-row label span { font: 700 0.66rem/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; color: var(--engrave); }
   .toggle-row input:checked + span { color: var(--fg); }
   .toggle-row input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
-  .toggle-slot { position: relative; width: 46px; height: 24px; border-radius: 12px; background: var(--glass); box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.7), 0 1px 0 var(--bevel); cursor: pointer; }
+  .toggle-slot { position: relative; width: 46px; height: 24px; border-radius: 12px; background: var(--glass); box-shadow: inset 0 2px 4px var(--glass-shade), 0 1px 0 var(--bevel); cursor: pointer; }
   .toggle-lever { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 40% 30%, var(--key-hi), var(--key) 75%); box-shadow: 0 2px 3px rgb(0 0 0 / 0.4); transition: translate 0.12s; }
   .toggle-row:has([value='remove']:checked) .toggle-lever { translate: 22px 0; background: radial-gradient(circle at 40% 30%, #ffd08a, var(--led-a) 75%); }
   .mod-body:disabled .toggle-row { opacity: 0.42; }
