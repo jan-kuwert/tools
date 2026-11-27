@@ -605,6 +605,12 @@ export function initPdfApp(): void {
     return Math.max(0.1, Math.min(aw / d.w, ah / d.h));
   }
 
+  // Free zoom levels (pinch / Ctrl+wheel) show up as an extra option so the select always reflects the zoom.
+  const customZoom = zoomSel.appendChild(new Option('', ''));
+  customZoom.hidden = true;
+  /** True while a pinch is in progress: pages are only resized (canvases stretch); rendering waits for it to settle. */
+  let deferRender = false;
+
   function layout() {
     // Keep the current page at the same spot while the zoom changes.
     const anchorEl = current?.view;
@@ -622,10 +628,12 @@ export function initPdfApp(): void {
       }
     }
     if (anchorEl && scale !== old) view.scrollTop = anchorEl.offsetTop + ratio * anchorEl.offsetHeight;
-    for (const p of visible) want(p);
+    if (!deferRender) for (const p of visible) want(p);
     const pct = Math.round((scale / PT) * 100);
     zoomSel.options[0].textContent = zoom === 'width' ? `Fit width (${pct}%)` : 'Fit width';
     zoomSel.options[1].textContent = zoom === 'page' ? `Fit page (${pct}%)` : 'Fit page';
+    customZoom.hidden = typeof zoom !== 'number' || ZOOMS.includes(zoom);
+    if (!customZoom.hidden) Object.assign(customZoom, { value: String(zoom), textContent: `${pct}%` });
     zoomSel.value = String(zoom);
   }
 
@@ -638,6 +646,59 @@ export function initPdfApp(): void {
     const next = dir > 0 ? ZOOMS.find((z) => z > cur + 0.001) : [...ZOOMS].reverse().find((z) => z < cur - 0.001);
     if (next) setZoom(next);
   }
+
+  /** Zoom by `factor` keeping the document point under (x, y) (client coords) fixed. */
+  let settle = 0;
+  function zoomAt(factor: number, x: number, y: number) {
+    const z = Math.min(ZOOMS[ZOOMS.length - 1], Math.max(ZOOMS[0], (scale / PT) * factor));
+    if (Math.abs(z - scale / PT) < 1e-4) return;
+    const hit = items().find((it) => {
+      const r = it.view.getBoundingClientRect();
+      return y >= r.top && y <= r.bottom;
+    });
+    const before = hit?.view.getBoundingClientRect();
+    const fx = before ? (x - before.left) / before.width : 0;
+    const fy = before ? (y - before.top) / before.height : 0;
+    deferRender = true;
+    setZoom(Math.round(z * 1000) / 1000);
+    if (hit && before) {
+      const after = hit.view.getBoundingClientRect();
+      view.scrollLeft += after.left + fx * after.width - x;
+      view.scrollTop += after.top + fy * after.height - y;
+    }
+    clearTimeout(settle);
+    settle = window.setTimeout(() => {
+      deferRender = false;
+      for (const p of visible) want(p);
+    }, 160);
+  }
+
+  // Trackpad pinch arrives as Ctrl+wheel (Chrome, Edge, Firefox); a mouse wheel with Ctrl/Cmd zooms too.
+  // preventDefault stops the browser from zooming the whole page instead.
+  view.addEventListener(
+    'wheel',
+    (e) => {
+      if (!(e.ctrlKey || e.metaKey) || !items().length) return;
+      e.preventDefault();
+      const px = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 16 : e.deltaY;
+      zoomAt(Math.min(1.25, Math.max(0.8, Math.exp(-px * 0.01))), e.clientX, e.clientY);
+    },
+    { passive: false },
+  );
+  // Safari reports trackpad pinch as non-standard gesture events with a cumulative `scale`.
+  type GestureEvt = UIEvent & { scale: number; clientX: number; clientY: number };
+  let gestureScale = 1;
+  view.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+    gestureScale = 1;
+  });
+  view.addEventListener('gesturechange', (e) => {
+    const g = e as GestureEvt;
+    e.preventDefault();
+    if (!items().length) return;
+    zoomAt(g.scale / gestureScale, g.clientX, g.clientY);
+    gestureScale = g.scale;
+  });
 
   function scrollToItem(item: Item) {
     const top = item.view.offsetTop - PAD;
