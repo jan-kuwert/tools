@@ -76,8 +76,42 @@ const vars = ['name', 'ext', 'id', 'date', 'today', 'size'].map((v) => `{${v}}`)
             </table>
             <p class="visually-hidden" id="fl-order-help">Drag to reorder, or press Alt+Up or Alt+Down. The order sets {'{id}'} numbers and the order in archives.</p>
             <div class="fl-empty" data-empty>
-              <svg class="fl-drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 30H11a7 7 0 0 1-1-13.9A11 11 0 0 1 31.4 13 9 9 0 1 1 36 30h-2" /><path d="M24 22v16M18 28l6-6 6 6" /></svg>
-              <p class="fl-empty-title">Drop files or folders anywhere</p>
+              <svg class="fl-bg-art" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+                <defs>
+                  <radialGradient id="fl-g-a"><stop offset="0" class="s-a" /><stop offset="1" class="s-a" stop-opacity="0" /></radialGradient>
+                  <radialGradient id="fl-g-b"><stop offset="0" class="s-b" /><stop offset="1" class="s-b" stop-opacity="0" /></radialGradient>
+                  <pattern id="fl-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" /></pattern>
+                  <radialGradient id="fl-fade" r="0.6"><stop offset="0.25" stop-color="#000" /><stop offset="1" stop-color="#fff" /></radialGradient>
+                  <mask id="fl-edge"><rect width="1200" height="600" fill="url(#fl-fade)" /></mask>
+                </defs>
+                <g class="g-aurora">
+                  <ellipse class="g-blob b1" cx="230" cy="450" rx="440" ry="300" fill="url(#fl-g-a)" />
+                  <ellipse class="g-blob b2" cx="990" cy="140" rx="420" ry="300" fill="url(#fl-g-b)" />
+                </g>
+                <rect class="g-dots" width="1200" height="600" fill="url(#fl-dots)" mask="url(#fl-edge)" />
+                <g transform="translate(70 318) rotate(-8)">
+                  <path class="g-folder-back" d="M0 12a12 12 0 0 1 12-12h58a12 12 0 0 1 9 4l14 16h115a12 12 0 0 1 12 12v118a12 12 0 0 1-12 12H12A12 12 0 0 1 0 150Z" />
+                  <rect class="g-paper" x="22" y="24" width="160" height="70" rx="6" />
+                  <path class="g-folder" d="M0 56a12 12 0 0 1 12-12h196a12 12 0 0 1 12 12v94a12 12 0 0 1-12 12H12A12 12 0 0 1 0 150Z" />
+                </g>
+                {[[190, 70, 9, '.zip'], [1010, 300, -7, '.gz']].map(([x, y, r, ext]) => (
+                  <g transform={`translate(${x} ${y}) rotate(${r})`}>
+                    <rect class="g-paper" width="130" height="165" rx="8" />
+                    <path class="g-fold" d="M100 0h22a8 8 0 0 1 8 8v22z" />
+                    <path class="g-lines" d="M18 30h70M18 46h94M18 62h80M18 78h94" />
+                    <rect class="g-tag" x="18" y="118" width="58" height="26" rx="13" />
+                    <text class="g-ext" x="47" y="136" text-anchor="middle">{ext}</text>
+                  </g>
+                ))}
+                <g transform="translate(880 80) rotate(6)">
+                  <rect class="g-paper" width="200" height="150" rx="14" />
+                  <path class="g-zip" d="M100 0v112" />
+                  <rect class="g-pull" x="89" y="108" width="22" height="30" rx="6" />
+                  <rect class="g-tag" x="18" y="18" width="50" height="26" rx="13" />
+                  <text class="g-ext" x="43" y="36" text-anchor="middle">.7z</text>
+                </g>
+              </svg>
+              <p class="fl-empty-title">Drop files or folders, or choose them</p>
               <div class="fl-empty-actions">
                 <button class="btn btn-primary" type="button" data-open><Icon name="upload" />Choose files</button>
                 <button class="btn" type="button" data-open-folder><Icon name="folder" />Choose a folder</button>
@@ -300,14 +334,37 @@ const vars = ['name', 'ext', 'id', 'date', 'today', 'size'].map((v) => `{${v}}`)
   .fl-table tr:is(:hover, :focus-within) .fl-c-acts .fl-ib { opacity: 1; }
   .fl-c-acts .icon svg, .fl-grip .icon svg { width: 15px; height: 15px; }
 
-  /* Empty state: the whole list area is the drop zone. */
-  .fl-empty { position: absolute; inset: 0.75rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.8rem; padding: 1.5rem; text-align: center; border: 2px dashed color-mix(in srgb, var(--muted) 35%, transparent); border-radius: 14px; background: color-mix(in srgb, var(--app-stage) 35%, var(--surface)); transition: border-color 0.15s, background-color 0.15s; }
-  .fl.fl-over .fl-empty { border-color: var(--accent); }
-  .fl-drop-icon { width: 52px; height: 52px; fill: none; stroke: color-mix(in srgb, var(--muted) 80%, transparent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  /* Empty state: the whole list area is the drop zone. Same backdrop language as the image, PDF and GPX apps:
+     soft accent glows, an edge-weighted dot grid, and folders, files and an archive kept clear of the centre. */
+  .fl-empty {
+    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; overflow: hidden;
+    padding: 1rem; text-align: center; border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+  .fl-empty:hover, .fl.fl-over .fl-empty { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .fl-empty > :not(svg) { position: relative; }
+  .fl-bg-art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .fl-bg-art .s-a { stop-color: var(--accent); }
+  .fl-bg-art .s-b { stop-color: color-mix(in oklch, var(--accent), light-dark(#ea580c, #fb923c) 55%); }
+  .fl-bg-art .g-aurora { opacity: 0.2; }
+  .fl-bg-art .g-dots { fill: var(--fg); opacity: 0.15; }
+  .fl-bg-art .g-paper { fill: var(--surface); fill-opacity: 0.8; stroke: var(--fg); stroke-opacity: 0.1; stroke-width: 1.5; }
+  .fl-bg-art .g-fold { fill: var(--fg); opacity: 0.06; }
+  .fl-bg-art .g-lines { fill: none; stroke: var(--fg); stroke-opacity: 0.13; stroke-width: 5; stroke-linecap: round; }
+  .fl-bg-art .g-folder-back { fill: color-mix(in srgb, var(--accent) 30%, var(--surface)); opacity: 0.7; }
+  .fl-bg-art .g-folder { fill: color-mix(in srgb, var(--accent) 45%, var(--surface)); opacity: 0.75; }
+  .fl-bg-art .g-zip { fill: none; stroke: var(--accent); stroke-opacity: 0.35; stroke-width: 12; stroke-dasharray: 6 6; }
+  .fl-bg-art .g-pull { fill: var(--accent); opacity: 0.45; }
+  .fl-bg-art .g-tag { fill: var(--accent); opacity: 0.18; }
+  .fl-bg-art .g-ext { fill: var(--accent); fill-opacity: 0.75; font: 700 14px var(--mono); }
+  @media (prefers-reduced-motion: no-preference) {
+    .fl-bg-art .g-blob { transform-box: fill-box; transform-origin: center; animation: fl-drift 26s ease-in-out infinite alternate; }
+    .fl-bg-art .g-blob.b2 { animation-duration: 32s; animation-direction: alternate-reverse; }
+  }
+  @keyframes fl-drift { to { transform: translate(-50px, 30px) scale(1.12); } }
   .fl-empty-title { margin: 0; font-size: 1.15rem; font-weight: 650; }
   .fl-empty-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
-  .fl-empty-actions .btn { padding: 0.5rem 1rem; font-size: 0.9rem; }
-  .fl-empty-hint { margin: 0; max-width: 54ch; color: var(--muted); font-size: 0.8rem; }
+  .fl-empty-hint { margin: 0; max-width: 46ch; color: var(--muted); font-size: 0.85rem; }
 
   .fl-status { display: flex; align-items: center; gap: 1rem; min-height: 28px; padding: 0 0.75rem; background: var(--app-bar); border-top: 1px solid var(--app-line); color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
   .fl-msg { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

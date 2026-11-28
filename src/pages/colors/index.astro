@@ -1,0 +1,300 @@
+---
+// Colors app: pick colours for a light and a dark theme (or edit colours imported from a CSS file) and check contrast
+// against WCAG 2.2 while picking. Behaviour: src/lib/colors-app.ts; colour maths, CSS parsing and theme roles: src/lib/color.ts.
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import AppBar from '../../components/AppBar.astro';
+import ModeBadge from '../../components/ModeBadge.astro';
+import { categories, href } from '../../tools';
+
+const category = categories.find((c) => c.id === 'colors')!;
+---
+<Base title="Colors · Tools" description={category.blurb}>
+  <div class="tool-shell" data-wide>
+    <div class="crumbs"><a href={href()}>All tools</a> / <a href={href() + '#colors'}>Colors</a></div>
+    <div class="tool-head">
+      <h1>Colors</h1>
+      <ModeBadge mode="local" />
+    </div>
+    <p class="tool-summary">{category.blurb}</p>
+    <div class="privacy-note privacy-local" role="note">
+      <Icon name="lock" />
+      <p><strong>Runs in your browser; nothing is uploaded.</strong> <a href={href('privacy')}>How we check</a></p>
+    </div>
+
+    <section class="co-app" data-colors-app aria-label="Colors">
+      <header class="co-tb">
+        <AppBar part="switch" current="colors" />
+        <span class="co-msg" data-msg role="status" aria-live="polite"></span>
+        <div class="co-end">
+          <AppBar part="actions" />
+        </div>
+      </header>
+
+      <div class="co-body">
+        <div class="co-main">
+          <div class="co-previews">
+            {(['light', 'dark'] as const).map((v) => (
+              <div class="co-preview" data-preview={v} data-v={v} data-pick="background" aria-hidden="true">
+                <span class="pv-tag" data-pick="muted">{v === 'light' ? 'Light' : 'Dark'}</span>
+                <div class="pv-card" data-pick="surface">
+                  <strong class="pv-title" data-pick="text">Your theme in use</strong>
+                  <p data-pick="text">Body text sits on the surface color. <span class="pv-link" data-pick="primary">Links use the primary color</span> and must stay readable.</p>
+                  <span class="pv-muted" data-pick="muted">Muted text for hints and captions.</span>
+                  <span class="pv-input" data-pick="border">name@example.com</span>
+                  <span class="pv-btns">
+                    <span class="pv-btn pv-primary" data-pick="on-primary">Save changes</span>
+                    <span class="pv-btn" data-pick="border">Cancel</span>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <section class="co-checks" aria-labelledby="co-checks-title">
+            <div class="co-checks-head">
+              <h2 id="co-checks-title">Contrast <span class="co-checks-sub" data-checks-sub></span></h2>
+              <span class="co-summary" data-summary></span>
+            </div>
+            <table class="co-table">
+              <caption class="visually-hidden">Contrast of each color pair against WCAG 2.2</caption>
+              <thead><tr><th scope="col">Pair</th><th scope="col" data-v="light">Light</th><th scope="col" data-v="dark">Dark</th></tr></thead>
+              <tbody data-rows></tbody>
+            </table>
+            <p class="co-note">AA is the usual legal and design baseline; AAA is stricter. Large text means at least 24 px, or 18.66 px bold. Borders need 3:1 only when they are what shows where a control is. Ratios are rounded down, so 4.49:1 never passes as 4.5:1.</p>
+          </section>
+        </div>
+        <div class="pane-resizer co-resize-side" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" aria-controls="co-side" tabindex="0" data-resize-side title="Drag or use arrow keys to resize; double-click to reset"></div>
+        <aside class="co-side" id="co-side" aria-label="Colors and CSS">
+          <div class="co-side-head">
+            <h2 id="co-roles-title" data-list-title>Theme colors</h2>
+            <button class="co-ib co-flip" type="button" data-toggle-side aria-expanded="true" aria-controls="co-side" aria-label="Collapse sidebar" title="Collapse the sidebar to swatches"><Icon name="sidebar" /></button>
+          </div>
+          <div class="co-side-scroll">
+          <section class="co-colors" aria-labelledby="co-roles-title">
+          <ul class="co-roles" data-roles></ul>
+          <div class="co-panel" id="co-panel" data-panel hidden>
+            <div class="segmented co-variant" role="radiogroup" aria-label="Edit the light or the dark value">
+              <label><input type="radio" name="variant" value="light" /><span><span class="co-chip" data-chip="light" aria-hidden="true"></span>Light</span></label>
+              <label><input type="radio" name="variant" value="dark" /><span><span class="co-chip" data-chip="dark" aria-hidden="true"></span>Dark</span></label>
+            </div>
+            <div class="co-sv" data-sv tabindex="0" role="slider" aria-label="Saturation and brightness. Left and right change saturation, up and down brightness; Shift for bigger steps." aria-valuemin="0" aria-valuemax="100" aria-describedby="co-zone-legend">
+              <canvas data-sv-canvas></canvas>
+              <span class="co-knob" data-knob aria-hidden="true"></span>
+            </div>
+            <input class="co-hue" type="range" min="0" max="359" step="1" data-hue aria-label="Hue" />
+            <div class="co-row">
+              <label class="co-hex"><span class="visually-hidden">Color value</span><input type="text" data-picker-hex spellcheck="false" autocomplete="off" /></label>
+              <select class="co-format" data-format aria-label="Color format" title="Notation for values and the CSS export"><option value="hex">HEX</option><option value="rgb">RGB</option><option value="hsl">HSL</option></select>
+              <button class="co-ib" type="button" data-eyedropper hidden aria-label="Pick a color from the screen" title="Pick a color from anywhere on screen"><Icon name="eyedropper" /></button>
+            </div>
+            <div class="co-channels" data-channels role="group" aria-label="Color channels" hidden></div>
+            <label class="co-against"><span>Contrast with</span><select data-against></select></label>
+            <div class="co-result" data-against-result></div>
+            <p class="co-legend" id="co-zone-legend" data-legend></p>
+            <p class="co-vs">On white <b data-vs-white></b> · On black <b data-vs-black></b></p>
+          </div>
+          <div class="co-import">
+            <button class="co-tool" type="button" data-import-btn title="Edit the colors of a stylesheet (or drop a .css file here)"><Icon name="upload" /><span>Import CSS</span></button>
+            <button class="co-tool" type="button" data-builtin hidden>Built-in theme</button>
+            <input type="file" accept=".css,text/css" data-import hidden />
+          </div>
+          <p class="co-hint">Pick a color to edit it. Light and Dark are edited separately. Imported files keep their custom property names; colors set with var(), gradients or transparency are left out.</p>
+          </section>
+          <section class="co-css-sec" aria-labelledby="co-css-title">
+            <h2 id="co-css-title">CSS</h2>
+            <textarea class="co-css" data-css spellcheck="false" autocomplete="off" aria-labelledby="co-css-title" aria-describedby="co-css-hint"></textarea>
+            <p class="co-hint" id="co-css-hint" data-css-hint>Edit or paste custom properties, then apply. Names that match the current colors update them; other names open as a new palette.</p>
+            <div class="co-css-acts">
+              <button class="btn btn-primary" type="button" data-apply disabled>Apply CSS</button>
+              <button class="btn" type="button" data-discard disabled>Discard edits</button>
+            </div>
+          </section>
+          </div>
+          <div class="co-export">
+            <button class="btn" type="button" data-copy><Icon name="copy" />Copy CSS</button>
+            <button class="btn btn-primary" type="button" data-download><Icon name="download" />Download</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </div>
+</Base>
+
+<style is:global>
+  /* The app shows itself in the theme being edited (colors-app.ts sets --bg, --fg, --accent … on this element).
+     Surfaces the site derives at :root are derived again here, or they would keep the site's colors. */
+  .co-app {
+    --app-bg: var(--bg);
+    --app-line: var(--border);
+    --app-selected: color-mix(in srgb, var(--accent) 14%, transparent);
+    --surface-2: color-mix(in srgb, var(--fg) 6%, var(--surface));
+    --app-bar: color-mix(in srgb, var(--fg) 2%, var(--surface));
+    --app-side: color-mix(in srgb, var(--fg) 3%, var(--bg));
+    --app-hover: color-mix(in srgb, var(--fg) 6%, transparent);
+    --co-w: min(100vw - 2rem, 1440px);
+    position: relative; display: flex; flex-direction: column; width: var(--co-w);
+    height: clamp(600px, calc(100dvh - 120px), 1000px); margin: 1.5rem calc((100% - var(--co-w)) / 2) 0;
+    background: var(--app-bg); color: var(--fg); border: 1px solid var(--app-line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .co-app .icon svg { width: 18px; height: 18px; }
+  .co-app h2 { margin: 0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .co-tb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.75rem; padding: 0.45rem 0.6rem; background: var(--app-bar); border-bottom: 1px solid var(--app-line); }
+  .co-msg { font-size: 0.85rem; color: var(--muted); }
+  .co-end { display: flex; align-items: center; margin-left: auto; }
+  .co-tool {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; height: 34px; padding: 0 0.6rem; flex: none;
+    border: 1px solid var(--app-line); border-radius: 8px; background: var(--surface); color: var(--fg); font: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer;
+  }
+  .co-tool:hover { background: var(--app-hover); }
+  .co-ib { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+  .co-ib:hover, .co-ib[aria-expanded='true'] { background: var(--app-hover); color: var(--fg); }
+  .co-flip svg { transform: scaleX(-1); }
+
+  .co-app.co-over::after { content: 'Drop a CSS file to edit its colors'; position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; border-radius: inherit; box-shadow: inset 0 0 0 3px var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); font-size: 1.1rem; font-weight: 700; pointer-events: none; }
+  .co-body { position: relative; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--co-sw, 340px); min-height: 0; }
+  .co-app[data-side-collapsed] .co-body { --co-sw: 60px; }
+  .co-body > .pane-resizer { position: absolute; top: 0; bottom: 0; margin: 0; right: calc(var(--co-sw, 340px) - 3px); }
+  .co-app[data-side-collapsed] .co-resize-side { display: none; }
+  /* Collapsed sidebar: only the swatches; names stay available to screen readers. */
+  .co-app[data-side-collapsed] .co-side-scroll { padding: 0.75rem 0.4rem; }
+  .co-app[data-side-collapsed] .co-colors { justify-items: center; }
+  .co-app[data-side-collapsed] :is(.co-side h2, .co-hint, .co-chev, .co-panel, [data-builtin], .co-import .co-tool > span:not(.icon), .co-css-sec, .co-export) { display: none; }
+  .co-app[data-side-collapsed] .co-role-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .co-app[data-side-collapsed] .co-role { justify-content: center; padding: 0.35rem; }
+  .co-app[data-side-collapsed] .co-import { padding: 0; }
+  .co-app[data-side-collapsed] .co-import .co-tool { width: 34px; padding: 0; }
+  .co-app[data-imported] .co-previews, .co-app[data-no-dark] :is([data-v='dark'], .co-variant) { display: none; }
+
+  /* Roles */
+  .co-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-side); border-left: 1px solid var(--app-line); font-size: 0.9rem; }
+  .co-side-scroll { flex: 1; min-height: 0; display: grid; align-content: start; gap: 1.4rem; overflow-y: auto; overscroll-behavior: contain; padding: 0.9rem 0.6rem; }
+  .co-side section { display: grid; gap: 0.5rem; }
+  .co-side h2 { padding: 0 0.4rem; }
+  .co-side-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.6rem 0; }
+  .co-side-head .co-ib[aria-expanded='true'] { background: none; color: var(--muted); }
+  .co-side-head .co-ib:hover { background: var(--app-hover); color: var(--fg); }
+  .co-app[data-side-collapsed] .co-side-head { justify-content: center; padding: 0.5rem 0 0; }
+  .co-roles { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .co-role {
+    display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.45rem 0.5rem; border: 0; border-radius: 10px;
+    background: none; color: var(--fg); font: inherit; font-size: 0.9rem; text-align: left; cursor: pointer;
+  }
+  .co-role:hover { background: var(--app-hover); }
+  .co-roles > li:has(> .co-panel:not([hidden])) { background: var(--app-selected); border-radius: 12px; }
+  .co-chev { width: 12px; height: 12px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.12s; }
+  .co-role[aria-expanded='true'] .co-chev { transform: rotate(180deg); }
+  .co-panel { display: grid; gap: 0.6rem; padding: 0.15rem 0.5rem 0.75rem; font-size: 0.88rem; }
+  .co-against { display: grid; gap: 0.25rem; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .co-against select { height: 34px; padding: 0 0.5rem; font-size: 0.88rem; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--fg); }
+  .co-result { display: grid; gap: 0.4rem; }
+  .co-result > div { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; }
+  .co-result .co-vname { min-width: 2.6rem; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+  .co-result .co-ratio { min-width: 3.6rem; }
+  /* Light value in the top-left half, dark in the bottom-right half. */
+  .co-dot { width: 1.6rem; height: 1.6rem; flex: none; border-radius: 8px; background: linear-gradient(135deg, var(--swatch) 50%, var(--swatch-dark, var(--swatch)) 50%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent); }
+  .co-chip { display: inline-block; width: 0.85rem; height: 0.85rem; margin-right: 0.35rem; vertical-align: -0.1em; border-radius: 4px; background: var(--swatch); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent); }
+  .co-panel .co-variant { justify-self: start; }
+  .co-variant label > span { display: inline-flex; align-items: center; }
+  .co-variant .co-chip { display: inline-block; padding: 0; border-radius: 4px; }
+  .co-role-name { flex: 1; min-width: 0; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .co-import { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.25rem 0.4rem 0; }
+  .co-hint { margin: 0.25rem 0.4rem 0; font-size: 0.78rem; color: var(--muted); }
+
+  /* Preview and checks */
+  .co-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; }
+  .co-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); flex: none; border-bottom: 1px solid var(--app-line); }
+  .co-preview {
+    display: grid; justify-items: center; align-content: center; gap: 0.75rem; min-height: 280px; padding: 1.25rem 1.25rem 1.5rem;
+    background: var(--t-background); color: var(--t-text);
+  }
+  .co-preview [data-pick] { cursor: pointer; }
+  .pv-card {
+    display: grid; gap: 0.55rem; width: min(100%, 26rem); padding: 1.4rem 1.5rem; border-radius: 16px;
+    background: var(--t-surface); border: 1px solid var(--t-border); box-shadow: 0 8px 30px -12px rgb(0 0 0 / 0.25); font-size: 0.95rem;
+  }
+  .pv-card p { margin: 0; }
+  .pv-title { font-size: 1.25rem; letter-spacing: -0.01em; }
+  .pv-muted { color: var(--t-muted); font-size: 0.85rem; }
+  .pv-tag { justify-self: start; color: var(--t-muted); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .pv-link { color: var(--t-primary); text-decoration: underline; text-underline-offset: 2px; }
+  .pv-input { padding: 0.5rem 0.7rem; border-radius: 10px; border: 1px solid var(--t-border); color: var(--t-muted); }
+  .pv-btns { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
+  .pv-btn { padding: 0.5rem 1rem; border-radius: 10px; border: 1px solid var(--t-border); font-weight: 600; font-size: 0.9rem; }
+  .pv-primary { background: var(--t-primary); border-color: var(--t-primary); color: var(--t-on-primary); }
+
+  .co-checks { padding: 1rem 1.25rem 1.5rem; }
+  .co-checks-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.5rem; }
+  .co-summary { font-size: 0.85rem; font-weight: 600; }
+  .co-checks-sub { margin-left: 0.4rem; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--fg); }
+  .co-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .co-table thead th { padding: 0.35rem 0.5rem; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); text-align: left; border-bottom: 1px solid var(--app-line); }
+  .co-table td, .co-table tbody th { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--app-line); text-align: left; vertical-align: middle; }
+  .co-table tbody th { font-weight: 600; }
+  .co-pair { display: grid; }
+  .co-table tbody th small { color: var(--muted); font-weight: 500; font-size: 0.75rem; }
+  .co-table tr[data-related] { background: var(--app-selected); }
+  .co-cell { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 0.35rem 0.6rem; }
+  .co-cell .co-levels { grid-column: 1 / -1; }
+  .co-sample { display: inline-grid; place-items: center; width: 3rem; height: 2rem; border-radius: 8px; font-weight: 700; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent); }
+  .co-sample.ui::after { content: ''; width: 1.9rem; height: 1rem; border: 2px solid currentColor; border-radius: 5px; }
+  .co-ratio { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .co-levels { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .co-lv { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.1rem 0.5rem 0.1rem 0.4rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; cursor: help; }
+  .co-lv[data-pass='true'] { background: var(--local-bg); color: var(--local); }
+  .co-lv[data-pass='true']::before { content: '✓' / ''; }
+  .co-lv[data-pass='false'] { background: color-mix(in srgb, var(--error) 12%, transparent); color: var(--error); }
+  .co-lv[data-pass='false']::before { content: '✕' / ''; }
+  .co-note { margin: 0.75rem 0 0; max-width: 70ch; font-size: 0.8rem; color: var(--muted); }
+
+  /* Picker */
+  .co-sv { position: relative; height: 180px; border-radius: 12px; overflow: hidden; touch-action: none; cursor: crosshair; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent); }
+  .co-sv canvas { display: block; width: 100%; height: 100%; }
+  .co-sv:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .co-knob { position: absolute; width: 18px; height: 18px; translate: -50% -50%; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3); pointer-events: none; }
+  .co-hue { appearance: none; width: 100%; height: 14px; margin: 0; border-radius: 7px; background: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); cursor: pointer; }
+  .co-hue::-webkit-slider-thumb { appearance: none; width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; background: transparent; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.45); }
+  .co-hue::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; border: 3px solid #fff; background: transparent; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.45); }
+  .co-row { display: flex; gap: 0.5rem; }
+  .co-hex { flex: 1; display: flex; min-width: 0; }
+  .co-hex input { flex: 1; min-width: 0; height: 34px; font-family: var(--mono); font-size: 0.84rem; }
+  .co-format { flex: none; height: 34px; padding: 0 0.4rem; font-size: 0.8rem; font-weight: 600; }
+  .co-channels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; }
+  .co-channels label { display: flex; align-items: center; gap: 0.3rem; min-width: 0; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+  .co-channels input { flex: 1; min-width: 0; height: 32px; padding: 0 0.4rem; font-family: var(--mono); font-size: 0.82rem; }
+  .co-channels input[aria-invalid='true'] { border-color: var(--error); }
+  .co-hex input[aria-invalid='true'] { border-color: var(--error); }
+  .co-vs { margin: 0; font-size: 0.78rem; color: var(--muted); }
+  .co-vs b { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .co-css { width: 100%; min-height: 14rem; margin: 0; padding: 0.7rem; resize: vertical; white-space: pre; overflow-x: auto; border-radius: 10px; background: var(--surface); border: 1px solid var(--app-line); font: 0.74rem/1.55 var(--mono); }
+  .co-css[data-dirty] { border-color: var(--accent); }
+  .co-css-acts { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0 0.4rem; }
+  .co-css-acts .btn { padding: 0.45rem 0.8rem; font-size: 0.86rem; }
+  .co-css-sec .co-hint, .co-css { margin: 0 0.4rem; width: auto; }
+  .co-export { display: flex; gap: 0.5rem; padding: 0.75rem 1rem; border-top: 1px solid var(--app-line); }
+  .co-export .btn { flex: 1; padding: 0.5rem 0.75rem; font-size: 0.88rem; }
+
+  @media (max-width: 1000px) {
+    .co-app { height: auto; }
+    .co-body { grid-template-columns: minmax(0, 1fr); }
+    .co-body > .pane-resizer { display: none; }
+    .co-app[data-side-collapsed] .co-colors { justify-items: stretch; }
+    .co-app[data-side-collapsed] .co-roles { grid-template-columns: repeat(auto-fill, 44px); }
+    .co-side { border: 0; border-top: 1px solid var(--app-line); }
+    .co-roles { grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+    .co-roles > li:has(> .co-panel:not([hidden])) { grid-column: 1 / -1; }
+    .co-main { overflow: visible; }
+  }
+
+  /* Embedded in the home hub: the app is the whole frame, edge to edge. */
+  :root[data-embed] main#main:has(.co-app) { width: 100%; padding: 0; }
+  :root[data-embed] .tool-shell:has(.co-app) > :not(.co-app) { display: none; }
+  :root[data-embed] .co-app { width: 100%; height: 100dvh; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+  @media (max-width: 1000px) { :root[data-embed] .co-app { height: auto; min-height: 100dvh; } }
+</style>
+
+<script>
+  import { initColorsApp } from '../../lib/colors-app';
+
+  initColorsApp();
+</script>

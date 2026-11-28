@@ -1,5 +1,5 @@
 export type Mode = 'local' | 'cloud';
-export type Category = 'images' | 'pdf' | 'audio' | 'files' | 'text' | 'gpx';
+export type Category = 'images' | 'pdf' | 'audio' | 'files' | 'text' | 'gpx' | 'colors';
 
 export interface Tool {
   slug: string; // path below base, e.g. "images/convert"
@@ -28,6 +28,7 @@ export const categories: { id: Category; label: string; blurb: string; app: stri
   { id: 'files', label: 'Files', blurb: 'Explore, bulk rename, zip and extract files and folders.', app: 'files' },
   { id: 'text', label: 'Text', blurb: 'Edit, format, minify and compare JSON, JavaScript and Markdown.', app: 'text' },
   { id: 'gpx', label: 'GPX', blurb: 'Merge, trim, clean up and edit GPS tracks from runs, rides and watches.', app: 'gpx' },
+  { id: 'colors', label: 'Colors', blurb: 'Pick colors, build a light and dark theme and check contrast against WCAG.', app: 'colors' },
 ];
 
 export const tools: Tool[] = [
@@ -219,6 +220,15 @@ export const tools: Tool[] = [
     slug: `pdf/${m}`, appMode: 'organize', page: false, category: 'pdf', title, short: title, summary, mode: 'local',
     limits: 'Unencrypted PDFs · up to 200 MB',
   })),
+  {
+    slug: 'colors',
+    category: 'colors',
+    title: 'Theme creator & contrast checker',
+    short: 'Theme creator',
+    summary: 'Pick colors for a light and dark theme and see every text and UI pair rated against WCAG 2.2 AA and AAA.',
+    mode: 'local',
+    limits: 'Runs in your browser',
+  },
 ];
 
 export const toolBySlug = (slug: string): Tool => {

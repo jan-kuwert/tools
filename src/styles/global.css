@@ -32,6 +32,7 @@
   --c-files: light-dark(#b45309, #fbbf24);
   --c-text: light-dark(#2563eb, #60a5fa);
   --c-gpx: light-dark(#0e7490, #22d3ee);
+  --c-colors: light-dark(#7c3aed, #a78bfa);
 }
 :root[data-theme='light'] { color-scheme: light; }
 :root[data-theme='dark'] { color-scheme: dark; }

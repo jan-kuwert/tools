@@ -10,7 +10,7 @@ const cat = categories.find((c) => c.id === 'text')!;
 // Cloned into client-built rows (explorer, tabs, output).
 const rowIcons = ['doc', 'braces', 'code', 'files', 'images', 'pdf', 'edit', 'download', 'trash', 'xmark', 'warning', 'check', 'compare'] as const;
 
-// Decorative, faint "file" behind the empty editor: a small sample tokenised at build time.
+// Sample code shown in two editor windows behind the empty state, tokenised at build time.
 const sample = `// text: everything stays in your browser
 import { format, minify } from './json';
 import { render } from './markdown';
@@ -60,6 +60,11 @@ const ghost = sample.split('\n').map((line) =>
     return ['', m[5]];
   }),
 );
+const LINE = 19;
+const windows = [
+  { name: 'text.ts', lines: ghost.slice(0, 18), first: 1, at: 'translate(40 100) rotate(-6)' },
+  { name: 'pretty.ts', lines: ghost.slice(-18), first: ghost.length - 17, at: 'translate(820 70) rotate(5)' },
+].map((w) => ({ ...w, height: 50 + w.lines.length * LINE }));
 ---
 <Base title={`${cat.label} · Tools`} description={cat.blurb}>
   <div class="tool-shell" data-wide>
@@ -170,21 +175,49 @@ const ghost = sample.split('\n').map((line) =>
                   </div>
                   {i === 0 && (
                     <div class="fx-empty" data-empty-state>
-                      <div class="fx-bg-doc" aria-hidden="true">
-                        <div class="fx-bg-gutter">{Array.from({ length: 60 }, (_, n) => <span>{n + 1}</span>)}</div>
-                        <pre class="fx-bg-code">{ghost.map((line) => <>{line.map(([cls, text]) => (cls ? <span class={`hljs-${cls}`}>{text}</span> : text))}{'\n'}</>)}</pre>
+                      <svg class="fx-bg-art" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+                        <defs>
+                          <radialGradient id="fx-g-a"><stop offset="0" class="s-a" /><stop offset="1" class="s-a" stop-opacity="0" /></radialGradient>
+                          <radialGradient id="fx-g-b"><stop offset="0" class="s-b" /><stop offset="1" class="s-b" stop-opacity="0" /></radialGradient>
+                          <pattern id="fx-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.3" /></pattern>
+                          <radialGradient id="fx-fade" r="0.6"><stop offset="0.25" stop-color="#000" /><stop offset="1" stop-color="#fff" /></radialGradient>
+                          <mask id="fx-edge"><rect width="1200" height="600" fill="url(#fx-fade)" /></mask>
+                          <radialGradient id="fx-win-fade" r="0.5"><stop offset="0.4" stop-color="#000" /><stop offset="0.85" stop-color="#fff" /></radialGradient>
+                          <mask id="fx-win-edge"><rect width="1200" height="600" fill="url(#fx-win-fade)" /></mask>
+                          {windows.map((w, k) => <clipPath id={`fx-clip-${k}`}><rect y="30" width="360" height={w.height - 30} /></clipPath>)}
+                        </defs>
+                        <g class="g-aurora">
+                          <ellipse class="g-blob b1" cx="220" cy="170" rx="440" ry="300" fill="url(#fx-g-a)" />
+                          <ellipse class="g-blob b2" cx="1000" cy="460" rx="420" ry="300" fill="url(#fx-g-b)" />
+                        </g>
+                        <rect class="g-dots" width="1200" height="600" fill="url(#fx-dots)" mask="url(#fx-edge)" />
+                        <g mask="url(#fx-win-edge)">
+                        {windows.map((w, k) => (
+                          <g class="g-window" transform={w.at}>
+                            <rect class="g-win" width="360" height={w.height} rx="12" />
+                            <path class="g-bar" d="M0 12a12 12 0 0 1 12-12h336a12 12 0 0 1 12 12v18H0Z" />
+                            <circle class="g-light" cx="16" cy="15" r="4" /><circle class="g-light" cx="30" cy="15" r="4" /><circle class="g-light" cx="44" cy="15" r="4" />
+                            <text class="g-name" x="180" y="19" text-anchor="middle">{w.name}</text>
+                            <g clip-path={`url(#fx-clip-${k})`}>
+                              {w.lines.map((line, j) => (
+                                <>
+                                  <text class="g-num" x="30" y={52 + j * LINE} text-anchor="end">{w.first + j}</text>
+                                  <text class="g-code" x="42" y={52 + j * LINE}>{line.map(([cls, t]) => (cls ? <tspan class={`t-${cls}`}>{t}</tspan> : t))}</text>
+                                </>
+                              ))}
+                            </g>
+                          </g>
+                        ))}
+                        </g>
+                      </svg>
+                      <p class="fx-empty-title">Drop files, or start writing</p>
+                      <button class="btn btn-primary" type="button" data-new><Icon name="new-file" />New file</button>
+                      <div class="fx-empty-actions">
+                        <button class="btn" type="button" data-open><Icon name="upload" />Choose files</button>
+                        <button class="btn" type="button" data-paste><Icon name="paste" />Paste from clipboard</button>
                       </div>
-                      <div class="fx-drop-card">
-                        <svg class="fx-drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 30H11a7 7 0 0 1-1-13.9A11 11 0 0 1 31.4 13 9 9 0 1 1 36 30h-2" /><path d="M24 22v16M18 28l6-6 6 6" /></svg>
-                        <p class="fx-empty-title">Drop files here</p>
-                        <button class="btn btn-primary fx-new-big" type="button" data-new><Icon name="new-file" />New file</button>
-                        <div class="fx-empty-actions">
-                          <button class="btn" type="button" data-open><Icon name="upload" />Choose files</button>
-                          <button class="btn" type="button" data-paste><Icon name="paste" />Paste from clipboard</button>
-                        </div>
-                        <p class="fx-empty-hint">Text up to 50 MB · JavaScript up to 10 MB · drop folders to add every file inside.</p>
-                        <p class="fx-empty-hint" id="fx-keys">Tab inserts two spaces; press Esc, then Tab, to leave the editor. Ctrl/Cmd+S downloads, Ctrl/Cmd+Shift+F formats JSON, Alt+W closes the tab, Ctrl/Cmd+Alt+N opens a new file.</p>
-                      </div>
+                      <p class="fx-empty-hint">Text up to 50 MB · JavaScript up to 10 MB · drop folders to add every file inside.</p>
+                      <p class="fx-empty-hint fx-keys" id="fx-keys">Tab inserts two spaces; press Esc, then Tab, to leave the editor. Ctrl/Cmd+S downloads, Ctrl/Cmd+Shift+F formats JSON, Alt+W closes the tab, Ctrl/Cmd+Alt+N opens a new file.</p>
                     </div>
                   )}
                 </div>
@@ -600,31 +633,43 @@ const ghost = sample.split('\n').map((line) =>
   .fx-info dd { margin: 0; font-weight: 600; word-break: break-all; }
   .fx-hex pre { margin: 0; font: 12.5px/1.6 var(--mono); color: var(--muted); }
 
-  /* Empty state: the whole area looks like a faint code file behind a full-area dashed drop border, prompt on top. */
-  .fx-empty { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
-  .fx-empty::before {
-    content: ''; position: absolute; inset: 1rem; z-index: 1; pointer-events: none; border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px;
+  /* Empty state: the whole editor area is the drop zone. Same backdrop language as the image, PDF and GPX apps:
+     soft accent glows, an edge-weighted dot grid, and two editor windows with sample code kept clear of the centre. */
+  .fx-empty {
+    position: absolute; inset: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; overflow: hidden;
+    padding: 1rem; text-align: center; border: 2px dashed color-mix(in srgb, var(--fg) 22%, transparent); border-radius: 14px;
     transition: border-color 0.15s, background-color 0.15s;
   }
-  .fx.fx-over .fx-empty::before { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-  .fx-bg-doc {
-    position: absolute; inset: calc(1rem + 2px); border-radius: 12px; display: flex; padding-top: 8px; overflow: hidden; pointer-events: none; user-select: none;
-    font: 13px/var(--fx-line) var(--mono); opacity: 0.32;
-    -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 0 35%, #000 85%); mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 0 35%, #000 85%);
+  .fx.fx-over .fx-empty { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .fx-empty > :not(svg) { position: relative; }
+  .fx-bg-art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+  .fx-bg-art .s-a { stop-color: var(--accent); }
+  .fx-bg-art .s-b { stop-color: color-mix(in oklch, var(--accent), light-dark(#7c3aed, #a78bfa) 55%); }
+  .fx-bg-art .g-aurora { opacity: 0.2; }
+  .fx-bg-art .g-dots { fill: var(--fg); opacity: 0.15; }
+  .fx-bg-art .g-window { opacity: 0.7; }
+  .fx-bg-art .g-win { fill: var(--surface); fill-opacity: 0.85; stroke: var(--fg); stroke-opacity: 0.1; stroke-width: 1.5; }
+  .fx-bg-art .g-bar { fill: var(--fg); opacity: 0.05; }
+  .fx-bg-art .g-light { fill: var(--fg); opacity: 0.15; }
+  .fx-bg-art .g-name { fill: var(--muted); font: 600 12px var(--font); }
+  .fx-bg-art :is(.g-num, .g-code) { font: 13px var(--mono); white-space: pre; }
+  .fx-bg-art .g-num { fill: var(--muted); opacity: 0.6; }
+  .fx-bg-art .g-code { fill: var(--muted); }
+  .fx-bg-art .t-keyword { fill: var(--hl-keyword); }
+  .fx-bg-art .t-string { fill: var(--hl-string); }
+  .fx-bg-art .t-number { fill: var(--hl-number); }
+  .fx-bg-art .t-comment { fill: var(--hl-comment); font-style: italic; }
+  .fx-bg-art .t-title { fill: var(--accent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .fx-bg-art .g-blob { transform-box: fill-box; transform-origin: center; animation: fx-drift 26s ease-in-out infinite alternate; }
+    .fx-bg-art .g-blob.b2 { animation-duration: 32s; animation-direction: alternate-reverse; }
   }
-  .fx-bg-gutter { flex: none; width: 4ch; padding-right: 0.9ch; box-sizing: content-box; text-align: right; color: var(--muted); border-right: 1px solid var(--border); }
-  .fx-bg-gutter span { display: block; height: var(--fx-line); }
-  .fx-bg-code { margin: 0; padding: 0 12px 0 10px; font: inherit; color: var(--muted); }
-  .fx-drop-card {
-    position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; width: min(30rem, calc(100% - 3rem));
-    padding: 1.5rem; text-align: center; border-radius: 16px; background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(2px);
-  }
-  .fx-drop-icon { width: 44px; height: 44px; fill: none; stroke: color-mix(in srgb, var(--muted) 80%, transparent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .fx-empty-title { margin: 0; font-size: 1.1rem; font-weight: 650; }
-  .fx-new-big { padding: 0.6rem 1.3rem; font-size: 0.98rem; }
+  @keyframes fx-drift { to { transform: translate(-50px, 30px) scale(1.12); } }
+  .fx-empty-title { margin: 0; font-size: 1.15rem; font-weight: 650; }
   .fx-empty-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
   .fx-empty-actions .btn { padding: 0.45rem 0.9rem; font-size: 0.88rem; }
-  .fx-empty-hint { margin: 0; max-width: 54ch; color: var(--muted); font-size: 0.8rem; }
+  .fx-empty-hint { margin: 0; max-width: 46ch; color: var(--muted); font-size: 0.85rem; }
+  .fx-empty-hint.fx-keys { font-size: 0.78rem; }
 
   /* Output panel */
   .fx-panel { border-top: 1px solid var(--app-line); background: var(--surface); }
@@ -674,7 +719,6 @@ const ghost = sample.split('\n').map((line) =>
     .fx-top .fx-msg { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     /* Phones: only "split down"; side by side would be too narrow. */
     [data-split-btn='right'] { display: none; }
-    .fx-drop-card { padding: 1.25rem 1rem; }
     .fx-diff-names { flex-basis: 100%; }
   }
 
